@@ -30,6 +30,18 @@ module MySQL
     function prepare(stmtptr::Ptr{Cuchar}, sql::String)
         return mysql_stmt_prepare(stmtptr, sql)
     end
+
+    function execute(stmtptr::Ptr{Cuchar})
+        return mysql_stmt_execute(stmtptr)
+    end
+    
+    function stmt_error(stmtptr::Ptr{Cuchar})
+        return mysql_stmt_error(stmtptr)
+    end
+    
+    function stmt_close(stmtptr::Ptr{Cuchar})
+        return mysql_stmt_close(stmtptr)
+    end
     
     function prepare_and_execute(stmtptr::Ptr{Cuchar}, sql::String)
         response = mysql_stmt_prepare(stmtptr, sql)
@@ -53,19 +65,7 @@ module MySQL
         end
     
     end
-    
-    function execute(stmtptr::Ptr{Cuchar})
-        return mysql_stmt_execute(stmtptr)
-    end
-    
-    function stmt_error(stmtptr::Ptr{Cuchar})
-        return mysql_stmt_error(stmtptr)
-    end
-    
-    function stmt_close(stmtptr::Ptr{Cuchar})
-        return mysql_stmt_close(stmtptr)
-    end
-    
+        
     ## executesthe query and returns the result set in case of select
     ## and the # of affected rows in case of insert / update / delete .
     ## returns -1 in case of errors

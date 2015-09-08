@@ -3,8 +3,11 @@
 using DataFrames
 using Dates
 
+## Can use MYSQL_TYPE_MAP and reduce this to just 1 line of code
+## but if conditions retained in case we need to insert code for
+## specific cases.
+
 function getType(dataType)
-    ## should ideally be 1 line of code ???
     if (dataType == MySQL.MYSQL_CONSTS.MYSQL_TYPE_LONGLONG ||
         dataType == MySQL.MYSQL_CONSTS.MYSQL_TYPE_INT24)
         return Int64

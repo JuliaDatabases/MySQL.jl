@@ -1,36 +1,27 @@
 MySQL.jl
 ======
 
-The MySQL.jl package is meant to provide a database-independent API that all database drivers can be expected to comply with. This makes it easy to write code that can be easily ported between different databases. 
+Julia functions to convert database tables to [Data Frames](https://github.com/JuliaStats/DataFrames.jl) and wrappers to MySQL C functions. (uses [DBI.jl](https://github.com/JuliaDB/DBI.jl))
 
-# Types
+# Types (Derived from DBI.jl)
 
-* `DatabaseSystem`: This represents a specific type of database, like:
-    * `MySQL`
-* `DatabaseHandle`: This represents an established connection to a database
-* `StatementHandle`: This represents a prepared SQL statement ready for execution in the database
-* `DatabaseTable`: Metadata about a database table and its columns
-* `DatabaseColumn`: Metadata about a database column
+* `MySQL5`: An abstract subtype of DBI.DatabaseSystem
+* `MySQLDatabaseHandle`: A subtype of DBI.DatabaseHandle
+* `MySQLStatementHandle`: A subtype of DBI.StatementHandle
 
 # Functions
 
-* `columninfo`: Get basic information about a specific column in a table
+## Direct wrappers for C functions
 * `connect`/`disconnect`: Set up and shut down connections to database
-* `errcode`: Get the native error code for the database
-* `errstring`: Get the native error string for the database
-* `execute`: Execute a SQL statement with optional per-call variable bindings
-* `executed`: How many times has this statement been executed
-* `fetchall`: Fetch all rows as an array of arrays
-* `fetchdf`: Fetch all rows as a DataFrame
-* `fetchrow`: Fetch a row as an Array{Any}
-* `finish`: Finalize a SQL statement's execution
-* `lastinsertid`: What was the row ID of the last row inserted into a table
+* `stmt_init`: Initialize SQL statement
 * `prepare`: Ask the database to prepare, but not execute, a SQL statement
-* `run`: Run a non-`SELECT` SQL statement
-* `sqlescape`: Escape a SQL statement to prevent injections
-* `sql2jltype`: Convert a SQL type into a Julia `DataType`
-* `select`: Combine a call to `prepare`, `execute`, `fetchdf` and `finish` to produce a DataFrame based on a `SELECT` SQL statement
-* `tableinfo`: Get metadata about a table
+* `execute`: Execute an SQL statement
+* `stmt_error`: Get the MySQL error statement
+* `stmt_close`: Close the MySQL statement
+## Other functions
+* `prepare_and_execute`: Wrapper to call prepare and execute and show appropriate error messages
+* `execute_query`: Obtain result of a query as a DataFrame
+
 
 # Extended Usage Example
 
