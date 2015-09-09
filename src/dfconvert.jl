@@ -108,7 +108,7 @@ function populateRow(numFields::Int8, fieldTypes::Array{Uint32}, result::MySQL.M
             end
         elseif fieldTypes[i] == MySQL.MYSQL_CONSTS.MYSQL_TYPE_DATETIME
             if (!isempty(value))
-                df[row, i] = value
+                df[row, i] = DateTime(value, "yyyy-mm-dd HH:MM:SS")
             else
                 df[row, i] = NA
             end
