@@ -22,7 +22,6 @@ type MYSQL_ROW
     values :: Ptr{Ptr{Uint8}} ## pointer to an array of strings
 end
 
-
 ## The field object that contains the metadata of the table. 
 ## Returned by mysql_fetch_fields API
 type MYSQL_FIELD
@@ -173,7 +172,6 @@ immutable type MYSQL_BIND
             0, 0, 0, 0, in_buffer_type, 0, 0, 0, 0, C_NULL)
     end
 
-#=
     function MYSQL_BIND(in_length::Ptr{Culong}, in_is_null::Ptr{Cchar}, in_buffer::Ptr{Void}, in_error::Ptr{Cchar}, in_row_ptr::Ptr{Cuchar},
             in_store_param_func::Ptr{Void}, in_fetch_result ::Ptr{Void}, in_skip_result ::Ptr{Void}, in_buffer_length::Culong,
             in_offset::Culong, in_length_value::Culong, in_param_number :: Cuint, in_pack_length :: Cuint, in_buffer_type :: Cint,
@@ -185,42 +183,9 @@ immutable type MYSQL_BIND
     end
 
     function MYSQL_BIND()
-        ## new(C_NULL, C_NULL, C_NULL, C_NULL, C_NULL, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, C_NULL)
-        new()
+        new(C_NULL, C_NULL, C_NULL, C_NULL, C_NULL, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, C_NULL)
     end
-=#
 end
-
-
-#=
-typedef struct st_mysql_bind
-{
-  unsigned long    *length;          /* output length pointer */
-  my_bool       *is_null;      /* Pointer to null indicator */
-  void        *buffer;      /* buffer to get/put data */
-  /* set this if you want to track data truncations happened during fetch */
-  my_bool       *error;
-  unsigned char *row_ptr;         /* for the current data position */
-  void (*store_param_func)(NET *net, struct st_mysql_bind *param);
-  void (*fetch_result)(struct st_mysql_bind *, MYSQL_FIELD *,
-                       unsigned char **row);
-  void (*skip_result)(struct st_mysql_bind *, MYSQL_FIELD *,
-              unsigned char **row);
-  /* output buffer length, must be set when fetching str/binary */
-  unsigned long buffer_length;
-  unsigned long offset;           /* offset position for char/binary fetch */
-  unsigned long    length_value;     /* Used if length is 0 */
-  unsigned int    param_number;      /* For null count and error messages */
-  unsigned int  pack_length;      /* Internal length for packed data */
-  enum enum_field_types buffer_type;    /* buffer type */
-  my_bool       error_value;      /* used if error is 0 */
-  my_bool       is_unsigned;      /* set if integer type is unsigned */
-  my_bool    long_data_used;      /* If used with mysql_send_long_data */
-  my_bool    is_null_value;    /* Used if is_null is 0 */
-  void *extension
-} MYSQL_BIND;
-=#
-
 
 #=
 type MYSQL_STMT
@@ -253,8 +218,8 @@ type MYSQL_STMT
     update_max_length::Cint
     extension::Ptr{Cuchar}
 end
-
 =#
+
 baremodule MYSQL_OPTION
     const MYSQL_OPT_CONNECT_TIMEOUT = 0 
     const MYSQL_OPT_COMPRESS = 1

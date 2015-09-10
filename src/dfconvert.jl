@@ -50,6 +50,7 @@ function getType(dataType)
     end
 end
 
+# Fill the row indexed by 'row' of the dateframe 'df' with values from 'result'.
 function populateRow(numFields::Int8, fieldTypes::Array{Uint32}, result::MySQL.MYSQL_ROW, df, row, datetime_format)
     for i = 1:numFields
         value = ""
@@ -108,7 +109,6 @@ function populateRow(numFields::Int8, fieldTypes::Array{Uint32}, result::MySQL.M
             end
         elseif fieldTypes[i] == MySQL.MYSQL_CONSTS.MYSQL_TYPE_DATETIME
             if (!isempty(value))
-                @show value
                 df[row, i] = DateTime(value, datetime_format)
             else
                 df[row, i] = NA
@@ -126,19 +126,18 @@ end
 function populateRow(numFields::Int8, fieldTypes::Array{Uint32}, df, row, juBindArray, datetime_format)
     for i = 1:numFields
         value = ""
-        println("The value is ::: $value")
         if (fieldTypes[i] == MySQL.MYSQL_CONSTS.MYSQL_TYPE_SHORT ||
-           fieldTypes[i] == MySQL.MYSQL_CONSTS.MYSQL_TYPE_LONG)
+            fieldTypes[i] == MySQL.MYSQL_CONSTS.MYSQL_TYPE_LONG)
             value = int32(juBindArray[i].buffer_int[1])
         elseif (fieldTypes[i] == MySQL.MYSQL_CONSTS.MYSQL_TYPE_LONGLONG ||
-               fieldTypes[i] == MySQL.MYSQL_CONSTS.MYSQL_TYPE_INT24)
+                fieldTypes[i] == MySQL.MYSQL_CONSTS.MYSQL_TYPE_INT24)
             value = int(juBindArray[i].buffer_long[1])
         elseif (fieldTypes[i] == MySQL.MYSQL_CONSTS.MYSQL_TYPE_TINY ||
-               fieldTypes[i] == MySQL.MYSQL_CONSTS.MYSQL_TYPE_ENUM ||
-               fieldTypes[i] == MySQL.MYSQL_CONSTS.MYSQL_TYPE_BIT)
+                fieldTypes[i] == MySQL.MYSQL_CONSTS.MYSQL_TYPE_ENUM ||
+                fieldTypes[i] == MySQL.MYSQL_CONSTS.MYSQL_TYPE_BIT)
             value = int8(juBindArray[i].buffer_int[1])
         elseif (fieldTypes[i] == MySQL.MYSQL_CONSTS.MYSQL_TYPE_DECIMAL ||
-               fieldTypes[i] == MySQL.MYSQL_CONSTS.MYSQL_TYPE_NEWDECIMAL)
+                fieldTypes[i] == MySQL.MYSQL_CONSTS.MYSQL_TYPE_NEWDECIMAL)
             ### Not supported fully !!! this may work in some cases
             data  = juBindArray[i].buffer_string
             value = 0.0
@@ -150,13 +149,13 @@ function populateRow(numFields::Int8, fieldTypes::Array{Uint32}, df, row, juBind
                 end
             end
         elseif (fieldTypes[i] == MySQL.MYSQL_CONSTS.MYSQL_TYPE_FLOAT ||
-               fieldTypes[i] == MySQL.MYSQL_CONSTS.MYSQL_TYPE_DOUBLE)
+                fieldTypes[i] == MySQL.MYSQL_CONSTS.MYSQL_TYPE_DOUBLE)
             value = 0.0
             if (juBindArray[i].buffer_double[1] != C_NULL)
                 value = float(juBindArray[i].buffer_double[1])
             end    
         elseif (fieldTypes[i] == MySQL.MYSQL_CONSTS.MYSQL_TYPE_NEWDATE ||
-               fieldTypes[i] == MySQL.MYSQL_CONSTS.MYSQL_TYPE_DATETIME)
+                fieldTypes[i] == MySQL.MYSQL_CONSTS.MYSQL_TYPE_DATETIME)
             mysql_time = juBindArray[i].buffer_datetime[1]
             if (mysql_time.year != 0)   ## to handle invalid data like 0000-00-00T00:00:00
                 value = DateTime(mysql_time.year, mysql_time.month, mysql_time.day,
@@ -176,6 +175,8 @@ function populateRow(numFields::Int8, fieldTypes::Array{Uint32}, df, row, juBind
     end    
 end
 
+# Returns a dataframe containing the data in 'results'. The Column 
+# headers and types are obtained from 'fields'.
 function obtainResultsAsDataFrame(numFields::Int8, fields::Ptr{MySQL.MYSQL_FIELD},
                                   results::Ptr{Uint8}, datetime_format = MYSQL_DEFAULT_DATETIME_FORMAT)
     numRows = MySQL.mysql_num_rows(results)
@@ -185,15 +186,10 @@ function obtainResultsAsDataFrame(numFields::Int8, fields::Ptr{MySQL.MYSQL_FIELD
     for i = 1:numFields
         fieldsObj = unsafe_load(fields, i)
         columnTypes[i] = Array(getType(fieldsObj.field_type), numRows)
-        ## columnTypes[i] = Array(MySQL.MYSQL_TYPE_MAP[fieldsObj.field_type], numRows)
-        ## deepcopy(MySQL.MYSQL_TYPE_MAP[fieldsObj.field_type])
         columnHeaders[i] = symbol(bytestring(fieldsObj.name))
         fieldTypes[i] = fieldsObj.field_type
         fieldsObj = null
     end
-
-    ## columnTypes = {Int32[], String[], String[]}
-    ## columnHeaders = [symbol("catid"), symbol("catname"), symbol("pincode")]
 
     df = DataFrame(columnTypes, columnHeaders)
     for row = 1:numRows
@@ -207,8 +203,6 @@ end
 function obtainResultsAsDataFrame(results::Ptr{Cuchar}, preparedStmt::Bool=false,
                                   stmtptr::Ptr{Cuchar}=C_NULL, datetime_format = MYSQL_DEFAULT_DATETIME_FORMAT)
     numFields = MySQL.mysql_num_fields(results)
-    
-    ### Returns C type MYSQL_FIELD
     fields = MySQL.mysql_fetch_fields(results)
     
     if (preparedStmt)
@@ -233,8 +227,6 @@ function obtainResultsAsDataFrame(results::Ptr{Cuchar}, preparedStmt::Bool=false
     for i = 1:numFields
         fieldsObj = unsafe_load(fields, i)
         columnTypes[i] = Array(getType(fieldsObj.field_type), numRows)
-        ## columnTypes[i] = Array(MySQL.MYSQL_TYPE_MAP[fieldsObj.field_type], numRows)
-        ## deepcopy(MySQL.MYSQL_TYPE_MAP[fieldsObj.field_type])
         columnHeaders[i] = symbol(bytestring(fieldsObj.name))
         fieldTypes[i] = fieldsObj.field_type
         field_length = fieldsObj.field_length
@@ -325,7 +317,7 @@ function obtainResultsAsDataFrame(results::Ptr{Cuchar}, preparedStmt::Bool=false
     df = DataFrame(columnTypes, columnHeaders)
     if (preparedStmt == true)
         response = MySQL.mysql_stmt_bind_result(stmtptr, reinterpret(Ptr{Cuchar},
-                                                  pointer(bindArray)))
+                                                pointer(bindArray)))
         if (response != 0)
             println("the error after bind result is ::: $(bytestring(MySQL.mysql_stmt_error(stmtptr)))")
             return df

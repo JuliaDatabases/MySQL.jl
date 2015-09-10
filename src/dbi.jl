@@ -32,11 +32,15 @@ function Base.connect(::Type{MySQL5},
     return MySQLDatabaseHandle(mysqlptr, 0)
 end
 
+function connect(hostName::String, userName::String, password::String, db::String)
+    return Base.connect(MySQL5, hostName, userName, password, db, 0,
+                        C_NULL, MySQL.CLIENT_MULTI_STATEMENTS)
+end
+
 ## Overides the DBI package's disconnect and invokes the mysql_close API
 ## TODO: Check if it is really required to override DBI package !!!!
 function DBI.disconnect(db::MySQLDatabaseHandle)
     mysql_close(db.ptr)
-    return
 end
 
 

@@ -141,6 +141,10 @@ function mysql_stmt_init(dbptr::Ptr{Cuchar})
                  dbptr)
 end
 
+function mysql_stmt_init(db::DBI.DatabaseHandle)
+    return mysql_stmt_init(db.ptr)
+end
+
 # Creates the prepared statement. There should be only 1 statement
 function mysql_stmt_prepare(stmtptr::Ptr{Cuchar}, sql::String)
     s = utf8(sql)
@@ -272,4 +276,28 @@ function mysql_affected_rows(results::Ptr{Cuchar})
                  Uint64,
                  (Ptr{Cuchar},),
                  results)
+end
+
+# Handy function to make things easier.
+function prepare_and_execute(stmtptr::Ptr{Cuchar}, sql::String)
+    response = mysql_stmt_prepare(stmtptr, sql)
+
+    if (response == 0)
+        results = mysql_stmt_result_metadata(stmtptr)
+        response = mysql_stmt_execute(stmtptr)
+
+        if (response == 0)
+            println("Query executed successfully !!!")
+            return obtainResultsAsDataFrame(results, true, stmtptr)
+        else
+            println("Query execution failed !!!")
+            error = bytestring(mysql_stmt_error(stmtptr))
+            println("The error is ::: $error")
+        end
+
+    else
+        println("Error in preparing the query !!!")
+        mysql_stmt_error(stmtptr)
+    end
+
 end
