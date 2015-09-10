@@ -3,10 +3,11 @@
 using DataFrames
 using Dates
 
+const MYSQL_DEFAULT_DATETIME_FORMAT = "yyyy-mm-dd HH:MM:SS"
+
 ## Can use MYSQL_TYPE_MAP and reduce this to just 1 line of code
 ## but if conditions retained in case we need to insert code for
 ## specific cases.
-
 function getType(dataType)
     if (dataType == MySQL.MYSQL_CONSTS.MYSQL_TYPE_LONGLONG ||
         dataType == MySQL.MYSQL_CONSTS.MYSQL_TYPE_INT24)
@@ -40,7 +41,6 @@ function getType(dataType)
     elseif (dataType == MySQL.MYSQL_CONSTS.MYSQL_TYPE_DATETIME ||
            dataType == MySQL.MYSQL_CONSTS.MYSQL_TYPE_NEWDATE)
         return DateTime
-        ## return MySQL.MYSQL_TIME
     elseif (dataType == MySQL.MYSQL_CONSTS.MYSQL_TYPE_VARCHAR ||
            dataType == MySQL.MYSQL_CONSTS.MYSQL_TYPE_VAR_STRING ||
            dataType == MySQL.MYSQL_CONSTS.MYSQL_TYPE_STRING)
@@ -50,7 +50,7 @@ function getType(dataType)
     end
 end
 
-function populateRow(numFields::Int8, fieldTypes::Array{Uint32}, result::MySQL.MYSQL_ROW, df, row)
+function populateRow(numFields::Int8, fieldTypes::Array{Uint32}, result::MySQL.MYSQL_ROW, df, row, datetime_format)
     for i = 1:numFields
         value = ""
         obj = unsafe_load(result.values, i)
@@ -108,7 +108,8 @@ function populateRow(numFields::Int8, fieldTypes::Array{Uint32}, result::MySQL.M
             end
         elseif fieldTypes[i] == MySQL.MYSQL_CONSTS.MYSQL_TYPE_DATETIME
             if (!isempty(value))
-                df[row, i] = DateTime(value, "yyyy-mm-dd HH:MM:SS")
+                @show value
+                df[row, i] = DateTime(value, datetime_format)
             else
                 df[row, i] = NA
             end
@@ -122,7 +123,7 @@ function populateRow(numFields::Int8, fieldTypes::Array{Uint32}, result::MySQL.M
     end
 end
 
-function populateRow(numFields::Int8, fieldTypes::Array{Uint32}, df, row, juBindArray)
+function populateRow(numFields::Int8, fieldTypes::Array{Uint32}, df, row, juBindArray, datetime_format)
     for i = 1:numFields
         value = ""
         println("The value is ::: $value")
@@ -176,7 +177,7 @@ function populateRow(numFields::Int8, fieldTypes::Array{Uint32}, df, row, juBind
 end
 
 function obtainResultsAsDataFrame(numFields::Int8, fields::Ptr{MySQL.MYSQL_FIELD},
-                                  results::Ptr{Uint8})
+                                  results::Ptr{Uint8}, datetime_format = MYSQL_DEFAULT_DATETIME_FORMAT)
     numRows = MySQL.mysql_num_rows(results)
     columnTypes = Array(Any, numFields)
     columnHeaders = Array(Symbol, numFields)
@@ -197,14 +198,14 @@ function obtainResultsAsDataFrame(numFields::Int8, fields::Ptr{MySQL.MYSQL_FIELD
     df = DataFrame(columnTypes, columnHeaders)
     for row = 1:numRows
         result = MySQL.mysql_fetch_row(results)
-        populateRow(numFields, fieldTypes, result, df, row)
+        populateRow(numFields, fieldTypes, result, df, row, datetime_format)
         result = null
     end
     return df
 end
 
 function obtainResultsAsDataFrame(results::Ptr{Cuchar}, preparedStmt::Bool=false,
-                                  stmtptr::Ptr{Cuchar}=C_NULL)
+                                  stmtptr::Ptr{Cuchar}=C_NULL, datetime_format = MYSQL_DEFAULT_DATETIME_FORMAT)
     numFields = MySQL.mysql_num_fields(results)
     
     ### Returns C type MYSQL_FIELD
@@ -339,12 +340,12 @@ function obtainResultsAsDataFrame(results::Ptr{Cuchar}, preparedStmt::Bool=false
                 println("Could not fetch row ::: $(bytestring(MySQL.mysql_stmt_error(stmtptr)))")
                 return df
             else
-                populateRow(numFields, fieldTypes, df, row, juBindArray)
+                populateRow(numFields, fieldTypes, df, row, juBindArray, datetime_format)
             end
         else
             result = MySQL.mysql_fetch_row(results)
             if (result != 0)
-                populateRow(numFields, fieldTypes, result, df, row)
+                populateRow(numFields, fieldTypes, result, df, row, datetime_format)
             else
                 println("result is ::: $result  ::: error is ::: $(bytestring(MySQL.mysql_stmt_error(stmtptr)))")
             end
