@@ -22,6 +22,9 @@ type MYSQL_ROW
     values :: Ptr{Ptr{Uint8}} ## pointer to an array of strings
 end
 
+typealias MYSQLPTR Ptr{Cuchar}
+typealias MYSQL_RES Ptr{Void}
+
 ## The field object that contains the metadata of the table. 
 ## Returned by mysql_fetch_fields API
 type MYSQL_FIELD
