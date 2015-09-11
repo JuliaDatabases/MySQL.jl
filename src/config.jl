@@ -9,8 +9,9 @@ let
     global mysql_lib
     succeeded = false
     if !isdefined(:mysql_lib)
-        lib_choices = ["libmysql.so", "libmysqlclient.so",
-                       "libmysqlclient_r.so", "libmariadb.so",]
+        @linux_only lib_choices = ["libmysql.so", "libmysqlclient.so",
+                                   "libmysqlclient_r.so", "libmariadb.so",
+                                   "libmysqlclient_r.so.16"]
         local lib
         for lib in lib_choices
             try
