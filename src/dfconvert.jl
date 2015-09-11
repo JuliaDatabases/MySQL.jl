@@ -3,6 +3,7 @@
 using DataFrames
 using Dates
 
+const MYSQL_DEFAULT_DATE_FORMAT = "yyyy-mm-dd"
 const MYSQL_DEFAULT_DATETIME_FORMAT = "yyyy-mm-dd HH:MM:SS"
 
 ## Can use MYSQL_TYPE_MAP and reduce this to just 1 line of code
@@ -27,7 +28,6 @@ function getType(dataType)
         return Float64
     elseif (dataType == MySQL.MYSQL_CONSTS.MYSQL_TYPE_NULL ||
         dataType == MySQL.MYSQL_CONSTS.MYSQL_TYPE_TIMESTAMP ||
-        dataType == MySQL.MYSQL_CONSTS.MYSQL_TYPE_DATE ||
         dataType == MySQL.MYSQL_CONSTS.MYSQL_TYPE_TIME ||
         dataType == MySQL.MYSQL_CONSTS.MYSQL_TYPE_SET ||
         dataType == MySQL.MYSQL_CONSTS.MYSQL_TYPE_TINY_BLOB ||
@@ -38,6 +38,8 @@ function getType(dataType)
         return String
     elseif (dataType == MySQL.MYSQL_CONSTS.MYSQL_TYPE_YEAR)
         return Int64
+    elseif (dataType == MySQL.MYSQL_CONSTS.MYSQL_TYPE_DATE)
+        return Date
     elseif (dataType == MySQL.MYSQL_CONSTS.MYSQL_TYPE_DATETIME ||
            dataType == MySQL.MYSQL_CONSTS.MYSQL_TYPE_NEWDATE)
         return DateTime
@@ -50,8 +52,8 @@ function getType(dataType)
     end
 end
 
-# Fill the row indexed by 'row' of the dateframe 'df' with values from 'result'.
-function populateRow(numFields::Int8, fieldTypes::Array{Uint32}, result::MySQL.MYSQL_ROW, df, row, datetime_format)
+# Fill the row indexed by 'row' of the dataframe 'df' with values from 'result'.
+function populateRow(numFields::Int8, fieldTypes::Array{Uint32}, result::MySQL.MYSQL_ROW, df, row)
     for i = 1:numFields
         value = ""
         obj = unsafe_load(result.values, i)
@@ -107,9 +109,15 @@ function populateRow(numFields::Int8, fieldTypes::Array{Uint32}, result::MySQL.M
             else
                 df[row, i] = NA
             end
+        elseif fieldTypes[i] == MySQL.MYSQL_CONSTS.MYSQL_TYPE_DATE
+            if (!isempty(value))
+                df[row, i] = Date(value, MYSQL_DEFAULT_DATE_FORMAT)
+            else
+                df[row, i] = NA
+            end
         elseif fieldTypes[i] == MySQL.MYSQL_CONSTS.MYSQL_TYPE_DATETIME
             if (!isempty(value))
-                df[row, i] = DateTime(value, datetime_format)
+                df[row, i] = DateTime(value, MYSQL_DEFAULT_DATETIME_FORMAT)
             else
                 df[row, i] = NA
             end
@@ -123,7 +131,7 @@ function populateRow(numFields::Int8, fieldTypes::Array{Uint32}, result::MySQL.M
     end
 end
 
-function populateRow(numFields::Int8, fieldTypes::Array{Uint32}, df, row, juBindArray, datetime_format)
+function populateRow(numFields::Int8, fieldTypes::Array{Uint32}, df, row, juBindArray)
     for i = 1:numFields
         value = ""
         if (fieldTypes[i] == MySQL.MYSQL_CONSTS.MYSQL_TYPE_SHORT ||
@@ -178,7 +186,7 @@ end
 # Returns a dataframe containing the data in 'results'. The Column 
 # headers and types are obtained from 'fields'.
 function obtainResultsAsDataFrame(numFields::Int8, fields::Ptr{MySQL.MYSQL_FIELD},
-                                  results::Ptr{Uint8}, datetime_format = MYSQL_DEFAULT_DATETIME_FORMAT)
+                                  results::Ptr{Uint8})
     numRows = MySQL.mysql_num_rows(results)
     columnTypes = Array(Any, numFields)
     columnHeaders = Array(Symbol, numFields)
@@ -194,14 +202,14 @@ function obtainResultsAsDataFrame(numFields::Int8, fields::Ptr{MySQL.MYSQL_FIELD
     df = DataFrame(columnTypes, columnHeaders)
     for row = 1:numRows
         result = MySQL.mysql_fetch_row(results)
-        populateRow(numFields, fieldTypes, result, df, row, datetime_format)
+        populateRow(numFields, fieldTypes, result, df, row)
         result = null
     end
     return df
 end
 
 function obtainResultsAsDataFrame(results::Ptr{Cuchar}, preparedStmt::Bool=false,
-                                  stmtptr::Ptr{Cuchar}=C_NULL, datetime_format = MYSQL_DEFAULT_DATETIME_FORMAT)
+                                  stmtptr::Ptr{Cuchar}=C_NULL)
     numFields = MySQL.mysql_num_fields(results)
     fields = MySQL.mysql_fetch_fields(results)
     
@@ -332,12 +340,12 @@ function obtainResultsAsDataFrame(results::Ptr{Cuchar}, preparedStmt::Bool=false
                 println("Could not fetch row ::: $(bytestring(MySQL.mysql_stmt_error(stmtptr)))")
                 return df
             else
-                populateRow(numFields, fieldTypes, df, row, juBindArray, datetime_format)
+                populateRow(numFields, fieldTypes, df, row, juBindArray)
             end
         else
             result = MySQL.mysql_fetch_row(results)
             if (result != 0)
-                populateRow(numFields, fieldTypes, result, df, row, datetime_format)
+                populateRow(numFields, fieldTypes, result, df, row)
             else
                 println("result is ::: $result  ::: error is ::: $(bytestring(MySQL.mysql_stmt_error(stmtptr)))")
             end

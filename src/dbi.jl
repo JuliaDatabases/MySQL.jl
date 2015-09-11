@@ -37,12 +37,9 @@ function connect(hostName::String, userName::String, password::String, db::Strin
                         C_NULL, MySQL.CLIENT_MULTI_STATEMENTS)
 end
 
-## Overides the DBI package's disconnect and invokes the mysql_close API
-## TODO: Check if it is really required to override DBI package !!!!
-function DBI.disconnect(db::MySQLDatabaseHandle)
+function MySQL.disconnect(db::MySQLDatabaseHandle)
     mysql_close(db.ptr)
 end
-
 
 #= Set of useful functions. 
 ## TODO:: Do we really need this ????
