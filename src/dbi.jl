@@ -1,5 +1,7 @@
-## Overides the Base package's connect and invokes the mysql_real_connect API
-## TODO: Check if it is really required to override Base package !!!!
+"""
+Overides the Base package's connect and invokes the mysql_real_connect API.
+Returns a MySQLDatabaseHandle. Aborts on error.
+"""
 function Base.connect(::Type{MySQL5},
                       host::String,
                       user::String,
@@ -32,11 +34,19 @@ function Base.connect(::Type{MySQL5},
     return MySQLDatabaseHandle(mysqlptr, 0)
 end
 
+"""
+Wrapper over mysql_real_connect with CLIENT_MULTI_STATEMENTS passed
+as client flag options.
+"""
 function connect(hostName::String, userName::String, password::String, db::String)
     return Base.connect(MySQL5, hostName, userName, password, db, 0,
                         C_NULL, MySQL.CLIENT_MULTI_STATEMENTS)
 end
 
+"""
+Wrapper over mysql_close. Must be called to close the connection opened by
+MySQL.connect.
+"""
 function MySQL.disconnect(db::MySQLDatabaseHandle)
     mysql_close(db.ptr)
 end

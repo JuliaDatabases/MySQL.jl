@@ -84,8 +84,6 @@ function run_test()
     show_as_dataframe()
 
     do_multi_statement()
- #   MySQL.disconnect(con)
-#con = MySQL.connect(HOST, USER, PASSWD, DBNAME)
     show_as_dataframe()
 
     drop_table()

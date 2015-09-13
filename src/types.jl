@@ -2,11 +2,19 @@ using Dates
 
 abstract MySQL5 <: DBI.DatabaseSystem
 
+"""
+Julia wrapper for MySQL database handle. Used for passing to mysql_init,
+mysql_real_connect, mysql_close etc.
+"""
 type MySQLDatabaseHandle <: DBI.DatabaseHandle
     ptr::Ptr{Cuchar}
     status::Cint
 end
 
+"""
+Julia wrapper for MySQL statement handle. Used for prepared statement
+API's.
+"""
 type MySQLStatementHandle <: DBI.StatementHandle
     db::MySQLDatabaseHandle
     ptr::Ptr{Cuchar}
@@ -17,16 +25,27 @@ type MySQLStatementHandle <: DBI.StatementHandle
     end
 end
 
-## the record that would be returned by mysql_fetch_row API
+"""
+The record that would be returned by mysql_fetch_row API.
+"""
 type MYSQL_ROW
-    values :: Ptr{Ptr{Uint8}} ## pointer to an array of strings
+    values :: Ptr{Ptr{Uint8}} # pointer to an array of strings
 end
 
+"""
+The MySQL handle passed to C calls.
+"""
 typealias MYSQLPTR Ptr{Cuchar}
+
+"""
+The Pointer to result set for C calls.
+"""
 typealias MYSQL_RES Ptr{Void}
 
-## The field object that contains the metadata of the table. 
-## Returned by mysql_fetch_fields API
+"""
+The field object that contains the metadata of the table. 
+Returned by mysql_fetch_fields API.
+"""
 type MYSQL_FIELD
     name :: Ptr{Uint8}             ##  Name of column
     org_name :: Ptr{Uint8}         ##  Original column name, if an alias
@@ -51,7 +70,9 @@ type MYSQL_FIELD
     extension :: Ptr{Void}
 end
 
-## the field_type in the MYSQL_FIELD object that directly maps to native MYSQL types
+"""
+The field_type in the MYSQL_FIELD object that directly maps to native MYSQL types
+"""
 baremodule MYSQL_CONSTS
     const MYSQL_TYPE_DECIMAL     = 0
     const MYSQL_TYPE_TINY        = 1
@@ -83,8 +104,9 @@ baremodule MYSQL_CONSTS
 end
 
 
-# Native mysql to julia type mapping.
-# TODO ::: Verify for date time, blob, etc
+"""
+Native mysql to julia type mapping.
+"""
 MYSQL_TYPE_MAP = [
     MySQL.MYSQL_CONSTS.MYSQL_TYPE_DECIMAL::Int64     => Float64,
     MySQL.MYSQL_CONSTS.MYSQL_TYPE_TINY::Int64        => Int8,
@@ -118,13 +140,9 @@ MYSQL_TYPE_MAP = [
 # Constant indicating whether multiple statements in queries should be supported or not.
 const CLIENT_MULTI_STATEMENTS = ( unsigned(1) << 16)
 
-# C struct members which are mirrored by MYSQL_TIME.
-#=
-  unsigned int  year, month, day, hour, minute, second;
-  unsigned long second_part;  /**< microseconds */
-  my_bool       neg;
-  enum enum_mysql_timestamp_type time_type;
-=#
+"""
+Type mirroring MYSQL_TIME C struct.
+"""
 immutable type MYSQL_TIME
     year::Cuint
     month::Cuint
@@ -137,7 +155,9 @@ immutable type MYSQL_TIME
     offset::Cuint
 end
 
-## Support for prepared statement related APIs.
+"""
+Support for prepared statement related APIs.
+"""
 immutable type JU_MYSQL_BIND
     length::Array{Culong, 0}
     is_null::Array{Culong, 0}
@@ -223,6 +243,9 @@ type MYSQL_STMT
 end
 =#
 
+"""
+Options to be passed to mysql_options API.
+"""
 baremodule MYSQL_OPTION
     const MYSQL_OPT_CONNECT_TIMEOUT = 0 
     const MYSQL_OPT_COMPRESS = 1

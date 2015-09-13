@@ -1,5 +1,6 @@
 module MySQL
     using DBI
+    using Docile
 
     include("config.jl")
     include("types.jl")
@@ -12,20 +13,19 @@ module MySQL
     
     include("dfconvert.jl")
         
-    ## executesthe query and returns the result set in case of select
-    ## and the # of affected rows in case of insert / update / delete .
-    ## returns -1 in case of errors
+    """
+Executes the query `sql` and returns the result set as a dataframe in case of select
+and the number of affected rows in case of insert / update / delete. Returns -1 in case of errors.
+    """
     function execute_query(db::DBI.DatabaseHandle, sql::String, outputFormat::Int64=0)
         response = mysql_query(db.ptr, sql)
     
         if (!bool(response))
             results = mysql_store_result(db.ptr)
     
-            if (results == C_NULL)
+            if (results == C_NULL) # `sql` was not select statement
                 affectedRows = MySQL.mysql_affected_rows(db.ptr)
                 println("affected rows : ", affectedRows)
-                ## in case of update / delete / insert,
-                ## between real error case and insert / updates
                 return affectedRows
             end
     
