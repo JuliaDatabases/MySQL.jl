@@ -9,7 +9,7 @@ const PREPARE = false
 function run_query_helper(command, successmsg, failmsg)
     response = MySQL.mysql_query(con.ptr, command)
 
-    if (!bool(response))
+    if (response == 0)
         println(successmsg)
     else
         println(failmsg)
@@ -49,7 +49,15 @@ end
 function update_values()
     command = """UPDATE Employee SET Salary = 25000.00 WHERE ID > 2;"""
     run_query_helper(command, "Update success", "Update failed")
-end 
+end
+
+function do_multi_statement()
+    command = """INSERT INTO Employee (Name, Salary, JoinDate, LastLogin, LunchTime)
+                 VALUES
+                 ('Donald', 30000.00, '2014-2-2', '2015-8-8 13:14:15', '14:01:02');
+                 UPDATE Employee SET LunchTime = '15:00:00' WHERE LENGTH(Name) > 5;"""
+    run_query_helper(command, "Multi statement success", "Multi statement failed")
+end
 
 function show_as_dataframe()
     command = """SELECT * FROM Employee;"""
@@ -68,10 +76,18 @@ end
 function run_test()
     global con = MySQL.connect(HOST, USER, PASSWD, DBNAME)
     create_table()
+
     insert_values()
     show_as_dataframe()
+
     update_values()
     show_as_dataframe()
+
+    do_multi_statement()
+ #   MySQL.disconnect(con)
+#con = MySQL.connect(HOST, USER, PASSWD, DBNAME)
+    show_as_dataframe()
+
     drop_table()
     MySQL.disconnect(con)
 end
