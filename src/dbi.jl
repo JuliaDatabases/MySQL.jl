@@ -6,7 +6,7 @@ function Base.connect(::Type{MySQL5},
                       host::String,
                       user::String,
                       passwd::String,
-                      db::String, # TODO: Let this be optional?
+                      db::String,
                       port::Integer = 0,
                       unix_socket::Any = C_NULL,
                       client_flag::Integer = 0)

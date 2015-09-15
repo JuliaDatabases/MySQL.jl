@@ -12,6 +12,7 @@ let
         @linux_only lib_choices = ["libmysql.so", "libmysqlclient.so",
                                    "libmysqlclient_r.so", "libmariadb.so",
                                    "libmysqlclient_r.so.16"]
+        @osx_only lib_choices = ["libmysqlclient.dylib"]
         local lib
         for lib in lib_choices
             try

@@ -1,6 +1,5 @@
 module MySQL
     using DBI
-    using Docile
 
     include("config.jl")
     include("types.jl")
@@ -17,7 +16,7 @@ module MySQL
 Executes the query `sql` and returns the result set as a dataframe in case of select
 and the number of affected rows in case of insert / update / delete. Returns -1 in case of errors.
     """
-    function execute_query(db::DBI.DatabaseHandle, sql::String, outputFormat::Int64=0)
+    function getResultsAsDataFrame(db::DBI.DatabaseHandle, sql::String, outputFormat::Int64=0)
         response = mysql_query(db.ptr, sql)
     
         if (!bool(response))

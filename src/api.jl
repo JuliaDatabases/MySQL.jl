@@ -504,7 +504,7 @@ function mysql_warning_count(mysqlptr::MYSQLPTR)
 end
 
 # Handy function to make things easier.
-function prepare_and_execute(stmtptr::Ptr{Cuchar}, sql::String)
+function prepstmt_getResultsAsDataFrame(stmtptr::Ptr{Cuchar}, sql::String)
     response = mysql_stmt_prepare(stmtptr, sql)
 
     if (response == 0)
