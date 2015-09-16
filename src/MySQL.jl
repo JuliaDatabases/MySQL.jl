@@ -4,7 +4,7 @@ module MySQL
     include("config.jl")
     include("types.jl")
     include("api.jl")
-    include("dbi.jl")
+    include("handy.jl")
 
     export MySQL5
     export MySQLDatabaseHandle

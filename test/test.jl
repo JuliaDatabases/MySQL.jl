@@ -81,7 +81,7 @@ function show_as_dataframe()
 end
 
 function run_test()
-    global con = MySQL.connect(HOST, USER, PASSWD, DBNAME)
+    global con = MySQL.mysql_connect(HOST, USER, PASSWD, DBNAME)
     create_table()
 
     insert_values()
@@ -95,7 +95,7 @@ function run_test()
 #    show_as_dataframe()
 
     drop_table()
-    MySQL.disconnect(con)
+    MySQL.mysql_disconnect(con)
 end
 
 run_test()
