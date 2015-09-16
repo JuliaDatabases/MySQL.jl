@@ -69,7 +69,7 @@ make sure LD_LIBRARY_PATH contains the MariaDB/MySQL .so file directory path. Us
 A total of 67,000 insert queries were executed batch wise in batch sizes of 50, 100, 150 ... so on.
  The time taken for all the queries to complete is plotted on the y axis and the batch sizes on x axis.
 
-![alt tag](https://github.com/nkottary/nishanth.github.io/blob/master/plot.svg)
+![alt tag](https://raw.githubusercontent.com/nkottary/nishanth.github.io/master/plot.png)
 
 # Types (Derived from [DBI.jl](https://github.com/JuliaDB/DBI.jl))
 
