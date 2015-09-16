@@ -2,6 +2,7 @@ module MySQL
     using DBI
 
     include("config.jl")
+    include("consts.jl")
     include("types.jl")
     include("api.jl")
     include("handy.jl")
