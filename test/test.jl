@@ -4,7 +4,6 @@ const HOST = "127.0.0.1"
 const USER = "root"
 const PASSWD = "root"
 const DBNAME = "mysqltest"
-const PREPARE = false
 
 function run_query_helper(command, successmsg, failmsg)
     response = MySQL.mysql_query(con.ptr, command)
@@ -61,15 +60,23 @@ end
 
 function show_as_dataframe()
     command = """SELECT * FROM Employee;"""
+    response = MySQL.mysql_query(con.ptr, command)
 
-    if (PREPARE)
-        stmt_ptr = MySQL.mysql_stmt_init(con)
-        dframe = MySQL.prepstmt_getResultsAsDataFrame(stmt_ptr, command)
-        MySQL.mysql_stmt_close(stmt_ptr)
-    else
-        dframe = MySQL.getResultsAsDataFrame(con, command)
+    if (response != 0)
+        err_string = "Error occured while executing mysql_query on \"$command\""
+        err_string = err_string * "\nMySQL ERROR: " * bytestring(MySQL.mysql_error(con.ptr))
+        error(err_string)
     end
 
+    results = MySQL.mysql_store_result(con.ptr)
+    if (results == C_NULL)
+        err_string = "Error occured while executing mysql_store_result on \"$command\""
+        err_string = err_string * "\nMySQL ERROR: " * bytestring(MySQL.mysql_error(con.ptr))
+        error(err_string)
+    end
+
+    dframe = MySQL.obtainResultsAsDataFrame(results)
+    MySQL.mysql_free_result(results)
     println(dframe)
 end
 

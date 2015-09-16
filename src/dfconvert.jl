@@ -52,7 +52,9 @@ function getType(dataType)
     end
 end
 
-# Fill the row indexed by 'row' of the dataframe 'df' with values from 'result'.
+"""
+Fill the row indexed by `row` of the dataframe `df` with values from `result`.
+"""
 function populateRow(numFields::Int8, fieldTypes::Array{Uint32}, result::MySQL.MYSQL_ROW, df, row)
     for i = 1:numFields
         value = ""
@@ -183,10 +185,12 @@ function populateRow(numFields::Int8, fieldTypes::Array{Uint32}, df, row, juBind
     end    
 end
 
-# Returns a dataframe containing the data in 'results'. The Column 
-# headers and types are obtained from 'fields'.
-function obtainResultsAsDataFrame(numFields::Int8, fields::Ptr{MySQL.MYSQL_FIELD},
-                                  results::Ptr{Uint8})
+"""
+Returns a dataframe containing the data in `results`.
+"""
+function obtainResultsAsDataFrame(results::MYSQL_RES)
+    numFields = MySQL.mysql_num_fields(results)
+    fields = MySQL.mysql_fetch_fields(results)
     numRows = MySQL.mysql_num_rows(results)
     columnTypes = Array(Any, numFields)
     columnHeaders = Array(Symbol, numFields)
@@ -208,7 +212,7 @@ function obtainResultsAsDataFrame(numFields::Int8, fields::Ptr{MySQL.MYSQL_FIELD
     return df
 end
 
-function obtainResultsAsDataFrame(results::Ptr{Cuchar}, preparedStmt::Bool=false,
+function prepstmt_obtainResultsAsDataFrame(results::Ptr{Cuchar}, preparedStmt::Bool=false,
                                   stmtptr::Ptr{Cuchar}=C_NULL)
     numFields = MySQL.mysql_num_fields(results)
     fields = MySQL.mysql_fetch_fields(results)

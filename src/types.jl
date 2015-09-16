@@ -40,7 +40,7 @@ typealias MYSQLPTR Ptr{Cuchar}
 """
 The Pointer to result set for C calls.
 """
-typealias MYSQL_RES Ptr{Void}
+typealias MYSQL_RES Ptr{Uint8}
 
 """
 The field object that contains the metadata of the table. 

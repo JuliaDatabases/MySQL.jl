@@ -20,7 +20,7 @@ using MySQL
 con = MySQL.connect(HOST, USER, PASSWD, DBNAME)
 ```
 
-Create/Insert etc:
+Create/Insert/Update etc:
 ```
 command = """CREATE TABLE Employee
              (
@@ -43,15 +43,11 @@ end
 Obtain SELECT statement results as dataframe:
 ```
 command = """SELECT * FROM Employee;"""
-dframe = MySQL.getResultsAsDataFrame(con, command)
-```
-
-Obtain SELECT statement results as dataframe using prepared statement:
-```
-command = """SELECT * FROM Employee;"""
-stmt_ptr = MySQL.stmt_init(con)
-dframe = MySQL.prepstmt_getResultsAsDataFrame(stmt_ptr, command)
-MySQL.stmt_close(stmt_ptr)
+response = MySQL.mysql_query(con.ptr, command)
+results = MySQL.mysql_store_result(con.ptr)
+dframe = MySQL.obtainResultsAsDataFrame(results) # The dataframes.
+MySQL.mysql_free_result(results)
+# See test/test.jl to see how to check return values and handle errors.
 ```
 
 Close the connection:

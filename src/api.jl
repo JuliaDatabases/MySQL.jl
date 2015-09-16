@@ -504,25 +504,25 @@ function mysql_warning_count(mysqlptr::MYSQLPTR)
 end
 
 # Handy function to make things easier.
-function prepstmt_getResultsAsDataFrame(stmtptr::Ptr{Cuchar}, sql::String)
-    response = mysql_stmt_prepare(stmtptr, sql)
-
-    if (response == 0)
-        results = mysql_stmt_result_metadata(stmtptr)
-        response = mysql_stmt_execute(stmtptr)
-
-        if (response == 0)
-            println("Query executed successfully !!!")
-            return obtainResultsAsDataFrame(results, true, stmtptr)
-        else
-            println("Query execution failed !!!")
-            error = bytestring(mysql_stmt_error(stmtptr))
-            println("The error is ::: $error")
-        end
-
-    else
-        println("Error in preparing the query !!!")
-        mysql_stmt_error(stmtptr)
-    end
-
-end
+# function prepstmt_getResultsAsDataFrame(stmtptr::Ptr{Cuchar}, sql::String)
+#     response = mysql_stmt_prepare(stmtptr, sql)
+# 
+#     if (response == 0)
+#         results = mysql_stmt_result_metadata(stmtptr)
+#         response = mysql_stmt_execute(stmtptr)
+# 
+#         if (response == 0)
+#             println("Query executed successfully !!!")
+#             return obtainResultsAsDataFrame(results, true, stmtptr)
+#         else
+#             println("Query execution failed !!!")
+#             error = bytestring(mysql_stmt_error(stmtptr))
+#             println("The error is ::: $error")
+#         end
+# 
+#     else
+#         println("Error in preparing the query !!!")
+#         mysql_stmt_error(stmtptr)
+#     end
+# 
+# end
