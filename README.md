@@ -76,3 +76,7 @@ A total of 67,000 insert queries were executed batch wise in batch sizes of 50, 
 * `MySQL5`: An abstract subtype of DBI.DatabaseSystem
 * `MySQLDatabaseHandle`: A subtype of DBI.DatabaseHandle
 * `MySQLStatementHandle`: A subtype of DBI.StatementHandle
+
+# Acknowledgement
+
+The generous inputs and help from Just Dial &trade;, Bangalore is greatly appreciated.
