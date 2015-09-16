@@ -64,6 +64,13 @@ make sure LD_LIBRARY_PATH contains the MariaDB/MySQL .so file directory path. Us
 * OSX: Same as above. In this case the file will be something like libmysqlclient.dylib.
 * Windows: There is no `@windows_only lib_choices` currently. Please add one and send a pull request.
 
+# Performance
+
+A total of 67,000 insert queries were executed batch wise in batch sizes of 50, 100, 150 ... so on.
+ The time taken for all the queries to complete is plotted on the y axis and the batch sizes on x axis.
+
+![alt tag](https://github.com/nkottary/nishanth.github.io/blob/master/plot.svg)
+
 # Types (Derived from [DBI.jl](https://github.com/JuliaDB/DBI.jl))
 
 * `MySQL5`: An abstract subtype of DBI.DatabaseSystem
