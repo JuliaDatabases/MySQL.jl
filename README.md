@@ -71,12 +71,6 @@ A total of 67,000 insert queries were executed batch wise in batch sizes of 50, 
 
 ![alt tag](https://raw.githubusercontent.com/nkottary/nishanth.github.io/master/plot.png)
 
-# Types (Derived from [DBI.jl](https://github.com/JuliaDB/DBI.jl))
-
-* `MySQL5`: An abstract subtype of DBI.DatabaseSystem
-* `MySQLDatabaseHandle`: A subtype of DBI.DatabaseHandle
-* `MySQLStatementHandle`: A subtype of DBI.StatementHandle
-
 # Acknowledgement
 
 The generous inputs and help from Just Dial &trade;, Bangalore is greatly appreciated.

@@ -1,12 +1,10 @@
 using Dates
 
-abstract MySQL5 <: DBI.DatabaseSystem
-
 """
 Julia wrapper for MySQL database handle. Used for passing to mysql_init,
 mysql_real_connect, mysql_close etc.
 """
-type MySQLDatabaseHandle <: DBI.DatabaseHandle
+type MySQLDatabaseHandle
     ptr::Ptr{Cuchar}
     status::Cint
 end
@@ -15,7 +13,7 @@ end
 Julia wrapper for MySQL statement handle. Used for prepared statement
 API's.
 """
-type MySQLStatementHandle <: DBI.StatementHandle
+type MySQLStatementHandle
     db::MySQLDatabaseHandle
     ptr::Ptr{Cuchar}
     executed::Int
@@ -154,7 +152,7 @@ Mirror to MYSQL_STMT struct in mysql.h
 type MYSQL_STMT
     mem_root::MEM_ROOT
     list::LIST
-    mysql::MySQL5
+    mysql::MYSQL
     params::MYSQL_BIND
     bind::MYSQL_BIND
     fields::MYSQL_FIELD

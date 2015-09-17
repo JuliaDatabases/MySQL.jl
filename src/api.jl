@@ -159,7 +159,7 @@ function mysql_stmt_init(dbptr::Ptr{Cuchar})
                  dbptr)
 end
 
-function mysql_stmt_init(db::DBI.DatabaseHandle)
+function mysql_stmt_init(db::MySQLDatabaseHandle)
     return mysql_stmt_init(db.ptr)
 end
 

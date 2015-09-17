@@ -1,5 +1,4 @@
 module MySQL
-    using DBI
 
     include("config.jl")
     include("consts.jl")
@@ -7,8 +6,8 @@ module MySQL
     include("api.jl")
     include("handy.jl")
 
-    export MySQL5
     export MySQLDatabaseHandle
+    export MySQLStatementHandle
     export CLIENT_MULTI_STATEMENTS
     
     include("dfconvert.jl")        
