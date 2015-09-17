@@ -181,7 +181,6 @@ function populateRow(numFields::Int8, fieldTypes::Array{Uint32}, df, row, juBind
             end
         end
         df[row, i] = value
-        println("The value set in df is ::: $(df[row, i])")
     end    
 end
 

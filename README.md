@@ -1,7 +1,7 @@
 MySQL.jl
 ======
 
-Julia bindings and helper functions for [MariaDB](https://mariadb.org/)/MySQL C library. 
+Julia bindings and helper functions for [MariaDB](https://mariadb.org/)/MySQL C library.
 Query results can be recieved as raw C pointers or as [Data Frames](https://github.com/JuliaStats/DataFrames.jl).
 
 # Installation
@@ -58,8 +58,8 @@ MySQL.disconnect(con)
 # How to solve MySQL library not found error
 
 This error may occur during `using MySQL`. To resolve this-
-* Ubuntu: Just add the MariaDB/MySQL .so file to lib_choices array in src/config.jl. If it is already there 
-make sure LD_LIBRARY_PATH contains the MariaDB/MySQL .so file directory path. Usually this is something like 
+* Ubuntu: Just add the MariaDB/MySQL .so file to lib_choices array in src/config.jl. If it is already there
+make sure LD_LIBRARY_PATH contains the MariaDB/MySQL .so file directory path. Usually this is something like
 `/usr/local/lib/mariadb/`.
 * OSX: Same as above. In this case the file will be something like libmysqlclient.dylib.
 * Windows: There is no `@windows_only lib_choices` currently. Please add one and send a pull request.
@@ -73,4 +73,4 @@ A total of 67,000 insert queries were executed batch wise in batch sizes of 50, 
 
 # Acknowledgement
 
-The generous inputs and help from Just Dial &trade;, Bangalore is greatly appreciated.
+We acknowledge the contributions of [JustDial](http://www.justdial.com) towards this work.
