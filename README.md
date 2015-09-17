@@ -64,6 +64,14 @@ make sure LD_LIBRARY_PATH contains the MariaDB/MySQL .so file directory path. Us
 * OSX: Same as above. In this case the file will be something like libmysqlclient.dylib.
 * Windows: There is no `@windows_only lib_choices` currently. Please add one and send a pull request.
 
+# Tests
+
+To run the tests you must have MySQL server running on the host. Set the constants HOST and ROOTPASS 
+in test/runtests.jl to the host and root password on your test setup. Run the tests using:
+```
+Pkg.test("MySQL")
+```
+
 # Performance
 
 A total of 67,000 insert queries were executed batch wise in batch sizes of 50, 100, 150 ... so on.
