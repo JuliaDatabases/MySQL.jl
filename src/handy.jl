@@ -4,13 +4,13 @@
 A handy function that wraps mysql_init and mysql_real_connect. Also does error
 checking on the pointers returned by init and real_connect.
 """
-function mysql_connect(host::String,
-                       user::String,
-                       passwd::String,
-                       db::String,
-                       port::Integer = 0,
-                       unix_socket::Any = C_NULL,
-                       client_flag::Integer = 0)
+function mysql_init_and_connect(host::String,
+                                user::String,
+                                passwd::String,
+                                db::String,
+                                port::Integer = 0,
+                                unix_socket::Any = C_NULL,
+                                client_flag::Integer = 0)
 
     mysqlptr::Ptr{Cuchar} = C_NULL
     mysqlptr = mysql_init(mysqlptr)
@@ -39,9 +39,9 @@ end
 Wrapper over mysql_real_connect with CLIENT_MULTI_STATEMENTS passed
 as client flag options.
 """
-function mysql_connect(hostName::String, userName::String, password::String, db::String)
-    return mysql_connect(hostName, userName, password, db, 0,
-                         C_NULL, MySQL.CLIENT_MULTI_STATEMENTS)
+function mysql_init_and_connect(hostName::String, userName::String, password::String, db::String)
+    return mysql_init_and_connect(hostName, userName, password, db, 0,
+                                  C_NULL, MySQL.CLIENT_MULTI_STATEMENTS)
 end
 
 """
