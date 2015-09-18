@@ -71,7 +71,7 @@ end
 """
 Type mirroring MYSQL_TIME C struct.
 """
-immutable type MYSQL_TIME
+immutable MYSQL_TIME
     year::Cuint
     month::Cuint
     day::Cuint
@@ -86,7 +86,7 @@ end
 """
 Support for prepared statement related APIs.
 """
-immutable type JU_MYSQL_BIND
+immutable JU_MYSQL_BIND
     length::Array{Culong, 0}
     is_null::Array{Culong, 0}
     buffer_long::Array{Culong, 0}
@@ -99,7 +99,7 @@ end
 """
 Mirror to MYSQL_BIND struct in mysql_bind.h
 """
-immutable type MYSQL_BIND
+immutable MYSQL_BIND
     length::Ptr{Culong}
     is_null::Ptr{Cchar}
     buffer::Ptr{Void}

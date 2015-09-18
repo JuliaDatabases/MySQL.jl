@@ -5,6 +5,8 @@
 # 
 # TODO: Need to update lib_choices for Mac OS X and Windows.
 
+using Compat
+
 let
     global mysql_lib
     succeeded = false
@@ -16,7 +18,7 @@ let
         local lib
         for lib in lib_choices
             try
-                dlopen(lib)
+                Libdl.dlopen(lib)
                 succeeded = true
                 break
             end

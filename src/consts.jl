@@ -2,6 +2,8 @@
 The field_type in the MYSQL_FIELD object that directly maps to native MYSQL types
 """
 baremodule MYSQL_CONSTS
+    import Base: call, @doc
+
     const MYSQL_TYPE_DECIMAL     = 0
     const MYSQL_TYPE_TINY        = 1
     const MYSQL_TYPE_SHORT       = 2
@@ -34,7 +36,7 @@ end
 """
 Native mysql to julia type mapping.
 """
-MYSQL_TYPE_MAP = [
+@compat MYSQL_TYPE_MAP = Dict(
     MySQL.MYSQL_CONSTS.MYSQL_TYPE_DECIMAL::Int64     => Float64,
     MySQL.MYSQL_CONSTS.MYSQL_TYPE_TINY::Int64        => Int8,
     MySQL.MYSQL_CONSTS.MYSQL_TYPE_SHORT::Int64       => Int64,
@@ -62,7 +64,7 @@ MYSQL_TYPE_MAP = [
     MySQL.MYSQL_CONSTS.MYSQL_TYPE_VAR_STRING::Int64  => String,
     MySQL.MYSQL_CONSTS.MYSQL_TYPE_STRING::Int64      => String,
     MySQL.MYSQL_CONSTS.MYSQL_TYPE_GEOMETRY::Int64    => Any
-]
+)
 
 # Constant indicating whether multiple statements in queries should be supported or not.
 const CLIENT_MULTI_STATEMENTS = ( unsigned(1) << 16)
@@ -71,7 +73,9 @@ const CLIENT_MULTI_STATEMENTS = ( unsigned(1) << 16)
 Options to be passed to mysql_options API.
 """
 baremodule MYSQL_OPTION
-    const MYSQL_OPT_CONNECT_TIMEOUT = 0 
+    import Base: call, @doc
+
+    const MYSQL_OPT_CONNECT_TIMEOUT = 0
     const MYSQL_OPT_COMPRESS = 1
     const MYSQL_OPT_NAMED_PIPE = 2
     const MYSQL_INIT_COMMAND = 3
