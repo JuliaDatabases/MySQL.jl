@@ -66,7 +66,9 @@ Native mysql to julia type mapping.
     MySQL.MYSQL_CONSTS.MYSQL_TYPE_GEOMETRY::Int64    => Any
 )
 
-# Constant indicating whether multiple statements in queries should be supported or not.
+"""
+Constant indicating whether multiple statements in queries should be supported or not.
+"""
 const CLIENT_MULTI_STATEMENTS = ( unsigned(1) << 16)
 
 """

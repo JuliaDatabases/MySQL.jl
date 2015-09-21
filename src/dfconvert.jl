@@ -187,7 +187,7 @@ end
 """
 Returns a dataframe containing the data in `results`.
 """
-function obtainResultsAsDataFrame(results::MYSQL_RES)
+function results_to_dataframe(results::MYSQL_RES)
     numFields = MySQL.mysql_num_fields(results)
     fields = MySQL.mysql_fetch_fields(results)
     numRows = MySQL.mysql_num_rows(results)

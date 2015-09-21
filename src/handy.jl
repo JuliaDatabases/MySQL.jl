@@ -51,3 +51,27 @@ MySQL.mysql_connect.
 function mysql_disconnect(db::MySQLDatabaseHandle)
     mysql_close(db.ptr)
 end
+
+"""
+Execute a query and return results as a dataframe if the query was a select query.
+If query is not a select query then return the number of affected rows.
+"""
+function execute_query(con::MySQLDatabaseHandle, command::String)
+    response = MySQL.mysql_query(con.ptr, command)
+
+    if (response != 0)
+        err_string = "Error occured while executing mysql_query on \"$command\""
+        err_string = err_string * "\nMySQL ERROR: " * bytestring(MySQL.mysql_error(con.ptr))
+        error(err_string)
+    end
+
+    results = MySQL.mysql_store_result(con.ptr)
+    if (results == C_NULL)
+        affectedRows = MySQL.mysql_affected_rows(con.ptr)
+        return affectedRows
+    end
+
+    dframe = MySQL.results_to_dataframe(results)
+    MySQL.mysql_free_result(results)
+    return dframe
+end

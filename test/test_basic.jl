@@ -82,23 +82,24 @@ end
 
 function show_as_dataframe()
     command = """SELECT * FROM Employee;"""
-    response = MySQL.mysql_query(con.ptr, command)
-
-    if (response != 0)
-        err_string = "Error occured while executing mysql_query on \"$command\""
-        err_string = err_string * "\nMySQL ERROR: " * bytestring(MySQL.mysql_error(con.ptr))
-        error(err_string)
-    end
-
-    results = MySQL.mysql_store_result(con.ptr)
-    if (results == C_NULL)
-        err_string = "Error occured while executing mysql_store_result on \"$command\""
-        err_string = err_string * "\nMySQL ERROR: " * bytestring(MySQL.mysql_error(con.ptr))
-        error(err_string)
-    end
-
-    dframe = MySQL.obtainResultsAsDataFrame(results)
-    MySQL.mysql_free_result(results)
+    dframe = MySQL.execute_query(con, command)
+#    response = MySQL.mysql_query(con.ptr, command)
+#
+#    if (response != 0)
+#        err_string = "Error occured while executing mysql_query on \"$command\""
+#        err_string = err_string * "\nMySQL ERROR: " * bytestring(MySQL.mysql_error(con.ptr))
+#        error(err_string)
+#    end
+#
+#    results = MySQL.mysql_store_result(con.ptr)
+#    if (results == C_NULL)
+#        err_string = "Error occured while executing mysql_store_result on \"$command\""
+#        err_string = err_string * "\nMySQL ERROR: " * bytestring(MySQL.mysql_error(con.ptr))
+#        error(err_string)
+#    end
+#
+#    dframe = MySQL.obtainResultsAsDataFrame(results)
+#    MySQL.mysql_free_result(results)
     println(dframe)
 end
 
