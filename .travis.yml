@@ -1,0 +1,8 @@
+language: julia
+julia:
+  - release
+  - nightly
+  - 0.3
+  - 0.4
+addons:
+  mariadb: '10.0'
