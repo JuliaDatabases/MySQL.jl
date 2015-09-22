@@ -370,13 +370,6 @@ function mysql_field_tell(result::MYSQL_RES)
     return ccall((:mysql_field_tell, mysql_lib), Cuint, (Ptr{Void},), result)
 end
 
-function mysql_get_character_set_info(mysqlptr::MYSQL)
-    info = _MY_CHARSET_INFO_[_MY_CHARSET_INFO_()]
-    ccall((:mysql_get_character_set_info, mysql_lib), Void, (Ptr{Void}, Ref{_MY_CHARSET_INFO_}),
-            mysqlptr, info)
-    return MY_CHARSET_INFO(info[1])
-end
-
 function mysql_get_client_info()
     return ccall((:mysql_get_client_info, mysql_lib), Ptr{Uint8}, ())
 end
