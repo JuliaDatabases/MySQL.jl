@@ -16,7 +16,7 @@ Pkg.clone("https://github.com/JuliaComputing/MySQL.jl")
 Connect to the MySQL server:
 ```
 using MySQL
-con = MySQL.connect(HOST, USER, PASSWD, DBNAME)
+con = MySQL.mysql_connect(HOST, USER, PASSWD, DBNAME)
 ```
 
 Create/Insert/Update etc:
@@ -58,7 +58,7 @@ The `execute_query()` API will take care of handling errors and freeing the memo
 
 Close the connection:
 ```
-MySQL.disconnect(con)
+MySQL.mysql_disconnect(con)
 ```
 
 # How to solve MySQL library not found error
