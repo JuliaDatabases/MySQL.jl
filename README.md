@@ -9,7 +9,6 @@ Query results can be recieved as raw C pointers or as [Data Frames](https://gith
 To get the master version:
 ```
 Pkg.clone("https://github.com/JuliaComputing/MySQL.jl")
-Pkg.build("MySQL")
 ```
 
 # Example usage
@@ -45,10 +44,17 @@ Obtain SELECT statement results as dataframe:
 command = """SELECT * FROM Employee;"""
 response = MySQL.mysql_query(con.ptr, command)
 results = MySQL.mysql_store_result(con.ptr)
-dframe = MySQL.obtainResultsAsDataFrame(results) # The dataframes.
+dframe = MySQL.results_to_dataframe(results) # The dataframes.
 MySQL.mysql_free_result(results)
 # See test/test.jl to see how to check return values and handle errors.
 ```
+
+Or, the execute_query wrapper can be used as follows:
+```
+command = """SELECT * FROM Employee;"""
+dframe = MySQL.execute_query(con, command)
+```
+The `execute_query()` API will take care of handling errors and freeing the memory allocated to the results.
 
 Close the connection:
 ```
