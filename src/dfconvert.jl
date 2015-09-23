@@ -96,12 +96,6 @@ function populate_row(numFields::Int8, fieldTypes::Array{Uint32}, result::MySQL.
             else
                 df[row, i] = NaN
             end
-        elseif (fieldTypes[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_NEWDATE)
-            if (!isempty(value))
-                df[row, i] = value
-            else
-                df[row, i] = NA
-            end
         elseif (fieldTypes[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_DATE)
             if (!isempty(value))
                 df[row, i] = Date(value, MYSQL_DEFAULT_DATE_FORMAT)
@@ -183,14 +177,20 @@ function stmt_populate_row(numFields::Int8, fieldTypes::Array{Uint32}, df, row, 
             if (juBindArray[i].buffer_double[1] != C_NULL)
                 value = parse(Float64, juBindArray[i].buffer_double[1])
             end    
-        elseif (fieldTypes[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_NEWDATE ||
-                fieldTypes[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_DATETIME)
+        elseif (fieldTypes[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_DATETIME)
             mysql_time = juBindArray[i].buffer_datetime[1]
             if (mysql_time.year != 0)   ## to handle invalid data like 0000-00-00T00:00:00
                 value = DateTime(mysql_time.year, mysql_time.month, mysql_time.day,
                                  mysql_time.hour, mysql_time.minute, mysql_time.second)
             else
                 value = DateTime()
+            end
+        elseif (fieldTypes[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_DATE)
+            mysql_date = juBindArray[i].buffer_date[1]
+            if (mysql_date.year != 0)   ## to handle invalid data like 0000-00-00
+                value = Date(mysql_date.year, mysql_date.month, mysql_date.day)
+            else
+                value = Date()
             end
         else
             data  = juBindArray[i].buffer_string
