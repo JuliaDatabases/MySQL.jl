@@ -2,6 +2,7 @@
 
 using DataFrames
 using Dates
+using Compat
 
 const MYSQL_DEFAULT_DATE_FORMAT = "yyyy-mm-dd"
 const MYSQL_DEFAULT_DATETIME_FORMAT = "yyyy-mm-dd HH:MM:SS"
@@ -64,26 +65,26 @@ function populate_row(numFields::Int8, fieldTypes::Array{Uint32}, result::MySQL.
             fieldTypes[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_ENUM ||
             fieldTypes[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_BIT)
             if (!isempty(value))
-                df[row, i] = parse(Int8, value)
+                @compat df[row, i] = parse(Int8, value)
             else
                 df[row, i] = NA
             end
         elseif (fieldTypes[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_SHORT)
             if (!isempty(value))
-                df[row, i] = parse(Int16, value)
+                @compat df[row, i] = parse(Int16, value)
             else
                 df[row, i] = NA
             end
         elseif (fieldTypes[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_LONG ||
                 fieldTypes[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_INT24)
             if (!isempty(value))
-                df[row, i] = parse(Int32, value)
+                @compat df[row, i] = parse(Int32, value)
             else
                 df[row, i] = NA
             end
         elseif (fieldTypes[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_LONGLONG)
             if (!isempty(value))
-                df[row, i] = parse(Int64, value)
+                @compat df[row, i] = parse(Int64, value)
             else
                 df[row, i] = NA
             end
@@ -92,7 +93,7 @@ function populate_row(numFields::Int8, fieldTypes::Array{Uint32}, result::MySQL.
                 fieldTypes[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_DECIMAL ||
                 fieldTypes[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_NEWDECIMAL)
             if (!isempty(value))
-                df[row, i] = parse(Float64, value)
+                @compat df[row, i] = parse(Float64, value)
             else
                 df[row, i] = NaN
             end
@@ -151,14 +152,14 @@ function stmt_populate_row(numFields::Int8, fieldTypes::Array{Uint32}, df, row, 
         if (fieldTypes[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_TINY ||
             fieldTypes[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_ENUM ||
             fieldTypes[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_BIT)
-            value = parse(Int8, juBindArray[i].buffer_int[1])
+            @compat value = parse(Int8, juBindArray[i].buffer_int[1])
         elseif (fieldTypes[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_SHORT)
-            value = parse(Int16, juBindArray[i].buffer_int[1])
+            @compat value = parse(Int16, juBindArray[i].buffer_int[1])
         elseif (fieldTypes[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_LONG ||
                 fieldTypes[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_INT24)
-            value = parse(Int32, juBindArray[i].buffer_int[1])
+            @compat value = parse(Int32, juBindArray[i].buffer_int[1])
         elseif (fieldTypes[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_LONGLONG)
-            value = parse(Int64, juBindArray[i].buffer_long[1])
+            @compat value = parse(Int64, juBindArray[i].buffer_long[1])
         elseif (fieldTypes[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_DECIMAL ||
                 fieldTypes[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_NEWDECIMAL)
             ### Not supported fully !!! this may work in some cases
@@ -168,14 +169,14 @@ function stmt_populate_row(numFields::Int8, fieldTypes::Array{Uint32}, df, row, 
                 idx  = findfirst(data, '\0')
                 tmp_val = bytestring(data[1:(idx == 0 ? endof(data) : idx-1)])
                 if (!isempty(tmp_val))
-                    value = parse(Float64, tmp_val)
+                    @compat value = parse(Float64, tmp_val)
                 end
             end
         elseif (fieldTypes[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_FLOAT ||
                 fieldTypes[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_DOUBLE)
             value = 0.0
             if (juBindArray[i].buffer_double[1] != C_NULL)
-                value = parse(Float64, juBindArray[i].buffer_double[1])
+                @compat value = parse(Float64, juBindArray[i].buffer_double[1])
             end    
         elseif (fieldTypes[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_DATETIME)
             mysql_time = juBindArray[i].buffer_datetime[1]
