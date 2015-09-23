@@ -320,6 +320,9 @@ function mysql_affected_rows(results::Ptr{Cuchar})
                  results)
 end
 
+"""
+Set the auto commit mode.
+"""
 function mysql_autocommit(mysqlptr::MYSQL, mode::Int8)
     return ccall((:mysql_autocommit, mysql_lib),
                  Cchar, (Ptr{Void}, Cchar),
