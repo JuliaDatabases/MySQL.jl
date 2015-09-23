@@ -158,10 +158,10 @@ function stmt_populate_row(numFields::Int8, fieldTypes::Array{Uint32}, df, row, 
             fieldTypes[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_ENUM ||
             fieldTypes[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_BIT)
             value = parse(Int8, juBindArray[i].buffer_int[1])
-        if (fieldTypes[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_SHORT)
+        elseif (fieldTypes[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_SHORT)
             value = parse(Int16, juBindArray[i].buffer_int[1])
-        if (fieldTypes[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_LONG ||
-            fieldTypes[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_INT24
+        elseif (fieldTypes[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_LONG ||
+                fieldTypes[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_INT24)
             value = parse(Int32, juBindArray[i].buffer_int[1])
         elseif (fieldTypes[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_LONGLONG)
             value = parse(Int64, juBindArray[i].buffer_long[1])
