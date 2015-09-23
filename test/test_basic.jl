@@ -48,7 +48,7 @@ function create_table()
                      LunchTime TIME,
                      OfficeNo TINYINT,
                      JobType ENUM('HR', 'Management', 'Accounts'),
-                     BitCode BIT(8),
+                     Senior BIT(1),
                      empno SMALLINT,
                      PRIMARY KEY (ID)
                  );"""
@@ -56,12 +56,12 @@ function create_table()
 end
 
 function insert_values()
-    command = """INSERT INTO Employee (Name, Salary, JoinDate, LastLogin, LunchTime, OfficeNo, JobType, BitCode, empno)
+    command = """INSERT INTO Employee (Name, Salary, JoinDate, LastLogin, LunchTime, OfficeNo, JobType, Senior, empno)
                  VALUES
-                 ('John', 10000.50, '2015-8-3', '2015-9-5 12:31:30', '12:00:00', 1, 'HR', b'11111111', 1301),
-                 ('Tom', 20000.25, '2015-8-4', '2015-10-12 13:12:14', '13:00:00', 12, 'HR', b'1010', 1422),
-                 ('Jim', 30000.00, '2015-6-2', '2015-9-5 10:05:10', '12:30:00', 45, 'Management', b'0101', 1567),
-                 ('Tim', 15000.50, '2015-7-25', '2015-10-10 12:12:25', '12:30:00', 56, 'Accounts', b'11101', 3200);
+                 ('John', 10000.50, '2015-8-3', '2015-9-5 12:31:30', '12:00:00', 1, 'HR', b'1', 1301),
+                 ('Tom', 20000.25, '2015-8-4', '2015-10-12 13:12:14', '13:00:00', 12, 'HR', b'1', 1422),
+                 ('Jim', 30000.00, '2015-6-2', '2015-9-5 10:05:10', '12:30:00', 45, 'Management', b'0', 1567),
+                 ('Tim', 15000.50, '2015-7-25', '2015-10-10 12:12:25', '12:30:00', 56, 'Accounts', b'1', 3200);
               """
     @test run_query_helper(command, "Insert")
 end
