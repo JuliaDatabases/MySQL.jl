@@ -34,39 +34,6 @@ baremodule MYSQL_TYPES
 end
 
 """
-Native mysql to julia type mapping.
-"""
-@compat MYSQL_TYPE_MAP = Dict(
-    MySQL.MYSQL_TYPES.MYSQL_TYPE_DECIMAL::Int64     => Float64,
-    MySQL.MYSQL_TYPES.MYSQL_TYPE_TINY::Int64        => Int8,
-    MySQL.MYSQL_TYPES.MYSQL_TYPE_SHORT::Int64       => Int64,
-    MySQL.MYSQL_TYPES.MYSQL_TYPE_LONG::Int64        => Int64,
-    MySQL.MYSQL_TYPES.MYSQL_TYPE_FLOAT::Int64       => Float64,
-    MySQL.MYSQL_TYPES.MYSQL_TYPE_DOUBLE::Int64      => Float64,
-    MySQL.MYSQL_TYPES.MYSQL_TYPE_NULL::Int64        => Any,
-    MySQL.MYSQL_TYPES.MYSQL_TYPE_TIMESTAMP::Int64   => Any,
-    MySQL.MYSQL_TYPES.MYSQL_TYPE_LONGLONG::Int64    => Int64,
-    MySQL.MYSQL_TYPES.MYSQL_TYPE_INT24::Int64       => Int64,
-    MySQL.MYSQL_TYPES.MYSQL_TYPE_DATE::Int64        => Any,
-    MySQL.MYSQL_TYPES.MYSQL_TYPE_TIME::Int64        => Any,
-    MySQL.MYSQL_TYPES.MYSQL_TYPE_DATETIME::Int64    => String,
-    MySQL.MYSQL_TYPES.MYSQL_TYPE_YEAR::Int64        => Int64,
-    MySQL.MYSQL_TYPES.MYSQL_TYPE_NEWDATE::Int64     => String,
-    MySQL.MYSQL_TYPES.MYSQL_TYPE_VARCHAR::Int64     => String,
-    MySQL.MYSQL_TYPES.MYSQL_TYPE_BIT::Int64         => Int8,
-    MySQL.MYSQL_TYPES.MYSQL_TYPE_NEWDECIMAL::Int64  => Float64,
-    MySQL.MYSQL_TYPES.MYSQL_TYPE_ENUM::Int64        => Int64,
-    MySQL.MYSQL_TYPES.MYSQL_TYPE_SET::Int64         => Any,
-    MySQL.MYSQL_TYPES.MYSQL_TYPE_TINY_BLOB::Int64   => Any,
-    MySQL.MYSQL_TYPES.MYSQL_TYPE_MEDIUM_BLOB::Int64 => Any,
-    MySQL.MYSQL_TYPES.MYSQL_TYPE_LONG_BLOB::Int64   => Any,
-    MySQL.MYSQL_TYPES.MYSQL_TYPE_BLOB::Int64        => Any,
-    MySQL.MYSQL_TYPES.MYSQL_TYPE_VAR_STRING::Int64  => String,
-    MySQL.MYSQL_TYPES.MYSQL_TYPE_STRING::Int64      => String,
-    MySQL.MYSQL_TYPES.MYSQL_TYPE_GEOMETRY::Int64    => Any
-)
-
-"""
 Constant indicating whether multiple statements in queries should be supported or not.
 """
 const CLIENT_MULTI_STATEMENTS = ( unsigned(1) << 16)
