@@ -63,61 +63,55 @@ function populateRow(numFields::Int8, fieldTypes::Array{Uint32}, result::MySQL.M
             value = bytestring(unsafe_load(result.values, i))
         end
 
-        if fieldTypes[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_LONG
-            if (!isempty(value))
-                df[row, i] = parse(Int32, value)
-            else
-                df[row, i] = NA
-            end
-        elseif fieldTypes[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_LONGLONG
-            if (!isempty(value))
-                df[row, i] = parse(Int64, value)
-            else
-                df[row, i] = NA
-            end
-        elseif fieldTypes[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_TINY
+        if (fieldTypes[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_TINY ||
+            fieldTypes[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_ENUM ||
+            fieldTypes[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_BIT)
             if (!isempty(value))
                 df[row, i] = parse(Int8, value)
             else
                 df[row, i] = NA
             end
-        elseif fieldTypes[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_FLOAT
+        elseif (fieldTypes[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_SHORT)
+            if (!isempty(value))
+                df[row, i] = parse(Int16, value)
+            else
+                df[row, i] = NA
+            end
+        elseif (fieldTypes[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_LONG ||
+                fieldTypes[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_INT24)
+            if (!isempty(value))
+                df[row, i] = parse(Int32, value)
+            else
+                df[row, i] = NA
+            end
+        elseif (fieldTypes[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_LONGLONG)
+            if (!isempty(value))
+                df[row, i] = parse(Int64, value)
+            else
+                df[row, i] = NA
+            end
+        elseif (fieldTypes[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_FLOAT ||
+                fieldTypes[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_DOUBLE ||
+                fieldTypes[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_DECIMAL ||
+                fieldTypes[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_NEWDECIMAL)
             if (!isempty(value))
                 df[row, i] = parse(Float64, value)
             else
                 df[row, i] = NaN
             end
-        elseif fieldTypes[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_DOUBLE
-            if (!isempty(value))
-                df[row, i] = parse(Float64, value)
-            else
-                df[row, i] = NaN
-            end
-        elseif fieldTypes[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_DECIMAL
-            if (!isempty(value))
-                df[row, i] = parse(Float64, value)
-            else
-                df[row, i] = NaN
-            end
-        elseif fieldTypes[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_NEWDECIMAL
-            if (!isempty(value))
-                df[row, i] = parse(Float64, value)
-            else
-                df[row, i] = NaN
-            end
-        elseif fieldTypes[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_NEWDATE
+        elseif (fieldTypes[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_NEWDATE)
             if (!isempty(value))
                 df[row, i] = value
             else
                 df[row, i] = NA
             end
-        elseif fieldTypes[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_DATE
+        elseif (fieldTypes[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_DATE)
             if (!isempty(value))
                 df[row, i] = Date(value, MYSQL_DEFAULT_DATE_FORMAT)
             else
                 df[row, i] = NA
             end
-        elseif fieldTypes[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_DATETIME
+        elseif (fieldTypes[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_DATETIME)
             if (!isempty(value))
                 df[row, i] = DateTime(value, MYSQL_DEFAULT_DATETIME_FORMAT)
             else
