@@ -8,9 +8,11 @@ const MYSQL_DEFAULT_DATE_FORMAT = "yyyy-mm-dd"
 const MYSQL_DEFAULT_DATETIME_FORMAT = "yyyy-mm-dd HH:MM:SS"
 
 function gettype(datatype)
-    if (datatype == MySQL.MYSQL_TYPES.MYSQL_TYPE_TINY ||
-        datatype == MySQL.MYSQL_TYPES.MYSQL_TYPE_ENUM  ||
-        datatype == MySQL.MYSQL_TYPES.MYSQL_TYPE_BIT)
+    if (datatype == MySQL.MYSQL_TYPES.MYSQL_TYPE_BIT)
+        @compat rettype = UInt8
+        return rettype
+    elseif (datatype == MySQL.MYSQL_TYPES.MYSQL_TYPE_TINY ||
+            datatype == MySQL.MYSQL_TYPES.MYSQL_TYPE_ENUM)
         return Int8
     elseif (datatype == MySQL.MYSQL_TYPES.MYSQL_TYPE_SHORT)
         return Int16
@@ -58,12 +60,17 @@ function populate_row(numFields::Int8, fieldTypes::Array{Uint32}, result::MySQL.
         value = ""
         obj = unsafe_load(result.values, i)
         if (obj != C_NULL)
-            value = bytestring(unsafe_load(result.values, i))
+            value = bytestring(obj)
         end
 
-        if (fieldTypes[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_TINY ||
-            fieldTypes[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_ENUM ||
-            fieldTypes[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_BIT)
+        if (fieldTypes[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_BIT)
+            if (!isempty(value))
+                @compat df[row, i] = convert(UInt8, value[1])
+            else
+                @compat df[row, i] = UInt8(0)
+            end
+        elseif (fieldTypes[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_TINY ||
+                fieldTypes[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_ENUM)
             if (!isempty(value))
                 @compat df[row, i] = parse(Int8, value)
             else
