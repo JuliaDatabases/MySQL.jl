@@ -14,8 +14,6 @@ function run_query_helper(command, msg)
         error(err_string)
     end
 
-    response = MySQL.mysql_stmt_bind_result(stmt, result)
-
     response = MySQL.mysql_stmt_execute(stmt)
     if (response != 0)
         err_string = "Error occured while executing prepared statement for query \"$command\""
@@ -30,13 +28,7 @@ function run_query_helper(command, msg)
         error(err_string)
     end
 
-    if (response == 0)
-        println("SUCCESS: " * msg)
-        return true
-    else
-        println("FAILED: " * msg)
-        return false
-    end
+    return true
 end
 
 function connect_as_root()
