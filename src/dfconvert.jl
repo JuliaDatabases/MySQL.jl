@@ -6,46 +6,43 @@ using Dates
 const MYSQL_DEFAULT_DATE_FORMAT = "yyyy-mm-dd"
 const MYSQL_DEFAULT_DATETIME_FORMAT = "yyyy-mm-dd HH:MM:SS"
 
-## Can use MYSQL_TYPE_MAP and reduce this to just 1 line of code
-## but if conditions retained in case we need to insert code for
-## specific cases.
-function getType(dataType)
-    if (dataType == MySQL.MYSQL_TYPES.MYSQL_TYPE_LONGLONG ||
-        dataType == MySQL.MYSQL_TYPES.MYSQL_TYPE_INT24)
-        return Int64
-    elseif (dataType == MySQL.MYSQL_TYPES.MYSQL_TYPE_TINY ||
-        dataType == MySQL.MYSQL_TYPES.MYSQL_TYPE_ENUM  ||
-        dataType == MySQL.MYSQL_TYPES.MYSQL_TYPE_BIT)
+function gettype(datatype)
+    if (datatype == MySQL.MYSQL_TYPES.MYSQL_TYPE_TINY ||
+        datatype == MySQL.MYSQL_TYPES.MYSQL_TYPE_ENUM  ||
+        datatype == MySQL.MYSQL_TYPES.MYSQL_TYPE_BIT)
         return Int8
-    elseif (dataType == MySQL.MYSQL_TYPES.MYSQL_TYPE_SHORT ||
-        dataType == MySQL.MYSQL_TYPES.MYSQL_TYPE_LONG)
+    elseif (datatype == MySQL.MYSQL_TYPES.MYSQL_TYPE_SHORT)
+        return Int16
+    elseif (datatype == MySQL.MYSQL_TYPES.MYSQL_TYPE_LONG ||
+            datatype == MySQL.MYSQL_TYPES.MYSQL_TYPE_INT24)
         return Int32
-    elseif (dataType == MySQL.MYSQL_TYPES.MYSQL_TYPE_DECIMAL ||
-           dataType == MySQL.MYSQL_TYPES.MYSQL_TYPE_NEWDECIMAL)
-        return Float64
-    elseif (dataType == MySQL.MYSQL_TYPES.MYSQL_TYPE_FLOAT ||
-        dataType == MySQL.MYSQL_TYPES.MYSQL_TYPE_DOUBLE)
-        return Float64
-    elseif (dataType == MySQL.MYSQL_TYPES.MYSQL_TYPE_NULL ||
-        dataType == MySQL.MYSQL_TYPES.MYSQL_TYPE_TIMESTAMP ||
-        dataType == MySQL.MYSQL_TYPES.MYSQL_TYPE_TIME ||
-        dataType == MySQL.MYSQL_TYPES.MYSQL_TYPE_SET ||
-        dataType == MySQL.MYSQL_TYPES.MYSQL_TYPE_TINY_BLOB ||
-        dataType == MySQL.MYSQL_TYPES.MYSQL_TYPE_MEDIUM_BLOB ||
-        dataType == MySQL.MYSQL_TYPES.MYSQL_TYPE_LONG_BLOB ||
-        dataType == MySQL.MYSQL_TYPES.MYSQL_TYPE_BLOB ||
-        dataType == MySQL.MYSQL_TYPES.MYSQL_TYPE_GEOMETRY)
-        return String
-    elseif (dataType == MySQL.MYSQL_TYPES.MYSQL_TYPE_YEAR)
+    elseif (datatype == MySQL.MYSQL_TYPES.MYSQL_TYPE_LONGLONG)
         return Int64
-    elseif (dataType == MySQL.MYSQL_TYPES.MYSQL_TYPE_DATE)
+    elseif (datatype == MySQL.MYSQL_TYPES.MYSQL_TYPE_DECIMAL ||
+           datatype == MySQL.MYSQL_TYPES.MYSQL_TYPE_NEWDECIMAL ||
+           datatype == MySQL.MYSQL_TYPES.MYSQL_TYPE_FLOAT ||
+           datatype == MySQL.MYSQL_TYPES.MYSQL_TYPE_DOUBLE)
+        return Float64
+    elseif (datatype == MySQL.MYSQL_TYPES.MYSQL_TYPE_NULL ||
+        datatype == MySQL.MYSQL_TYPES.MYSQL_TYPE_TIMESTAMP ||
+        datatype == MySQL.MYSQL_TYPES.MYSQL_TYPE_TIME ||
+        datatype == MySQL.MYSQL_TYPES.MYSQL_TYPE_SET ||
+        datatype == MySQL.MYSQL_TYPES.MYSQL_TYPE_TINY_BLOB ||
+        datatype == MySQL.MYSQL_TYPES.MYSQL_TYPE_MEDIUM_BLOB ||
+        datatype == MySQL.MYSQL_TYPES.MYSQL_TYPE_LONG_BLOB ||
+        datatype == MySQL.MYSQL_TYPES.MYSQL_TYPE_BLOB ||
+        datatype == MySQL.MYSQL_TYPES.MYSQL_TYPE_GEOMETRY)
+        return String
+    elseif (datatype == MySQL.MYSQL_TYPES.MYSQL_TYPE_YEAR)
+        return Int64
+    elseif (datatype == MySQL.MYSQL_TYPES.MYSQL_TYPE_DATE)
         return Date
-    elseif (dataType == MySQL.MYSQL_TYPES.MYSQL_TYPE_DATETIME ||
-           dataType == MySQL.MYSQL_TYPES.MYSQL_TYPE_NEWDATE)
+    elseif (datatype == MySQL.MYSQL_TYPES.MYSQL_TYPE_DATETIME ||
+           datatype == MySQL.MYSQL_TYPES.MYSQL_TYPE_NEWDATE)
         return DateTime
-    elseif (dataType == MySQL.MYSQL_TYPES.MYSQL_TYPE_VARCHAR ||
-           dataType == MySQL.MYSQL_TYPES.MYSQL_TYPE_VAR_STRING ||
-           dataType == MySQL.MYSQL_TYPES.MYSQL_TYPE_STRING)
+    elseif (datatype == MySQL.MYSQL_TYPES.MYSQL_TYPE_VARCHAR ||
+           datatype == MySQL.MYSQL_TYPES.MYSQL_TYPE_VAR_STRING ||
+           datatype == MySQL.MYSQL_TYPES.MYSQL_TYPE_STRING)
         return String
     else
         return String
@@ -55,7 +52,7 @@ end
 """
 Fill the row indexed by `row` of the dataframe `df` with values from `result`.
 """
-function populateRow(numFields::Int8, fieldTypes::Array{Uint32}, result::MySQL.MYSQL_ROW, df, row)
+function populate_row(numFields::Int8, fieldTypes::Array{Uint32}, result::MySQL.MYSQL_ROW, df, row)
     for i = 1:numFields
         value = ""
         obj = unsafe_load(result.values, i)
@@ -139,7 +136,7 @@ function results_to_dataframe(results::MYSQL_RES)
     fieldTypes = Array(Cuint, numFields)
     for i = 1:numFields
         fieldsObj = unsafe_load(fields, i)
-        columnTypes[i] = Array(getType(fieldsObj.field_type), numRows)
+        columnTypes[i] = Array(gettype(fieldsObj.field_type), numRows)
         columnHeaders[i] = symbol(bytestring(fieldsObj.name))
         fieldTypes[i] = fieldsObj.field_type
         fieldsObj = null
@@ -148,25 +145,26 @@ function results_to_dataframe(results::MYSQL_RES)
     df = DataFrame(columnTypes, columnHeaders)
     for row = 1:numRows
         result = MySQL.mysql_fetch_row(results)
-        populateRow(numFields, fieldTypes, result, df, row)
+        populate_row(numFields, fieldTypes, result, df, row)
         result = null
     end
     return df
 end
 
-function stmt_populateRow(numFields::Int8, fieldTypes::Array{Uint32}, df, row, juBindArray)
+function stmt_populate_row(numFields::Int8, fieldTypes::Array{Uint32}, df, row, juBindArray)
     for i = 1:numFields
         value = ""
-        if (fieldTypes[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_SHORT ||
-            fieldTypes[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_LONG)
-            value = int32(juBindArray[i].buffer_int[1])
-        elseif (fieldTypes[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_LONGLONG ||
-                fieldTypes[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_INT24)
-            value = int(juBindArray[i].buffer_long[1])
-        elseif (fieldTypes[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_TINY ||
-                fieldTypes[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_ENUM ||
-                fieldTypes[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_BIT)
-            value = int8(juBindArray[i].buffer_int[1])
+        if (fieldTypes[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_TINY ||
+            fieldTypes[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_ENUM ||
+            fieldTypes[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_BIT)
+            value = parse(Int8, juBindArray[i].buffer_int[1])
+        if (fieldTypes[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_SHORT)
+            value = parse(Int16, juBindArray[i].buffer_int[1])
+        if (fieldTypes[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_LONG ||
+            fieldTypes[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_INT24
+            value = parse(Int32, juBindArray[i].buffer_int[1])
+        elseif (fieldTypes[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_LONGLONG)
+            value = parse(Int64, juBindArray[i].buffer_long[1])
         elseif (fieldTypes[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_DECIMAL ||
                 fieldTypes[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_NEWDECIMAL)
             ### Not supported fully !!! this may work in some cases
@@ -176,14 +174,14 @@ function stmt_populateRow(numFields::Int8, fieldTypes::Array{Uint32}, df, row, j
                 idx  = findfirst(data, '\0')
                 tmp_val = bytestring(data[1:(idx == 0 ? endof(data) : idx-1)])
                 if (!isempty(tmp_val))
-                    value = float(tmp_val)
+                    value = parse(Float64, tmp_val)
                 end
             end
         elseif (fieldTypes[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_FLOAT ||
                 fieldTypes[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_DOUBLE)
             value = 0.0
             if (juBindArray[i].buffer_double[1] != C_NULL)
-                value = float(juBindArray[i].buffer_double[1])
+                value = parse(Float64, juBindArray[i].buffer_double[1])
             end    
         elseif (fieldTypes[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_NEWDATE ||
                 fieldTypes[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_DATETIME)
@@ -223,7 +221,7 @@ function stmt_results_to_dataframe(results::Ptr{Cuchar}, stmtptr::Ptr{Cuchar}=C_
     
     for i = 1:numFields
         fieldsObj = unsafe_load(fields, i)
-        columnTypes[i] = Array(getType(fieldsObj.field_type), numRows)
+        columnTypes[i] = Array(gettype(fieldsObj.field_type), numRows)
         columnHeaders[i] = symbol(bytestring(fieldsObj.name))
         fieldTypes[i] = fieldsObj.field_type
         field_length = fieldsObj.field_length
@@ -324,7 +322,7 @@ function stmt_results_to_dataframe(results::Ptr{Cuchar}, stmtptr::Ptr{Cuchar}=C_
             println("Could not fetch row ::: $(bytestring(MySQL.mysql_stmt_error(stmtptr)))")
             return df
         else
-            populateRow(numFields, fieldTypes, df, row, juBindArray)
+            stmt_populate_row(numFields, fieldTypes, df, row, juBindArray)
         end
     end
     return df
