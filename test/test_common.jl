@@ -79,9 +79,7 @@ function do_multi_statement()
 end
 
 function show_as_dataframe()
-    command = """SELECT * FROM Employee;"""
-    dframe = MySQL.execute_query(con, command)
-    println(dframe)
+    error("API not implemented: `run_query_helper`")
 end
 
 function drop_test_user()
@@ -95,7 +93,6 @@ function drop_test_database()
 end
 
 function run_test()
-
     # Connect as root and setup database, user and privilege
     # for the user.
     connect_as_root()

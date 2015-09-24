@@ -1,10 +1,8 @@
 # Same as test_basic.jl but uses prepare statements instead of `mysql_query`.
 
-include("test_common.jl")
-
 function run_query_helper(command, msg)
     stmt = MySQL.mysql_stmt_init(con.ptr)
-    
+ 
     if (stmt == C_NULL)
         error("Error in initialization of statement.")
     end
@@ -31,6 +29,12 @@ function run_query_helper(command, msg)
     end
 
     return true
+end
+
+function show_as_dataframe()
+    command = """SELECT * FROM Employee;"""
+    dframe = MySQL.results_to_dataframe(con, command)
+    println(dframe)
 end
 
 run_test()
