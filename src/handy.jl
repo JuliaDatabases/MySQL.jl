@@ -82,8 +82,8 @@ Same as execute query but for multi-statements.
 function execute_multi_query(con::MySQLDatabaseHandle, command::String)
     # Ideally, we should find out what the current auto-commit mode is
     # before setting/unsetting it.
-    MySQL.mysql_autocommit(con.ptr, 0)
-    response = MySQL.mysql_query(con.ptr, sql)
+    MySQL.mysql_autocommit(con.ptr, convert(Int8, 0))
+    response = MySQL.mysql_query(con.ptr, command)
     
     if (response != 0)
         err_string = "Error occured while executing mysql_query on \"$command\""
@@ -100,11 +100,11 @@ function execute_multi_query(con::MySQLDatabaseHandle, command::String)
             affectedRows = affectedRows + MySQL.mysql_affected_rows(con.ptr)
         end
 
-        MySQL.mysql_autocommit(con.ptr, 1)
+        MySQL.mysql_autocommit(con.ptr, convert(Int8, 1))
         return affectedRows
     end
 
-    MySQL.mysql_autocommit(con.ptr, 1)
+    MySQL.mysql_autocommit(con.ptr, convert(Int8, 1))
     dframe = MySQL.results_to_dataframe(results)
     MySQL.mysql_free_result(results)
     return dframe
