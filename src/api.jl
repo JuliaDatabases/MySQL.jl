@@ -211,7 +211,7 @@ Equivalent of `mysql_num_rows` for prepared statements.
 """
 function mysql_stmt_num_rows(stmtptr::Ptr{MYSQL_STMT})
     return ccall((:mysql_stmt_num_rows, mysql_lib),
-                 Culonglong,
+                 Int64,
                  (Ptr{Cuchar}, ),
                  stmtptr)
 end
@@ -230,7 +230,7 @@ end
 Bind the returned data from execution of the prepared statement
 to a preallocated datastructure `bind`.
 """
-function mysql_stmt_bind_result(stmtptr::Ptr{MYSQL_STMT}, bind::MYSQL_BIND)
+function mysql_stmt_bind_result(stmtptr::Ptr{MYSQL_STMT}, bind::Ptr{MYSQL_BIND})
     return ccall((:mysql_stmt_bind_result, mysql_lib),
                  Cchar,
                  (Ptr{Uint8}, Ptr{Cuchar}),

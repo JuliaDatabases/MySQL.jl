@@ -5,6 +5,6 @@ using Base.Test
 const HOST = "127.0.0.1"
 const ROOTPASS = "" # In Travis CI the root password is an empty string.
 
-for file in ["test_common.jl", "test_basic.jl", "test_prep.jl"]
+for file in ["test_basic.jl", "test_prep.jl"]
     include(file)
 end

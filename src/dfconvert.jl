@@ -145,6 +145,12 @@ function results_to_dataframe(results::MYSQL_RES)
         mysql_field = null
     end
 
+    @show typeof(jfield_types)
+    @show jfield_types
+    @show typeof(field_headers)
+    @show field_headers
+    @show typeof(n_rows)
+    @show n_rows
     df = DataFrame(jfield_types, field_headers, n_rows)
 
     for row = 1:n_rows
@@ -221,7 +227,7 @@ end
 """
 Convert the MySQL results `results` to a DataFrame given a prepared statement `stmtptr`.
 """
-function stmt_results_to_dataframe(results::Ptr{Cuchar}, stmtptr::Ptr{Cuchar}=C_NULL)
+function stmt_results_to_dataframe(results::MYSQL_RES, stmtptr::Ptr{MYSQL_STMT})
     n_fields = MySQL.mysql_num_fields(results)
     fields = MySQL.mysql_fetch_fields(results)
     
@@ -290,7 +296,7 @@ function stmt_results_to_dataframe(results::Ptr{Cuchar}, stmtptr::Ptr{Cuchar}=C_
             mysqlfield_types[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_LONG_BLOB ||
             mysqlfield_types[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_BLOB ||
             mysqlfield_types[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_GEOMETRY)
-            println("WARNING:::Please handle me !!!!!")
+            # WARNING:::Please handle me !!!!!
             ### TODO ::: This needs to be handled differently !!!!
             my_buff_string = zeros(Array(Uint8, field_length))
             buffer_length = field_length
@@ -326,9 +332,14 @@ function stmt_results_to_dataframe(results::Ptr{Cuchar}, stmtptr::Ptr{Cuchar}=C_
         mysql_field = null
     end
     
+    @show typeof(jfield_types)
+    @show jfield_types
+    @show typeof(field_headers)
+    @show field_headers
+    @show typeof(n_rows)
+    @show n_rows
     df = DataFrame(jfield_types, field_headers, n_rows)
-    response = MySQL.mysql_stmt_bind_result(stmtptr, reinterpret(Ptr{Cuchar},
-                                            pointer(mysql_bindarr)))
+    response = MySQL.mysql_stmt_bind_result(stmtptr, reinterpret(Ptr{MYSQL_BIND}, pointer(mysql_bindarr)))
     if (response != 0)
         println("the error after bind result is ::: $(bytestring(MySQL.mysql_stmt_error(stmtptr)))")
         return df
