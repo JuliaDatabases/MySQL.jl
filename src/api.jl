@@ -102,7 +102,7 @@ end
 """
 Executes the prepared query associated with the statement handle.
 """
-function mysql_stmt_execute(stmtptr::Ptr{Cuchar})
+function mysql_stmt_execute(stmtptr::Ptr{MYSQL_STMT})
     return ccall((:mysql_stmt_execute, mysql_lib),
                  Cint,
                  (Ptr{Cuchar}, ),
@@ -112,7 +112,7 @@ end
 """
 Closes the prepared statement.
 """
-function mysql_stmt_close(stmtptr::Ptr{Cuchar})
+function mysql_stmt_close(stmtptr::Ptr{MYSQL_STMT})
     return ccall((:mysql_stmt_close, mysql_lib),
                  Cchar,
                  (Ptr{Cuchar}, ),
@@ -154,7 +154,7 @@ Creates a mysql_stmt handle. Should be closed with mysql_close_stmt
 """
 function mysql_stmt_init(dbptr::Ptr{Cuchar})
     return ccall((:mysql_stmt_init, mysql_lib),
-                 Ptr{Cuchar},
+                 Ptr{MYSQL_STMT},
                  (Ptr{Cuchar}, ),
                  dbptr)
 end
@@ -166,7 +166,7 @@ end
 """
 Creates the prepared statement. There should be only 1 statement
 """
-function mysql_stmt_prepare(stmtptr::Ptr{Cuchar}, sql::String)
+function mysql_stmt_prepare(stmtptr::Ptr{MYSQL_STMT}, sql::String)
     s = utf8(sql)
     return ccall((:mysql_stmt_prepare, mysql_lib),
                  Cint, # TODO: Confirm proper type to use here
@@ -177,7 +177,7 @@ end
 """
 Returns the error message for the recently invoked statement API
 """
-function mysql_stmt_error(stmtptr::Ptr{Cuchar})
+function mysql_stmt_error(stmtptr::Ptr{MYSQL_STMT})
     return ccall((:mysql_stmt_error, mysql_lib),
                  Ptr{Cuchar},
                  (Ptr{Cuchar}, ),
@@ -188,7 +188,7 @@ end
 Store the entire result returned by the prepared statement in the
 bind datastructure provided by mysql_stmt_bind_result.
 """
-function mysql_stmt_store_result(stmtptr::Ptr{Cuchar})
+function mysql_stmt_store_result(stmtptr::Ptr{MYSQL_STMT})
     return ccall((:mysql_stmt_store_result, mysql_lib),
                  Cint,
                  (Ptr{Cuchar}, ),
@@ -199,7 +199,7 @@ end
 Return the metadata for the results that will be received from
 the execution of the prepared statement.
 """
-function mysql_stmt_result_metadata(stmtptr::Ptr{Cuchar})
+function mysql_stmt_result_metadata(stmtptr::Ptr{MYSQL_STMT})
     return ccall((:mysql_stmt_result_metadata, mysql_lib),
                  Ptr{Cuchar},
                  (Ptr{Cuchar}, ),
@@ -209,7 +209,7 @@ end
 """
 Equivalent of `mysql_num_rows` for prepared statements.
 """
-function mysql_stmt_num_rows(stmtptr::Ptr{Cuchar})
+function mysql_stmt_num_rows(stmtptr::Ptr{MYSQL_STMT})
     return ccall((:mysql_stmt_num_rows, mysql_lib),
                  Culonglong,
                  (Ptr{Cuchar}, ),
@@ -219,7 +219,7 @@ end
 """
 Equivalent of `mysql_fetch_row` for prepared statements.
 """
-function mysql_stmt_fetch_row(stmtptr::Ptr{Cuchar})
+function mysql_stmt_fetch_row(stmtptr::Ptr{MYSQL_STMT})
     return ccall((:mysql_stmt_fetch, mysql_lib),
                  Cint,
                  (Ptr{Cuchar}, ),
@@ -230,7 +230,7 @@ end
 Bind the returned data from execution of the prepared statement
 to a preallocated datastructure `bind`.
 """
-function mysql_stmt_bind_result(stmtptr::Ptr{Uint8}, bind::Ptr{Cuchar})
+function mysql_stmt_bind_result(stmtptr::Ptr{MYSQL_STMT}, bind::MYSQL_BIND)
     return ccall((:mysql_stmt_bind_result, mysql_lib),
                  Cchar,
                  (Ptr{Uint8}, Ptr{Cuchar}),
