@@ -196,8 +196,12 @@ function stmt_populate_row!(df, n_fields::Int8, mysqlfield_types::Array{Uint32},
             else
                 value = Date()
             end
+        elseif (mysqlfield_types[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_TIME)
+            mysql_time = jbindarr[i].buffer_time[1]
+            value = "$(mysql_time.hour):$(mysql_time.minute):$(mysql_time.second)"
         else
             data  = jbindarr[i].buffer_string
+
             if (!isempty(data))
                 idx  = findfirst(data, '\0')
                 value = bytestring(data[1:(idx == 0 ? endof(data) : idx-1)])
@@ -244,6 +248,7 @@ function stmt_results_to_dataframe(metadata::MYSQL_RES, stmtptr::Ptr{MYSQL_STMT}
         my_buff_string = Array(Uint8, field_length)
         my_buff_datetime = Array(MySQL.MYSQL_TIME)
         my_buff_date = Array(MySQL.MYSQL_TIME)
+        my_buff_time = Array(MySQL.MYSQL_TIME)
         my_buff = null
         
         if (mysqlfield_types[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_LONGLONG ||
@@ -270,9 +275,12 @@ function stmt_results_to_dataframe(metadata::MYSQL_RES, stmtptr::Ptr{MYSQL_STMT}
             my_buff_date = Array(MySQL.MYSQL_TIME)
             buffer_length = sizeof(MySQL.MYSQL_TIME)
             my_buff = my_buff_date
+        elseif (mysqlfield_types[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_TIME)
+            my_buff_time = Array(MySQL.MYSQL_TIME)
+            buffer_length = sizeof(MySQL.MYSQL_TIME)
+            my_buff = my_buff_time
         elseif (mysqlfield_types[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_NULL ||
                 mysqlfield_types[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_TIMESTAMP ||
-                mysqlfield_types[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_TIME ||
                 mysqlfield_types[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_SET ||
                 mysqlfield_types[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_TINY_BLOB ||
                 mysqlfield_types[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_MEDIUM_BLOB ||
@@ -309,7 +317,7 @@ function stmt_results_to_dataframe(metadata::MYSQL_RES, stmtptr::Ptr{MYSQL_STMT}
                                 buffer_length, buffer_type)
         juBind = MySQL.JU_MYSQL_BIND(tmp_long, tmp_char, my_buff_long, my_buff_int,
                                      my_buff_double, my_buff_string, my_buff_datetime,
-                                     my_buff_date)
+                                     my_buff_date, my_buff_time)
         push!(mysql_bindarr, bind)
         push!(jbindarr, juBind)
         mysql_field = null
