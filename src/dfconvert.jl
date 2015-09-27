@@ -40,8 +40,7 @@ function mysql_to_julia_type(mysqltype)
         return Int64
     elseif (mysqltype == MySQL.MYSQL_TYPES.MYSQL_TYPE_DATE)
         return Date
-    elseif (mysqltype == MySQL.MYSQL_TYPES.MYSQL_TYPE_DATETIME ||
-           mysqltype == MySQL.MYSQL_TYPES.MYSQL_TYPE_NEWDATE)
+    elseif (mysqltype == MySQL.MYSQL_TYPES.MYSQL_TYPE_DATETIME)
         return DateTime
     elseif (mysqltype == MySQL.MYSQL_TYPES.MYSQL_TYPE_VARCHAR ||
             mysqltype == MySQL.MYSQL_TYPES.MYSQL_TYPE_VAR_STRING ||
@@ -145,12 +144,6 @@ function results_to_dataframe(results::MYSQL_RES)
         mysql_field = null
     end
 
-    @show typeof(jfield_types)
-    @show jfield_types
-    @show typeof(field_headers)
-    @show field_headers
-    @show typeof(n_rows)
-    @show n_rows
     df = DataFrame(jfield_types, field_headers, n_rows)
 
     for row = 1:n_rows
@@ -172,31 +165,21 @@ function stmt_populate_row!(df, n_fields::Int8, mysqlfield_types::Array{Uint32},
         if (mysqlfield_types[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_TINY ||
             mysqlfield_types[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_ENUM ||
             mysqlfield_types[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_BIT)
-            @compat value = parse(Int8, jbindarr[i].buffer_int[1])
+            @compat value = convert(Int8, jbindarr[i].buffer_int[1])
         elseif (mysqlfield_types[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_SHORT)
-            @compat value = parse(Int16, jbindarr[i].buffer_int[1])
+            @compat value = convert(Int16, jbindarr[i].buffer_int[1])
         elseif (mysqlfield_types[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_LONG ||
                 mysqlfield_types[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_INT24)
-            @compat value = parse(Int32, jbindarr[i].buffer_int[1])
+            @compat value = convert(Int32, jbindarr[i].buffer_int[1])
         elseif (mysqlfield_types[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_LONGLONG)
-            @compat value = parse(Int64, jbindarr[i].buffer_long[1])
+            @compat value = convert(Int64, jbindarr[i].buffer_long[1])
         elseif (mysqlfield_types[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_DECIMAL ||
-                mysqlfield_types[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_NEWDECIMAL)
-            ### Not supported fully !!! this may work in some cases
-            data  = jbindarr[i].buffer_string
-            value = 0.0
-            if (!isempty(data))
-                idx  = findfirst(data, '\0')
-                tmp_val = bytestring(data[1:(idx == 0 ? endof(data) : idx-1)])
-                if (!isempty(tmp_val))
-                    @compat value = parse(Float64, tmp_val)
-                end
-            end
-        elseif (mysqlfield_types[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_FLOAT ||
+                mysqlfield_types[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_NEWDECIMAL ||
+                mysqlfield_types[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_FLOAT ||
                 mysqlfield_types[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_DOUBLE)
             value = 0.0
             if (jbindarr[i].buffer_double[1] != C_NULL)
-                @compat value = parse(Float64, jbindarr[i].buffer_double[1])
+                @compat value = convert(Float64, jbindarr[i].buffer_double[1])
             end    
         elseif (mysqlfield_types[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_DATETIME)
             mysql_time = jbindarr[i].buffer_datetime[1]
@@ -225,11 +208,12 @@ function stmt_populate_row!(df, n_fields::Int8, mysqlfield_types::Array{Uint32},
 end
 
 """
-Convert the MySQL results `results` to a DataFrame given a prepared statement `stmtptr`.
+Given the results metadata `metadata` and the prepared statement pointer `stmtptr`,
+ get the results as a dataframe.
 """
-function stmt_results_to_dataframe(results::MYSQL_RES, stmtptr::Ptr{MYSQL_STMT})
-    n_fields = MySQL.mysql_num_fields(results)
-    fields = MySQL.mysql_fetch_fields(results)
+function stmt_results_to_dataframe(metadata::MYSQL_RES, stmtptr::Ptr{MYSQL_STMT})
+    n_fields = MySQL.mysql_num_fields(metadata)
+    fields = MySQL.mysql_fetch_fields(metadata)
     
     MySQL.mysql_stmt_store_result(stmtptr)
     n_rows = MySQL.mysql_stmt_num_rows(stmtptr)
@@ -259,6 +243,7 @@ function stmt_results_to_dataframe(results::MYSQL_RES, stmtptr::Ptr{MYSQL_STMT})
         my_buff_double = Array(Cdouble)
         my_buff_string = Array(Uint8, field_length)
         my_buff_datetime = Array(MySQL.MYSQL_TIME)
+        my_buff_date = Array(MySQL.MYSQL_TIME)
         my_buff = null
         
         if (mysqlfield_types[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_LONGLONG ||
@@ -267,35 +252,33 @@ function stmt_results_to_dataframe(results::MYSQL_RES, stmtptr::Ptr{MYSQL_STMT})
             buffer_length = sizeof(Culong)
             my_buff = my_buff_long
         elseif (mysqlfield_types[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_TINY ||
-            mysqlfield_types[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_SHORT ||
-            mysqlfield_types[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_ENUM ||
-            mysqlfield_types[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_LONG ||
-            mysqlfield_types[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_BIT)
+                mysqlfield_types[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_SHORT ||
+                mysqlfield_types[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_ENUM ||
+                mysqlfield_types[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_LONG ||
+                mysqlfield_types[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_BIT)
             my_buff_int = Array(Cint)
             buffer_length = sizeof(Cint)
             my_buff = my_buff_int
         elseif (mysqlfield_types[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_DECIMAL ||
-            mysqlfield_types[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_NEWDECIMAL)
-            ### TODO ::: This needs to be handled more efficiently !!
-            ### there is no direct equivalent for this in Julia
-            my_buff_string = zeros(Array(Uint8, field_length))
-            buffer_length = field_length
-            my_buff = my_buff_string
-        elseif (mysqlfield_types[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_FLOAT ||
-            mysqlfield_types[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_DOUBLE)
+                mysqlfield_types[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_NEWDECIMAL ||
+                mysqlfield_types[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_FLOAT ||
+                mysqlfield_types[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_DOUBLE)
             my_buff_double = Array(Cdouble)
             buffer_length = sizeof(Cdouble)
             my_buff = my_buff_double
+        elseif (mysqlfield_types[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_DATE)
+            my_buff_date = Array(MySQL.MYSQL_TIME)
+            buffer_length = sizeof(MySQL.MYSQL_TIME)
+            my_buff = my_buff_date
         elseif (mysqlfield_types[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_NULL ||
-            mysqlfield_types[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_TIMESTAMP ||
-            mysqlfield_types[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_DATE ||
-            mysqlfield_types[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_TIME ||
-            mysqlfield_types[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_SET ||
-            mysqlfield_types[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_TINY_BLOB ||
-            mysqlfield_types[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_MEDIUM_BLOB ||
-            mysqlfield_types[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_LONG_BLOB ||
-            mysqlfield_types[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_BLOB ||
-            mysqlfield_types[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_GEOMETRY)
+                mysqlfield_types[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_TIMESTAMP ||
+                mysqlfield_types[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_TIME ||
+                mysqlfield_types[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_SET ||
+                mysqlfield_types[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_TINY_BLOB ||
+                mysqlfield_types[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_MEDIUM_BLOB ||
+                mysqlfield_types[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_LONG_BLOB ||
+                mysqlfield_types[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_BLOB ||
+                mysqlfield_types[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_GEOMETRY)
             # WARNING:::Please handle me !!!!!
             ### TODO ::: This needs to be handled differently !!!!
             my_buff_string = zeros(Array(Uint8, field_length))
@@ -305,14 +288,13 @@ function stmt_results_to_dataframe(results::MYSQL_RES, stmtptr::Ptr{MYSQL_STMT})
             my_buff_long = Array(Culong)
             buffer_length = sizeof(Culong)
             my_buff = my_buff_long
-        elseif (mysqlfield_types[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_DATETIME ||
-            mysqlfield_types[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_NEWDATE)
+        elseif (mysqlfield_types[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_DATETIME)
             my_buff_datetime = Array(MySQL.MYSQL_TIME)
             buffer_length = sizeof(MySQL.MYSQL_TIME)
             my_buff = my_buff_datetime
         elseif (mysqlfield_types[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_VARCHAR ||
-            mysqlfield_types[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_VAR_STRING ||
-            mysqlfield_types[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_STRING)
+                mysqlfield_types[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_VAR_STRING ||
+                mysqlfield_types[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_STRING)
             my_buff_string = zeros(Array(Uint8, field_length))
             buffer_length = field_length
             my_buff = my_buff_string
@@ -326,18 +308,13 @@ function stmt_results_to_dataframe(results::MYSQL_RES, stmtptr::Ptr{MYSQL_STMT})
                                 reinterpret(Ptr{Void}, pointer(my_buff)),
                                 buffer_length, buffer_type)
         juBind = MySQL.JU_MYSQL_BIND(tmp_long, tmp_char, my_buff_long, my_buff_int,
-                                     my_buff_double, my_buff_string, my_buff_datetime)
+                                     my_buff_double, my_buff_string, my_buff_datetime,
+                                     my_buff_date)
         push!(mysql_bindarr, bind)
         push!(jbindarr, juBind)
         mysql_field = null
     end
     
-    @show typeof(jfield_types)
-    @show jfield_types
-    @show typeof(field_headers)
-    @show field_headers
-    @show typeof(n_rows)
-    @show n_rows
     df = DataFrame(jfield_types, field_headers, n_rows)
     response = MySQL.mysql_stmt_bind_result(stmtptr, reinterpret(Ptr{MYSQL_BIND}, pointer(mysql_bindarr)))
     if (response != 0)

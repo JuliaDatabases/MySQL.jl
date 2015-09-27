@@ -65,9 +65,9 @@ function show_as_dataframe()
     end
 
     dframe = MySQL.stmt_results_to_dataframe(metadata, stmt)
-    println("nishanth kottary")
     MySQL.mysql_stmt_close(stmt)
     println(dframe)
 end
 
+println("\n*** Running Prepared Statement Test ***\n")
 run_test()
