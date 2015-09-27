@@ -95,6 +95,7 @@ immutable JU_MYSQL_BIND
     buffer_string::Array{Uint8, 1}
     buffer_datetime::Array{MYSQL_TIME, 0}
     buffer_date::Array{MYSQL_TIME, 0}
+    buffer_time::Array{MYSQL_TIME, 0}
 end
 
 """
