@@ -87,13 +87,14 @@ end
 Support for prepared statement related APIs.
 """
 immutable JU_MYSQL_BIND
-    length::Array{Culong, 0}
-    is_null::Array{Culong, 0}
-    buffer_long::Array{Culong, 0}
+    buffer_bit::Array{Cuchar, 0}
+    buffer_tiny::Array{Cchar, 0}
+    buffer_short::Array{Cshort, 0}
     buffer_int::Array{Cint, 0}
+    buffer_long::Array{Clong, 0}
     buffer_float::Array{Cfloat, 0}
     buffer_double::Array{Cdouble, 0}
-    buffer_string::Array{Uint8, 1}
+    buffer_string::Array{Cuchar, 1}
     buffer_datetime::Array{MYSQL_TIME, 0}
     buffer_date::Array{MYSQL_TIME, 0}
     buffer_time::Array{MYSQL_TIME, 0}
