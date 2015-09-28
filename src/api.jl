@@ -328,3 +328,13 @@ function mysql_autocommit(mysqlptr::MYSQL, mode::Int8)
                  Cchar, (Ptr{Void}, Cchar),
                  mysqlptr, mode)
 end
+
+"""
+Used to get the next result while executing multi query. Returns 0 on success
+and more results are present. Returns -1 on success and no more results. Returns
+positve on error.
+"""
+function mysql_next_result(mysqlptr::MYSQL)
+    return ccall((:mysql_next_result, mysql_lib), Cint, (Ptr{Void},),
+                 mysqlptr)
+end

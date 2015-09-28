@@ -71,11 +71,11 @@ function drop_table()
 end
 
 function do_multi_statement()
-    command = """INSERT INTO Employee (Name, Salary, JoinDate, LastLogin, LunchTime)
-                 VALUES
-                 ('Donald', 30000.00, '2014-2-2', '2015-8-8 13:14:15', '14:01:02');
+    command = """INSERT INTO Employee (Name, Salary, JoinDate, LastLogin, LunchTime, OfficeNo, JobType, Senior, empno) VALUES
+                 ('Donald', 30000.00, '2014-2-2', '2015-8-8 13:14:15', '14:01:02', 33, 'HR', b'0', 1112);
                  UPDATE Employee SET LunchTime = '15:00:00' WHERE LENGTH(Name) > 5;"""
-    @test run_query_helper(command, "Multi statement")
+    aff_rows = MySQL.execute_multi_query(con, command)
+    println("Multi query affected rows: $aff_rows")
 end
 
 function show_as_dataframe()
@@ -108,7 +108,7 @@ function run_test()
     insert_values()
     update_values()
 #   Subsequent queries fail after multi statement, need to debug.
-#    do_multi_statement()
+    do_multi_statement()
     show_as_dataframe()
     drop_table()
     MySQL.mysql_disconnect(con)
