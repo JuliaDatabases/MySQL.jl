@@ -36,7 +36,7 @@ function create_table()
                  (
                      ID INT NOT NULL AUTO_INCREMENT,
                      Name VARCHAR(255),
-                     Salary FLOAT,
+                     Salary FLOAT(7,2),
                      JoinDate DATE,
                      LastLogin DATETIME,
                      LunchTime TIME,
