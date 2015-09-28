@@ -175,12 +175,16 @@ function stmt_populate_row!(df, n_fields::Int8, mysqlfield_types::Array{Uint32},
             @compat value = convert(Int64, jbindarr[i].buffer_long[1])
         elseif (mysqlfield_types[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_DECIMAL ||
                 mysqlfield_types[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_NEWDECIMAL ||
-                mysqlfield_types[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_FLOAT ||
                 mysqlfield_types[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_DOUBLE)
             value = 0.0
             if (jbindarr[i].buffer_double[1] != C_NULL)
                 @compat value = convert(Float64, jbindarr[i].buffer_double[1])
-            end    
+            end
+        elseif (mysqlfield_types[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_FLOAT)
+            value = 0.0
+            if (jbindarr[i].buffer_float[1] != C_NULL)
+                @compat value = convert(Float32, jbindarr[i].buffer_float[1])
+            end
         elseif (mysqlfield_types[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_DATETIME)
             mysql_time = jbindarr[i].buffer_datetime[1]
             if (mysql_time.year != 0)   ## to handle invalid data like 0000-00-00T00:00:00
@@ -244,6 +248,7 @@ function stmt_results_to_dataframe(metadata::MYSQL_RES, stmtptr::Ptr{MYSQL_STMT}
         buffer_type::Cint = mysqlfield_types[i]
         my_buff_long = Array(Culong)
         my_buff_int = Array(Cint)
+        my_buff_float = Array(Cfloat)
         my_buff_double = Array(Cdouble)
         my_buff_string = Array(Uint8, field_length)
         my_buff_datetime = Array(MySQL.MYSQL_TIME)
@@ -266,11 +271,14 @@ function stmt_results_to_dataframe(metadata::MYSQL_RES, stmtptr::Ptr{MYSQL_STMT}
             my_buff = my_buff_int
         elseif (mysqlfield_types[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_DECIMAL ||
                 mysqlfield_types[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_NEWDECIMAL ||
-                mysqlfield_types[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_FLOAT ||
                 mysqlfield_types[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_DOUBLE)
             my_buff_double = Array(Cdouble)
             buffer_length = sizeof(Cdouble)
             my_buff = my_buff_double
+        elseif (mysqlfield_types[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_FLOAT)
+            my_buff_float = Array(Cfloat)
+            buffer_length = sizeof(Cfloat)
+            my_buff = my_buff_float
         elseif (mysqlfield_types[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_DATE)
             my_buff_date = Array(MySQL.MYSQL_TIME)
             buffer_length = sizeof(MySQL.MYSQL_TIME)
@@ -315,7 +323,7 @@ function stmt_results_to_dataframe(metadata::MYSQL_RES, stmtptr::Ptr{MYSQL_STMT}
         bind = MySQL.MYSQL_BIND(pointer(tmp_long), pointer(tmp_char),
                                 reinterpret(Ptr{Void}, pointer(my_buff)),
                                 buffer_length, buffer_type)
-        juBind = MySQL.JU_MYSQL_BIND(tmp_long, tmp_char, my_buff_long, my_buff_int,
+        juBind = MySQL.JU_MYSQL_BIND(tmp_long, tmp_char, my_buff_long, my_buff_int, my_buff_float,
                                      my_buff_double, my_buff_string, my_buff_datetime,
                                      my_buff_date, my_buff_time)
         push!(mysql_bindarr, bind)

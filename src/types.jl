@@ -91,6 +91,7 @@ immutable JU_MYSQL_BIND
     is_null::Array{Culong, 0}
     buffer_long::Array{Culong, 0}
     buffer_int::Array{Cint, 0}
+    buffer_float::Array{Cfloat, 0}
     buffer_double::Array{Cdouble, 0}
     buffer_string::Array{Uint8, 1}
     buffer_datetime::Array{MYSQL_TIME, 0}
