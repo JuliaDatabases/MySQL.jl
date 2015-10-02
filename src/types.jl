@@ -124,9 +124,8 @@ immutable MYSQL_BIND
     is_null_value :: Cchar
     extension :: Ptr{Void}
 
-    function MYSQL_BIND(in_length::Ptr{Culong}, in_is_null::Ptr{Cchar}, 
-                        in_buffer::Ptr{Void}, in_buffer_length::Culong, in_buffer_type::Cint)
-        new(in_length, in_is_null, in_buffer, C_NULL, C_NULL, 0, 0, 0, in_buffer_length,
+    function MYSQL_BIND(in_buffer::Ptr{Void}, in_buffer_length::Culong, in_buffer_type::Cint)
+        new(0, 0, in_buffer, C_NULL, C_NULL, 0, 0, 0, in_buffer_length,
             0, 0, 0, 0, in_buffer_type, 0, 0, 0, 0, C_NULL)
     end
 

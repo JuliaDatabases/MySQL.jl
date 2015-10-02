@@ -235,8 +235,8 @@ function stmt_results_to_dataframe(metadata::MYSQL_RES, stmtptr::Ptr{MYSQL_STMT}
         mysqlfield_types[i] = mysql_field.field_type
         field_length = mysql_field.field_length
     
-        tmp_long = Array(Culong)
-        tmp_char = Array(Cchar)
+#         tmp_long = Array(Culong)
+#         tmp_char = Array(Cchar)
         buffer_length::Culong = 0
         buffer_type::Cint = mysqlfield_types[i]
         my_buff_bit = Array(Cuchar)
@@ -311,8 +311,7 @@ function stmt_results_to_dataframe(metadata::MYSQL_RES, stmtptr::Ptr{MYSQL_STMT}
             my_buff = my_buff_string
         end
         
-        bind = MySQL.MYSQL_BIND(pointer(tmp_long), pointer(tmp_char),
-                                reinterpret(Ptr{Void}, pointer(my_buff)),
+        bind = MySQL.MYSQL_BIND(reinterpret(Ptr{Void}, pointer(my_buff)),
                                 buffer_length, buffer_type)
         juBind = MySQL.JU_MYSQL_BIND(my_buff_bit, my_buff_tiny, my_buff_short,
                                      my_buff_int, my_buff_long, my_buff_float,
