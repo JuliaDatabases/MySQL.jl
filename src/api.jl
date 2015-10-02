@@ -14,17 +14,17 @@ Used to connect to database server. Returns a MYSQL handle on success and
 C_NULL on failure.
 """
 function mysql_real_connect(mysqlptr::MYSQL,
-                            host::String,
-                            user::String,
-                            passwd::String,
-                            db::String,
-                            port::Cint,
-                            unix_socket::Any,
-                            client_flag::Uint64)
+                              host::String,
+                              user::String,
+                              passwd::String,
+                              db::String,
+                              port::Cint,
+                              unix_socket::Any,
+                              client_flag::Culong)
 
     reconnect_flag::Cuint = MySQL.MYSQL_OPTION.MYSQL_OPT_RECONNECT
     reconnect_option::Cuchar = 0
-    retVal = MySQL.mysql_options(mysqlptr, reconnect_flag, reinterpret(Ptr{None},
+    retVal = MySQL.mysql_options(mysqlptr, reconnect_flag, reinterpret(Ptr{Void},
                                    pointer_from_objref(reconnect_option)))
     if(retVal != 0)
         println("WARNING:::Options not set !!! The retVal is :: $retVal")
@@ -39,7 +39,7 @@ function mysql_real_connect(mysqlptr::MYSQL,
                   Ptr{Cuchar},
                   Cuint,
                   Ptr{Cuchar},
-                  Uint64),
+                  Culong),
                  mysqlptr,
                  host,
                  user,
@@ -56,8 +56,8 @@ mysql_real_connect. Can be called multiple times to set options.
 Returns non zero on error.
 """
 function mysql_options(mysqlptr::MYSQL,
-                       option_type::Cuint,
-                       option::Ptr{None})
+                        option_type::Cuint,
+                        option::Ptr{Void})
     return ccall((:mysql_options, mysql_lib),
                  Cint,
                  (Ptr{Cuchar},
@@ -134,14 +134,14 @@ end
 Creates the sql string where the special chars are escaped
 """
 function mysql_real_escape_string(mysqlptr::MYSQL,
-                                  to::Vector{Uint8},
+                                  to::Vector{Cuchar},
                                   from::String,
                                   length::Culong)
     return ccall((:mysql_real_escape_string, mysql_lib),
-                 Uint32,
+                 Cuint,
                  (Ptr{Cuchar},
-                  Ptr{Uint8},
-                  Ptr{Uint8},
+                  Ptr{Cuchar},
+                  Ptr{Cuchar},
                   Culong),
                  mysqlptr,
                  to,
@@ -152,11 +152,11 @@ end
 """
 Creates a mysql_stmt handle. Should be closed with mysql_close_stmt
 """
-function mysql_stmt_init(dbptr::Ptr{Cuchar})
+function mysql_stmt_init(mysqlptr::MYSQL)
     return ccall((:mysql_stmt_init, mysql_lib),
                  Ptr{MYSQL_STMT},
-                 (Ptr{Cuchar}, ),
-                 dbptr)
+                 (MYSQL, ),
+                 mysqlptr)
 end
 
 function mysql_stmt_init(db::MySQLDatabaseHandle)
@@ -201,8 +201,8 @@ the execution of the prepared statement.
 """
 function mysql_stmt_result_metadata(stmtptr::Ptr{MYSQL_STMT})
     return ccall((:mysql_stmt_result_metadata, mysql_lib),
-                 Ptr{Cuchar},
-                 (Ptr{Cuchar}, ),
+                 MYSQL_RES,
+                 (Ptr{MYSQL_STMT}, ),
                  stmtptr)
 end
 
@@ -211,7 +211,7 @@ Equivalent of `mysql_num_rows` for prepared statements.
 """
 function mysql_stmt_num_rows(stmtptr::Ptr{MYSQL_STMT})
     return ccall((:mysql_stmt_num_rows, mysql_lib),
-                 Int64,
+                 Clong,
                  (Ptr{Cuchar}, ),
                  stmtptr)
 end
@@ -233,7 +233,7 @@ to a preallocated datastructure `bind`.
 function mysql_stmt_bind_result(stmtptr::Ptr{MYSQL_STMT}, bind::Ptr{MYSQL_BIND})
     return ccall((:mysql_stmt_bind_result, mysql_lib),
                  Cchar,
-                 (Ptr{Uint8}, Ptr{Cuchar}),
+                 (Ptr{Cuchar}, Ptr{Cuchar}),
                  stmtptr,
                  bind)
 end
@@ -243,8 +243,8 @@ Executes the query and returns the status of the same.
 """
 function mysql_query(mysqlptr::MYSQL, sql::String)
     return ccall((:mysql_query, mysql_lib),
-                 Int8,
-                 (Ptr{Cuchar}, Ptr{Cuchar}),
+                 Cchar,
+                 (MYSQL, Ptr{Cuchar}),
                  mysqlptr,
                  sql)
 end
@@ -252,20 +252,20 @@ end
 """
 Stores the result in to an object.
 """
-function mysql_store_result(results::Ptr{Cuchar})
+function mysql_store_result(mysqlptr::MYSQL)
     return ccall((:mysql_store_result, mysql_lib),
-                 Ptr{Cuchar},
-                 (Ptr{Cuchar},),
-                 results)
+                 MYSQL_RES,
+                 (MYSQL, ),
+                 mysqlptr)
 end
 
 """
 Returns the field metadata.
 """
-function mysql_fetch_fields(results::Ptr{Cuchar})
+function mysql_fetch_fields(results::MYSQL_RES)
     return ccall((:mysql_fetch_fields, mysql_lib),
                  Ptr{MYSQL_FIELD},
-                 (Ptr{Cuchar},),
+                 (MYSQL_RES, ),
                  results)
 end
 
@@ -273,59 +273,59 @@ end
 """
 Returns the row from the result set.
 """
-function mysql_fetch_row(results::Ptr{Cuchar})
+function mysql_fetch_row(results::MYSQL_RES)
     return ccall((:mysql_fetch_row, mysql_lib),
                  MYSQL_ROW,
-                 (Ptr{Cuchar},),
+                 (MYSQL_RES, ),
                  results)
 end
 
 """
 Frees the result set.
 """
-function mysql_free_result(results::Ptr{Cuchar})
+function mysql_free_result(results::MYSQL_RES)
     return ccall((:mysql_free_result, mysql_lib),
                  Ptr{Cuchar},
-                 (Ptr{Cuchar},),
+                 (MYSQL_RES, ),
                  results)
 end
 
 """
 Returns the number of fields in the result set.
 """
-function mysql_num_fields(results::Ptr{Cuchar})
+function mysql_num_fields(results::MYSQL_RES)
     return ccall((:mysql_num_fields, mysql_lib),
-                 Int8,
-                 (Ptr{Cuchar},),
+                 Cuint,
+                 (MYSQL_RES, ),
                  results)
 end
 
 """
 Returns the number of records from the result set.
 """
-function mysql_num_rows(results::Ptr{Cuchar})
+function mysql_num_rows(results::MYSQL_RES)
     return ccall((:mysql_num_rows, mysql_lib),
-                 Int64,
-                 (Ptr{Cuchar},),
+                 Clong,
+                 (MYSQL_RES, ),
                  results)
 end
 
 """
 Returns the # of affected rows in case of insert / update / delete.
 """
-function mysql_affected_rows(results::Ptr{Cuchar})
+function mysql_affected_rows(results::MYSQL_RES)
     return ccall((:mysql_affected_rows, mysql_lib),
-                 Uint64,
-                 (Ptr{Cuchar},),
+                 Culong,
+                 (MYSQL_RES, ),
                  results)
 end
 
 """
 Set the auto commit mode.
 """
-function mysql_autocommit(mysqlptr::MYSQL, mode::Int8)
+function mysql_autocommit(mysqlptr::MYSQL, mode::Cchar)
     return ccall((:mysql_autocommit, mysql_lib),
-                 Cchar, (Ptr{Void}, Cchar),
+                 Cchar, (MYSQL, Cchar),
                  mysqlptr, mode)
 end
 
@@ -335,6 +335,7 @@ and more results are present. Returns -1 on success and no more results. Returns
 positve on error.
 """
 function mysql_next_result(mysqlptr::MYSQL)
-    return ccall((:mysql_next_result, mysql_lib), Cint, (Ptr{Void},),
+    return ccall((:mysql_next_result, mysql_lib),
+                 Cint, (MYSQL_RES, ),
                  mysqlptr)
 end

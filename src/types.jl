@@ -1,11 +1,21 @@
 using Dates
 
 """
+The MySQL handle passed to C calls.
+"""
+typealias MYSQL Ptr{Void}
+
+"""
+The Pointer to result set for C calls.
+"""
+typealias MYSQL_RES Ptr{Void}
+
+"""
 Julia wrapper for MySQL database handle. Used for passing to mysql_init,
 mysql_real_connect, mysql_close etc.
 """
 type MySQLDatabaseHandle
-    ptr::Ptr{Cuchar}
+    ptr::MYSQL
     status::Cint
 end
 
@@ -27,18 +37,8 @@ end
 The record that would be returned by mysql_fetch_row API.
 """
 type MYSQL_ROW
-    values :: Ptr{Ptr{Uint8}} # pointer to an array of strings
+    values :: Ptr{Ptr{Cuchar}} # pointer to an array of strings
 end
-
-"""
-The MySQL handle passed to C calls.
-"""
-typealias MYSQL Ptr{Uint8}
-
-"""
-The Pointer to result set for C calls.
-"""
-typealias MYSQL_RES Ptr{Uint8}
 
 """
 The field object that contains the metadata of the table. 

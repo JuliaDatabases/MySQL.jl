@@ -5,14 +5,14 @@ A handy function that wraps mysql_init and mysql_real_connect. Also does error
 checking on the pointers returned by init and real_connect.
 """
 function mysql_init_and_connect(host::String,
-                                user::String,
-                                passwd::String,
-                                db::String,
-                                port::Integer = 0,
-                                unix_socket::Any = C_NULL,
-                                client_flag::Integer = 0)
+                                  user::String,
+                                  passwd::String,
+                                  db::String,
+                                  port::Integer = 0,
+                                  unix_socket::Any = C_NULL,
+                                  client_flag::Integer = 0)
 
-    mysqlptr::Ptr{Cuchar} = C_NULL
+    mysqlptr::MYSQL = C_NULL
     mysqlptr = mysql_init(mysqlptr)
 
     if mysqlptr == C_NULL

@@ -54,7 +54,7 @@ end
 """
 Fill the row indexed by `row` of the dataframe `df` with values from `result`.
 """
-function populate_row!(df, numFields::Int8, mysqlfield_types::Array{Uint32}, result::MySQL.MYSQL_ROW, row)
+function populate_row!(df, numFields, mysqlfield_types::Array{Uint32}, result::MySQL.MYSQL_ROW, row)
     for i = 1:numFields
         value = ""
         obj = unsafe_load(result.values, i)
@@ -159,7 +159,7 @@ end
 Populate a row in the dataframe `df` indexed by `row` given the number of fields `n_fields`,
  the type of each field `mysqlfield_types` and an array `jbindarr` to which the results are bound.
 """
-function stmt_populate_row!(df, n_fields::Int8, mysqlfield_types::Array{Uint32}, row, jbindarr)
+function stmt_populate_row!(df, n_fields, mysqlfield_types::Array{Uint32}, row, jbindarr)
     for i = 1:n_fields
         value = ""
 
