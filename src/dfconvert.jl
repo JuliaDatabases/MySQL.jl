@@ -362,7 +362,7 @@ function mysql_stmt_results_to_dataframe(metadata::MYSQL_RES, stmtptr::Ptr{MYSQL
     end
 
     for row = 1:n_rows
-        result = mysql_stmt_fetch_row(stmtptr)
+        result = mysql_stmt_fetch(stmtptr)
         if (result == C_NULL)
             println("Could not fetch row ::: $(bytestring(mysql_stmt_error(stmtptr)))")
             return df

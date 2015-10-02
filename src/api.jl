@@ -215,7 +215,7 @@ end
 """
 Equivalent of `mysql_fetch_row` for prepared statements.
 """
-function mysql_stmt_fetch_row(stmtptr::Ptr{MYSQL_STMT})
+function mysql_stmt_fetch(stmtptr::Ptr{MYSQL_STMT})
     return ccall((:mysql_stmt_fetch, mysql_lib),
                  Cint,
                  (Ptr{Cuchar}, ),
