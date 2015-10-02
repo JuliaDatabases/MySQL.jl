@@ -45,13 +45,13 @@ The field object that contains the metadata of the table.
 Returned by mysql_fetch_fields API.
 """
 type MYSQL_FIELD
-    name :: Ptr{Uint8}             ##  Name of column
-    org_name :: Ptr{Uint8}         ##  Original column name, if an alias
-    table :: Ptr{Uint8}            ##  Table of column if column was a field
-    org_table :: Ptr{Uint8}        ##  Org table name, if table was an alias
-    db :: Ptr{Uint8}               ##  Database for table
-    catalog :: Ptr{Uint8}          ##  Catalog for table
-    def :: Ptr{Uint8}              ##  Default value (set by mysql_list_fields)
+    name :: Ptr{Cchar}             ##  Name of column
+    org_name :: Ptr{Cchar}         ##  Original column name, if an alias
+    table :: Ptr{Cchar}            ##  Table of column if column was a field
+    org_table :: Ptr{Cchar}        ##  Org table name, if table was an alias
+    db :: Ptr{Cchar}               ##  Database for table
+    catalog :: Ptr{Cchar}          ##  Catalog for table
+    def :: Ptr{Cchar}              ##  Default value (set by mysql_list_fields)
     field_length :: Clong          ##  Width of column (create length)
     max_length :: Clong            ##  Max width for selected set
     name_length :: Cuint
@@ -86,18 +86,33 @@ end
 """
 Support for prepared statement related APIs.
 """
-immutable JU_MYSQL_BIND
-    buffer_bit::Array{Cuchar, 0}
-    buffer_tiny::Array{Cchar, 0}
-    buffer_short::Array{Cshort, 0}
-    buffer_int::Array{Cint, 0}
-    buffer_long::Array{Clong, 0}
-    buffer_float::Array{Cfloat, 0}
-    buffer_double::Array{Cdouble, 0}
-    buffer_string::Array{Cuchar, 1}
-    buffer_datetime::Array{MYSQL_TIME, 0}
-    buffer_date::Array{MYSQL_TIME, 0}
-    buffer_time::Array{MYSQL_TIME, 0}
+immutable JULIA_MYSQL_BIND
+# This should be a Union
+    buffer_bit::Ptr{Cuchar}
+    buffer_tiny::Ptr{Cchar}
+    buffer_short::Ptr{Cshort}
+    buffer_int::Ptr{Cint}
+    buffer_long::Ptr{Clong}
+    buffer_float::Ptr{Cfloat}
+    buffer_double::Ptr{Cdouble}
+    buffer_string::Ptr{Cuchar}
+    buffer_datetime::Ptr{MYSQL_TIME}
+    buffer_date::Ptr{MYSQL_TIME}
+    buffer_time::Ptr{MYSQL_TIME}
+
+    function JULIA_MYSQL_BIND(buff_str_len)
+        new(pointer(Array(Cuchar)),
+            pointer(Array(Cchar)),
+            pointer(Array(Cshort)),
+            pointer(Array(Cint)),
+            pointer(Array(Clong)),
+            pointer(Array(Cfloat)),
+            pointer(Array(Cdouble)),
+            pointer(Array(Cuchar, buff_str_len)), # buffer_string
+            pointer(Array(MYSQL_TIME)),
+            pointer(Array(MYSQL_TIME)),
+            pointer(Array(MYSQL_TIME)), )
+    end
 end
 
 """
@@ -144,10 +159,10 @@ immutable MYSQL_BIND
     end
 end
 
-typealias MEM_ROOT Ptr{Uint8}
-typealias LIST Ptr{Uint8}
-typealias MYSQL_DATA Ptr{Uint8}
-typealias MYSQL_ROWS Ptr{Uint8}
+typealias MEM_ROOT Ptr{Void}
+typealias LIST Ptr{Void}
+typealias MYSQL_DATA Ptr{Void}
+typealias MYSQL_ROWS Ptr{Void}
 
 """
 Mirror to MYSQL_STMT struct in mysql.h
