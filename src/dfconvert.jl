@@ -229,8 +229,8 @@ function stmt_results_to_dataframe(metadata::MYSQL_RES, stmtptr::Ptr{MYSQL_STMT}
     mysql_bindarr = null
     jbindarr = null
     
-    mysql_bindarr = MySQL.MYSQL_BIND[]
-    jbindarr = MySQL.JU_MYSQL_BIND[]
+    mysql_bindarr = Array(MySQL.MYSQL_BIND, n_fields)
+    jbindarr = Array(MySQL.JU_MYSQL_BIND, n_fields)
 
     for i = 1:n_fields
         mysql_field = unsafe_load(fields, i)
@@ -322,10 +322,10 @@ function stmt_results_to_dataframe(metadata::MYSQL_RES, stmtptr::Ptr{MYSQL_STMT}
                                      my_buff_int, my_buff_long, my_buff_float,
                                      my_buff_double, my_buff_string, my_buff_datetime,
                                      my_buff_date, my_buff_time)
-        push!(mysql_bindarr, bind)
-        push!(jbindarr, juBind)
+        mysql_bindarr[i] = bind
+        jbindarr[i] = juBind
         mysql_field = null
-    end
+    end # end for
     
     df = DataFrame(jfield_types, field_headers, n_rows)
     response = MySQL.mysql_stmt_bind_result(stmtptr, reinterpret(Ptr{MYSQL_BIND}, pointer(mysql_bindarr)))
