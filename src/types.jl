@@ -61,7 +61,7 @@ end
 """
 Support for prepared statement related APIs.
 """
-immutable JULIA_MYSQL_BIND
+immutable MYSQL_JULIA_BIND
 # This should be a Union
     buffer_bit::Ptr{Cuchar}
     buffer_tiny::Ptr{Cchar}
@@ -75,7 +75,7 @@ immutable JULIA_MYSQL_BIND
     buffer_date::Ptr{MYSQL_TIME}
     buffer_time::Ptr{MYSQL_TIME}
 
-    function JULIA_MYSQL_BIND(buff_str_len)
+    function MYSQL_JULIA_BIND(buff_str_len)
         new(pointer(Array(Cuchar)),
             pointer(Array(Cchar)),
             pointer(Array(Cshort)),

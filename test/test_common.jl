@@ -9,7 +9,7 @@ function run_query_helper(command, msg)
 end
 
 function connect_as_root()
-    global con = MySQL.mysql_init_and_connect(HOST, "root", ROOTPASS, "")
+    global con = mysql_init_and_connect(HOST, "root", ROOTPASS, "")
 end
 
 function create_test_database()
@@ -28,7 +28,7 @@ function grant_test_user_privilege()
 end
 
 function connect_as_test_user()
-    global con = MySQL.mysql_init_and_connect(HOST, "test", "test", "mysqltest")
+    global con = mysql_init_and_connect(HOST, "test", "test", "mysqltest")
 end
 
 function create_table()
@@ -74,7 +74,7 @@ function do_multi_statement()
     command = """INSERT INTO Employee (Name, Salary, JoinDate, LastLogin, LunchTime, OfficeNo, JobType, Senior, empno) VALUES
                  ('Donald', 30000.00, '2014-2-2', '2015-8-8 13:14:15', '14:01:02', 33, 'HR', b'0', 1112);
                  UPDATE Employee SET LunchTime = '15:00:00' WHERE LENGTH(Name) > 5;"""
-    aff_rows = MySQL.execute_multi_query(con, command)
+    aff_rows = mysql_execute_multi_query(con, command)
     println("Multi query affected rows: $aff_rows")
 end
 
@@ -99,7 +99,7 @@ function run_test()
     create_test_database()
     create_test_user()
     grant_test_user_privilege()
-    MySQL.mysql_disconnect(con)
+    mysql_disconnect(con)
 
     # Connect as test user and do insert, update etc.
     # and finally drop the table.
@@ -111,11 +111,11 @@ function run_test()
     do_multi_statement()
     show_as_dataframe()
     drop_table()
-    MySQL.mysql_disconnect(con)
+    mysql_disconnect(con)
 
     # Drop the test user and database.
     connect_as_root()
     drop_test_user()
     drop_test_database()
-    MySQL.mysql_disconnect(con)
+    mysql_disconnect(con)
 end
