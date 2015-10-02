@@ -141,7 +141,6 @@ function results_to_dataframe(results::MYSQL_RES)
         jfield_types[i] = mysql_to_julia_type(mysql_field.field_type)
         field_headers[i] = symbol(bytestring(mysql_field.name))
         mysqlfield_types[i] = mysql_field.field_type
-        mysql_field = null
     end
 
     df = DataFrame(jfield_types, field_headers, n_rows)
@@ -149,7 +148,6 @@ function results_to_dataframe(results::MYSQL_RES)
     for row = 1:n_rows
         result = MySQL.mysql_fetch_row(results)
         populate_row!(df, n_fields, mysqlfield_types, result, row)
-        result = null
     end
 
     return df
@@ -226,8 +224,6 @@ function stmt_results_to_dataframe(metadata::MYSQL_RES, stmtptr::Ptr{MYSQL_STMT}
     jfield_types = Array(DataType, n_fields)
     field_headers = Array(Symbol, n_fields)
     mysqlfield_types = Array(Uint32, n_fields)
-    mysql_bindarr = null
-    jbindarr = null
     
     mysql_bindarr = Array(MySQL.MYSQL_BIND, n_fields)
     jbindarr = Array(MySQL.JU_MYSQL_BIND, n_fields)
@@ -254,7 +250,7 @@ function stmt_results_to_dataframe(metadata::MYSQL_RES, stmtptr::Ptr{MYSQL_STMT}
         my_buff_datetime = Array(MySQL.MYSQL_TIME)
         my_buff_date = Array(MySQL.MYSQL_TIME)
         my_buff_time = Array(MySQL.MYSQL_TIME)
-        my_buff = null
+        my_buff = C_NULL
         
         if (mysqlfield_types[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_LONGLONG ||
             mysqlfield_types[i] == MySQL.MYSQL_TYPES.MYSQL_TYPE_INT24)
@@ -324,7 +320,6 @@ function stmt_results_to_dataframe(metadata::MYSQL_RES, stmtptr::Ptr{MYSQL_STMT}
                                      my_buff_date, my_buff_time)
         mysql_bindarr[i] = bind
         jbindarr[i] = juBind
-        mysql_field = null
     end # end for
     
     df = DataFrame(jfield_types, field_headers, n_rows)
