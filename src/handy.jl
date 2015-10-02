@@ -32,7 +32,7 @@ function mysql_init_and_connect(host::String,
         error("Failed to connect to MySQL database")
     end
 
-    return MySQLDatabaseHandle(mysqlptr, 0)
+    return mysqlptr
 end
 
 """
@@ -48,22 +48,22 @@ end
 Wrapper over mysql_close. Must be called to close the connection opened by
 MySQL.mysql_connect.
 """
-function mysql_disconnect(db::MySQLDatabaseHandle)
-    mysql_close(db.ptr)
+function mysql_disconnect(db::MYSQL)
+    mysql_close(db)
 end
 
 """
 Execute a query and return results as a dataframe if the query was a select query.
 If query is not a select query then return the number of affected rows.
 """
-function execute_query(con::MySQLDatabaseHandle, command::String)
-    response = MySQL.mysql_query(con.ptr, command)
+function execute_query(con::MYSQL, command::String)
+    response = MySQL.mysql_query(con, command)
     mysql_display_error(con, response != 0,
                         "Error occured while executing mysql_query on \"$command\"")
 
-    results = MySQL.mysql_store_result(con.ptr)
+    results = MySQL.mysql_store_result(con)
     if (results == C_NULL)
-        affectedRows = MySQL.mysql_affected_rows(con.ptr)
+        affectedRows = MySQL.mysql_affected_rows(con)
         return affectedRows
     end
 
@@ -75,29 +75,29 @@ end
 """
 Same as execute query but for multi-statements.
 """
-function execute_multi_query(con::MySQLDatabaseHandle, command::String)
+function execute_multi_query(con::MYSQL, command::String)
     # Ideally, we should find out what the current auto-commit mode is
     # before setting/unsetting it.
-    MySQL.mysql_autocommit(con.ptr, convert(Int8, 0))
+    MySQL.mysql_autocommit(con, convert(Int8, 0))
 
-    response = MySQL.mysql_query(con.ptr, command)
+    response = MySQL.mysql_query(con, command)
     mysql_display_error(con, response != 0,
                         "Error occured while executing mysql_query on \"$command\"")
 
-    results = MySQL.mysql_store_result(con.ptr)
+    results = MySQL.mysql_store_result(con)
     
     if (results == C_NULL)
         affectedRows = 0
 
-        while (MySQL.mysql_next_result(con.ptr) == 0)
-            affectedRows = affectedRows + MySQL.mysql_affected_rows(con.ptr)
+        while (MySQL.mysql_next_result(con) == 0)
+            affectedRows = affectedRows + MySQL.mysql_affected_rows(con)
         end
 
-        MySQL.mysql_autocommit(con.ptr, convert(Int8, 1))
+        MySQL.mysql_autocommit(con, convert(Int8, 1))
         return affectedRows
     end
 
-    MySQL.mysql_autocommit(con.ptr, convert(Int8, 1))
+    MySQL.mysql_autocommit(con, convert(Int8, 1))
     dframe = MySQL.results_to_dataframe(results)
     MySQL.mysql_free_result(results)
     return dframe
@@ -109,7 +109,7 @@ A handy function to display the `mysql_error` message along with a user message 
 """
 function mysql_display_error(con, condition, msg)
     if (condition)
-        err_string = msg * "\nMySQL ERROR: " * bytestring(MySQL.mysql_error(con.ptr))
+        err_string = msg * "\nMySQL ERROR: " * bytestring(MySQL.mysql_error(con))
         error(err_string)
     end
 end

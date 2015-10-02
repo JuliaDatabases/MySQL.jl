@@ -4,7 +4,7 @@
 include("test_common.jl")
 
 function run_query_helper(command, msg)
-    response = MySQL.mysql_query(con.ptr, command)
+    response = MySQL.mysql_query(con, command)
 
     if (response == 0)
         println("SUCCESS: " * msg)

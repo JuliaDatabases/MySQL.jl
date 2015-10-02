@@ -159,10 +159,6 @@ function mysql_stmt_init(mysqlptr::MYSQL)
                  mysqlptr)
 end
 
-function mysql_stmt_init(db::MySQLDatabaseHandle)
-    return mysql_stmt_init(db.ptr)
-end
-
 """
 Creates the prepared statement. There should be only 1 statement
 """

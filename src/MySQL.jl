@@ -6,8 +6,6 @@ module MySQL
     include("api.jl")
     include("handy.jl")
 
-    export MySQLDatabaseHandle
-    export MySQLStatementHandle
     export CLIENT_MULTI_STATEMENTS
     
     include("dfconvert.jl")        

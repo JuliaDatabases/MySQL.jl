@@ -11,29 +11,6 @@ The Pointer to result set for C calls.
 typealias MYSQL_RES Ptr{Void}
 
 """
-Julia wrapper for MySQL database handle. Used for passing to mysql_init,
-mysql_real_connect, mysql_close etc.
-"""
-type MySQLDatabaseHandle
-    ptr::MYSQL
-    status::Cint
-end
-
-"""
-Julia wrapper for MySQL statement handle. Used for prepared statement
-API's.
-"""
-type MySQLStatementHandle
-    db::MySQLDatabaseHandle
-    ptr::Ptr{Cuchar}
-    executed::Int
-
-    function MySQLStatementHandle(db::MySQLDatabaseHandle, ptr::Ptr{Void})
-        new(db, ptr, 0)
-    end
-end
-
-"""
 The record that would be returned by mysql_fetch_row API.
 """
 type MYSQL_ROW
