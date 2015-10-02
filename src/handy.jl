@@ -127,5 +127,7 @@ function mysql_stmt_results_to_dataframe(stmtptr::Ptr{MYSQL_STMT})
     mysql_display_error(stmt.mysql, response != 0,
                         "Error occured while executing prepared statement")
 
-    return mysql_stmt_results_to_dataframe(metadata, stmtptr)
+    retval = mysql_stmt_results_to_dataframe(metadata, stmtptr)
+    mysql_free_result(metadata)
+    return retval
 end
