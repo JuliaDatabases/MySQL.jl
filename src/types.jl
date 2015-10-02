@@ -13,9 +13,7 @@ typealias MYSQL_RES Ptr{Void}
 """
 The record that would be returned by mysql_fetch_row API.
 """
-type MYSQL_ROW
-    values :: Ptr{Ptr{Cuchar}} # pointer to an array of strings
-end
+typealias MYSQL_ROW Ptr{Ptr{Cchar}} # pointer to an array of strings
 
 """
 The field object that contains the metadata of the table. 
@@ -139,7 +137,15 @@ end
 typealias MEM_ROOT Ptr{Void}
 typealias LIST Ptr{Void}
 typealias MYSQL_DATA Ptr{Void}
-typealias MYSQL_ROWS Ptr{Void}
+
+"""
+Mirror to MYSQL_ROWS struct in mysql.h
+"""
+type MYSQL_ROWS
+    next::Ptr{MYSQL_ROWS}
+    data::MYSQL_ROW
+    length::Culong
+end
 
 """
 Mirror to MYSQL_STMT struct in mysql.h

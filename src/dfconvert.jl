@@ -57,7 +57,7 @@ Fill the row indexed by `row` of the dataframe `df` with values from `result`.
 function populate_row!(df, numFields, mysqlfield_types::Array{Uint32}, result::MySQL.MYSQL_ROW, row)
     for i = 1:numFields
         value = ""
-        obj = unsafe_load(result.values, i)
+        obj = unsafe_load(result, i)
         if (obj != C_NULL)
             value = bytestring(obj)
         end
