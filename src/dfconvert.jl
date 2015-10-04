@@ -68,79 +68,52 @@ Fill the row indexed by `row` of the dataframe `df` with values from `result`.
 """
 function populate_row!(df, numFields, mysqlfield_types::Array{Uint32}, result::MYSQL_ROW, row)
     for i = 1:numFields
-        value = ""
+        di = df[i]
         obj = unsafe_load(result, i)
-        if (obj != C_NULL)
-            value = bytestring(obj)
+
+        if obj == C_NULL
+            di[row] = NA
+            continue
+        end
+            
+        value = bytestring(obj)
+
+        if length(value) == 0
+            di[row] = NA
+            continue
         end
 
         if (mysqlfield_types[i] == MYSQL_TYPES.MYSQL_TYPE_BIT)
-            if (!isempty(value))
-                @compat df[row, i] = convert(UInt8, value[1])
-            else
-                @compat df[row, i] = UInt8(0)
-            end
+            di[row] = convert(Cuchar, value[1])
 
         elseif (mysqlfield_types[i] == MYSQL_TYPES.MYSQL_TYPE_TINY ||
                 mysqlfield_types[i] == MYSQL_TYPES.MYSQL_TYPE_ENUM)
-            if (!isempty(value))
-                @compat df[row, i] = parse(Int8, value)
-            else
-                df[row, i] = NA
-            end
+            di[row] = parse(Cchar, value)
 
         elseif (mysqlfield_types[i] == MYSQL_TYPES.MYSQL_TYPE_SHORT)
-            if (!isempty(value))
-                @compat df[row, i] = parse(Int16, value)
-            else
-                df[row, i] = NA
-            end
+            di[row] = parse(Cshort, value)
 
         elseif (mysqlfield_types[i] == MYSQL_TYPES.MYSQL_TYPE_LONG ||
                 mysqlfield_types[i] == MYSQL_TYPES.MYSQL_TYPE_INT24)
-            if (!isempty(value))
-                @compat df[row, i] = parse(Int32, value)
-            else
-                df[row, i] = NA
-            end
+            di[row] = parse(Cint, value)
 
         elseif (mysqlfield_types[i] == MYSQL_TYPES.MYSQL_TYPE_LONGLONG)
-            if (!isempty(value))
-                @compat df[row, i] = parse(Int64, value)
-            else
-                df[row, i] = NA
-            end
+            di[row] = parse(Clong, value)
 
         elseif (mysqlfield_types[i] == MYSQL_TYPES.MYSQL_TYPE_FLOAT ||
                 mysqlfield_types[i] == MYSQL_TYPES.MYSQL_TYPE_DOUBLE ||
                 mysqlfield_types[i] == MYSQL_TYPES.MYSQL_TYPE_DECIMAL ||
                 mysqlfield_types[i] == MYSQL_TYPES.MYSQL_TYPE_NEWDECIMAL)
-            if (!isempty(value))
-                @compat df[row, i] = parse(Float64, value)
-            else
-                df[row, i] = NaN
-            end
+            di[row] = parse(Cdouble, value)
 
         elseif (mysqlfield_types[i] == MYSQL_TYPES.MYSQL_TYPE_DATE)
-            if (!isempty(value))
-                df[row, i] = Date(value, MYSQL_DEFAULT_DATE_FORMAT)
-            else
-                df[row, i] = NA
-            end
+            di[row] = Date(value, MYSQL_DEFAULT_DATE_FORMAT)
 
         elseif (mysqlfield_types[i] == MYSQL_TYPES.MYSQL_TYPE_DATETIME)
-            if (!isempty(value))
-                df[row, i] = DateTime(value, MYSQL_DEFAULT_DATETIME_FORMAT)
-            else
-                df[row, i] = NA
-            end
+            di[row] = DateTime(value, MYSQL_DEFAULT_DATETIME_FORMAT)
 
         else
-            if (!isempty(value))
-                df[row, i] = value
-            else
-                df[row, i] = ""
-            end
+            di[row] = value
 
         end
     end
@@ -180,8 +153,6 @@ Populate a row in the dataframe `df` indexed by `row` given the number of fields
 """
 function stmt_populate_row!(df, n_fields, mysqlfield_types::Array{Uint32}, row, jbindarr)
     for i = 1:n_fields
-        value = ""
-
         if (mysqlfield_types[i] == MYSQL_TYPES.MYSQL_TYPE_BIT)
             value = unsafe_load(jbindarr[i].buffer_bit, 1)
 
@@ -229,12 +200,7 @@ function stmt_populate_row!(df, n_fields, mysqlfield_types::Array{Uint32}, row, 
             value = "$(mysql_time.hour):$(mysql_time.minute):$(mysql_time.second)"
 
         else
-            data  = bytestring(jbindarr[i].buffer_string)
-
-            if (!isempty(data))
-                idx  = findfirst(data, '\0')
-                value = bytestring(data[1:(idx == 0 ? endof(data) : idx-1)])
-            end
+            value = bytestring(jbindarr[i].buffer_string)
 
         end
 
