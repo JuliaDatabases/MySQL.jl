@@ -71,8 +71,8 @@ function drop_table()
 end
 
 function do_multi_statement()
-    command = """INSERT INTO Employee (Name, Salary, JoinDate, LastLogin, LunchTime, OfficeNo, JobType, Senior, empno) VALUES
-                 ('Donald', 30000.00, '2014-2-2', '2015-8-8 13:14:15', '14:01:02', 33, 'HR', b'0', 1112);
+#    command = """INSERT INTO Employee (Name, Salary, JoinDate, LastLogin, LunchTime, OfficeNo, JobType, Senior, empno) VALUES
+    command = """INSERT INTO Employee (Name) VALUES ('');
                  UPDATE Employee SET LunchTime = '15:00:00' WHERE LENGTH(Name) > 5;"""
     aff_rows = mysql_execute_multi_query(con, command)
     println("Multi query affected rows: $aff_rows")
@@ -90,6 +90,28 @@ end
 function drop_test_database()
     command = """DROP DATABASE mysqltest;"""
     @test run_query_helper(command, "Drop database")
+end
+
+function cleanup()
+    try
+       mysql_disconnect(con)
+    end
+
+    try
+        connect_as_root()
+    end
+
+    try
+        drop_test_user()
+    end
+
+    try
+        drop_test_database()
+    end
+
+    try
+        mysql_disconnect(con)
+    end
 end
 
 function run_test()
@@ -118,4 +140,16 @@ function run_test()
     drop_test_user()
     drop_test_database()
     mysql_disconnect(con)
+end
+
+"""
+Incase of failure cleanup and throw the error that caused failure.
+"""
+function test_helper()
+    try
+        run_test()
+    catch err
+        cleanup()
+        throw(err)
+    end
 end

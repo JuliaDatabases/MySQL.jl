@@ -9,28 +9,27 @@ const MYSQL_DEFAULT_DATETIME_FORMAT = "yyyy-mm-dd HH:MM:SS"
 
 function mysql_to_julia_type(mysqltype)
     if (mysqltype == MYSQL_TYPES.MYSQL_TYPE_BIT)
-        @compat rettype = UInt8
-        return rettype
+        return Cuchar
 
     elseif (mysqltype == MYSQL_TYPES.MYSQL_TYPE_TINY ||
             mysqltype == MYSQL_TYPES.MYSQL_TYPE_ENUM)
-        return Int8
+        return Cchar
 
     elseif (mysqltype == MYSQL_TYPES.MYSQL_TYPE_SHORT)
-        return Int16
+        return Cshort
 
     elseif (mysqltype == MYSQL_TYPES.MYSQL_TYPE_LONG ||
             mysqltype == MYSQL_TYPES.MYSQL_TYPE_INT24)
-        return Int32
+        return Cint
 
     elseif (mysqltype == MYSQL_TYPES.MYSQL_TYPE_LONGLONG)
-        return Int64
+        return Clong
 
     elseif (mysqltype == MYSQL_TYPES.MYSQL_TYPE_DECIMAL ||
             mysqltype == MYSQL_TYPES.MYSQL_TYPE_NEWDECIMAL ||
             mysqltype == MYSQL_TYPES.MYSQL_TYPE_FLOAT ||
             mysqltype == MYSQL_TYPES.MYSQL_TYPE_DOUBLE)
-        return Float64
+        return Cdouble
 
     elseif (mysqltype == MYSQL_TYPES.MYSQL_TYPE_NULL ||
             mysqltype == MYSQL_TYPES.MYSQL_TYPE_TIMESTAMP ||
@@ -44,7 +43,7 @@ function mysql_to_julia_type(mysqltype)
         return String
 
     elseif (mysqltype == MYSQL_TYPES.MYSQL_TYPE_YEAR)
-        return Int64
+        return Clong
 
     elseif (mysqltype == MYSQL_TYPES.MYSQL_TYPE_DATE)
         return Date
@@ -63,11 +62,21 @@ function mysql_to_julia_type(mysqltype)
     end
 end
 
+function mysql_allocate_result_tuple(mysqlfield_types::Array{Cuint})
+    for i = 1:length(mysqlfield_types)
+    end
+end
+
+function mysql_get_row_as_tuple(result::MYSQL_ROW, mysqlfield_types::Array{Cuint})
+    for i = 1:length(mysqlfield_types)
+    end
+end
+
 """
 Fill the row indexed by `row` of the dataframe `df` with values from `result`.
 """
-function populate_row!(df, numFields, mysqlfield_types::Array{Uint32}, result::MYSQL_ROW, row)
-    for i = 1:numFields
+function populate_row!(df, mysqlfield_types::Array{Uint32}, result::MYSQL_ROW, row)
+    for i = 1:length(mysqlfield_types)
         di = df[i]
         obj = unsafe_load(result, i)
 
@@ -141,7 +150,7 @@ function results_to_dataframe(results::MYSQL_RES)
 
     for row = 1:n_rows
         result = mysql_fetch_row(results)
-        populate_row!(df, n_fields, mysqlfield_types, result, row)
+        populate_row!(df, mysqlfield_types, result, row)
     end
 
     return df
@@ -151,8 +160,8 @@ end
 Populate a row in the dataframe `df` indexed by `row` given the number of fields `n_fields`,
  the type of each field `mysqlfield_types` and an array `jbindarr` to which the results are bound.
 """
-function stmt_populate_row!(df, n_fields, mysqlfield_types::Array{Uint32}, row, jbindarr)
-    for i = 1:n_fields
+function stmt_populate_row!(df, mysqlfield_types::Array{Uint32}, row, jbindarr)
+    for i = 1:length(mysqlfield_types)
         if (mysqlfield_types[i] == MYSQL_TYPES.MYSQL_TYPE_BIT)
             value = unsafe_load(jbindarr[i].buffer_bit, 1)
 
@@ -333,7 +342,7 @@ function mysql_stmt_results_to_dataframe(metadata::MYSQL_RES, stmtptr::Ptr{MYSQL
             println("Could not fetch row ::: $(bytestring(mysql_stmt_error(stmtptr)))")
             return df
         else
-            stmt_populate_row!(df, n_fields, mysqlfield_types, row, jbindarr)
+            stmt_populate_row!(df, mysqlfield_types, row, jbindarr)
         end
     end
     return df

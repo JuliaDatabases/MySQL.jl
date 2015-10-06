@@ -22,4 +22,4 @@ function show_as_dataframe()
 end
 
 println("\n*** Running Basic Test ***\n")
-run_test()
+test_helper()

@@ -44,4 +44,4 @@ function show_as_dataframe()
 end
 
 println("\n*** Running Prepared Statement Test ***\n")
-run_test()
+test_helper()

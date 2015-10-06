@@ -63,7 +63,7 @@ function mysql_execute_query(con::MYSQL, command::String)
     results = mysql_store_result(con)
     if (results == C_NULL)
         affectedRows = mysql_affected_rows(con)
-        return affectedRows
+        return convert(Int, affectedRows)
     end
 
     dframe = results_to_dataframe(results)
