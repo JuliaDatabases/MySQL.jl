@@ -4,7 +4,7 @@ MySQL.jl
 [![Build Status](https://travis-ci.org/JuliaComputing/MySQL.jl.svg?branch=master)](https://travis-ci.org/JuliaComputing/MySQL.jl)
 
 Julia bindings and helper functions for [MariaDB](https://mariadb.org/)/MySQL C library.
-Query results can be recieved as raw C pointers or as [Data Frames](https://github.com/JuliaStats/DataFrames.jl).
+Query results can be recieved as julia arrays or as [Data Frames](https://github.com/JuliaStats/DataFrames.jl).
 
 # Installation
 
@@ -18,7 +18,7 @@ Pkg.clone("https://github.com/JuliaComputing/MySQL.jl")
 Connect to the MySQL server:
 ```
 using MySQL
-con = MySQL.mysql_connect(HOST, USER, PASSWD, DBNAME)
+con = mysql_init_and_connect(HOST, USER, PASSWD, DBNAME)
 ```
 
 Create/Insert/Update etc:
@@ -33,7 +33,7 @@ command = """CREATE TABLE Employee
                  LunchTime TIME,
                  PRIMARY KEY (ID)
              );"""
-response = MySQL.mysql_query(con, command)
+response = mysql_query(con, command)
 if (response == 0)
     println("Create table succeeded.")
 else
@@ -41,26 +41,86 @@ else
 end
 ```
 
-Obtain SELECT statement results as dataframe:
-```
-command = """SELECT * FROM Employee;"""
-response = MySQL.mysql_query(con.ptr, command)
-results = MySQL.mysql_store_result(con.ptr)
-dframe = MySQL.results_to_dataframe(results) # The dataframes.
-MySQL.mysql_free_result(results)
-# See test/test.jl to see how to check return values and handle errors.
-```
+Obtain SELECT results as dataframe:
 
-Or, the execute_query wrapper can be used as follows:
 ```
 command = """SELECT * FROM Employee;"""
-dframe = MySQL.execute_query(con, command)
+dframe = execute_query(con, command)
 ```
 The `execute_query()` API will take care of handling errors and freeing the memory allocated to the results.
 
-Close the connection:
+Obtain SELECT results as julia Array:
+
 ```
-MySQL.mysql_disconnect(con)
+command = """SELECT * FROM Employee;"""
+retarr = execute_query(con, command, opformat=MYSQL_ARRAY)
+```
+
+Iterate over rows:
+
+```
+response = mysql_query(con, "SELECT * FROM some_table;")
+mysql_display_error(con, response != 0,
+                    "Error occured while executing mysql_query on \"$command\"")
+
+result = mysql_store_result(con)
+
+for row in MySQLRowIterator(result)
+    println(row)
+end
+
+mysql_free_result(result)
+```
+
+Get metadata of fields:
+
+```
+response = mysql_query(con, "SELECT * FROM some_table;")
+mysql_display_error(con, response != 0,
+                    "Error occured while executing mysql_query on \"$command\"")
+
+result = mysql_store_result(con)
+mysqlfields = mysql_get_field_metadata(result)
+for i = 1:length(mysqlfields)
+    field = mysqlfields[i]
+    println("Field name is: ", bytestring(field.name))
+    println("Field length is: ", field_length)
+    println("Field type is: ", field_type)
+end
+```
+
+Execute a multi query:
+
+```
+command = """INSERT INTO Employee (Name) VALUES ('');
+             UPDATE Employee SET LunchTime = '15:00:00' WHERE LENGTH(Name) > 5;"""
+aff_rows = mysql_execute_multi_query(con, command)
+println("Multi query affected rows: $aff_rows")
+```
+
+Get dataframes using prepared statments:
+
+```
+command = """SELECT * FROM Employee;"""
+
+stmt = mysql_stmt_init(con)
+
+if (stmt == C_NULL)
+    error("Error in initialization of statement.")
+end
+
+response = mysql_stmt_prepare(stmt, command)
+mysql_display_error(con, response != 0,
+                    "Error occured while preparing statement for query \"$command\"")
+
+dframe = mysql_stmt_result_to_dataframe(stmt)
+mysql_stmt_close(stmt)
+```
+
+Close the connection:
+
+```
+mysql_disconnect(con)
 ```
 
 # How to solve MySQL library not found error
