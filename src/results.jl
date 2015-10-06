@@ -416,10 +416,10 @@ function mysql_stmt_result_to_dataframe(metadata::MYSQL_RES, stmtptr::Ptr{MYSQL_
 
         end
         
-        bind = MYSQL_BIND(reinterpret(Ptr{Void}, bindbuff),
-                                buffer_length, buffer_type)
+        mysqlbind = MYSQL_BIND(reinterpret(Ptr{Void}, bindbuff),
+                          buffer_length, buffer_type)
 
-        mysql_bindarr[i] = bind
+        mysql_bindarr[i] = mysqlbind
         jbindarr[i] = jbind
     end # end for
     

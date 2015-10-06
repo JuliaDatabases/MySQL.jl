@@ -188,8 +188,8 @@ Iterator for the mysql result (MYSQL_RES).
 """
 type MySQLRowIterator
     result::MYSQL_RES
-    row::Array{Any}
-    mysqlfield_types::Array{MYSQL_TYPE}
+    row::Array{Any, 1}
+    mysqlfield_types::Array{MYSQL_TYPE, 1}
     rowsleft::Int64
 end
 
