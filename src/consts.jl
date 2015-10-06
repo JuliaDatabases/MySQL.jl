@@ -2,7 +2,7 @@
 The field_type in the MYSQL_FIELD object that directly maps to native MYSQL types
 """
 baremodule MYSQL_TYPES
-#    import Base: call, @doc
+    import Base: call, @doc
 
     const MYSQL_TYPE_DECIMAL     = 0
     const MYSQL_TYPE_TINY        = 1
@@ -42,7 +42,7 @@ const CLIENT_MULTI_STATEMENTS = ( unsigned(1) << 16)
 Options to be passed to mysql_options API.
 """
 baremodule MYSQL_OPTION
-#    import Base: call, @doc
+    import Base: call, @doc
 
     const MYSQL_OPT_CONNECT_TIMEOUT = 0
     const MYSQL_OPT_COMPRESS = 1
@@ -83,3 +83,8 @@ baremodule MYSQL_OPTION
     const MYSQL_ENABLE_CLEARTEXT_PLUGIN = 36
     const MYSQL_OPT_CAN_HANDLE_EXPIRED_PASSWORDS = 37
 end
+
+const MYSQL_DATA_FRAME = 0
+const MYSQL_ARRAY = 1
+
+export MYSQL_DATA_FRAME, MYSQL_ARRAY

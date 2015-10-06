@@ -55,26 +55,32 @@ end
 Execute a query and return results as a dataframe if the query was a select query.
 If query is not a select query then return the number of affected rows.
 """
-function mysql_execute_query(con::MYSQL, command::String)
+function mysql_execute_query(con::MYSQL, command::String, opformat=MYSQL_DATA_FRAME)
     response = mysql_query(con, command)
     mysql_display_error(con, response != 0,
                         "Error occured while executing mysql_query on \"$command\"")
 
-    results = mysql_store_result(con)
-    if (results == C_NULL)
+    result = mysql_store_result(con)
+    if (result == C_NULL)
         affectedRows = mysql_affected_rows(con)
         return convert(Int, affectedRows)
     end
 
-    dframe = results_to_dataframe(results)
-    mysql_free_result(results)
-    return dframe
+    retval = Nothing
+    if opformat == MYSQL_DATA_FRAME
+        retval = mysql_result_to_dataframe(result)
+    else opformat == MYSQL_ARRAY
+        retval = mysql_get_result_as_array(result)
+    end
+
+    mysql_free_result(result)
+    return retval
 end
 
 """
 Same as execute query but for multi-statements.
 """
-function mysql_execute_multi_query(con::MYSQL, command::String)
+function mysql_execute_multi_query(con::MYSQL, command::String, opformat=MYSQL_DATA_FRAME)
     # Ideally, we should find out what the current auto-commit mode is
     # before setting/unsetting it.
     mysql_autocommit(con, convert(Int8, 0))
@@ -83,9 +89,9 @@ function mysql_execute_multi_query(con::MYSQL, command::String)
     mysql_display_error(con, response != 0,
                         "Error occured while executing mysql_query on \"$command\"")
 
-    results = mysql_store_result(con)
+    result = mysql_store_result(con)
     
-    if (results == C_NULL)
+    if (result == C_NULL)
         affectedRows = 0
 
         while (mysql_next_result(con) == 0)
@@ -97,9 +103,16 @@ function mysql_execute_multi_query(con::MYSQL, command::String)
     end
 
     mysql_autocommit(con, convert(Int8, 1))
-    dframe = results_to_dataframe(results)
-    mysql_free_result(results)
-    return dframe
+
+    retval = Nothing
+    if opformat == MYSQL_DATA_FRAME
+        retval = mysql_result_to_dataframe(result)
+    else opformat == MYSQL_ARRAY
+        retval = mysql_get_result_as_array(result)
+    end
+
+    mysql_free_result(result)
+    return retval
 end
 
 """
@@ -117,7 +130,7 @@ end
 Given a prepared statement pointer `stmtptr` returns a dataframe containing the results.
 `mysql_stmt_prepare` must be called on the statement pointer before this can be used.
 """
-function mysql_stmt_results_to_dataframe(stmtptr::Ptr{MYSQL_STMT})
+function mysql_stmt_result_to_dataframe(stmtptr::Ptr{MYSQL_STMT})
     stmt = unsafe_load(stmtptr)
     metadata = mysql_stmt_result_metadata(stmtptr)
     mysql_display_error(stmt.mysql, metadata == C_NULL,
@@ -127,7 +140,7 @@ function mysql_stmt_results_to_dataframe(stmtptr::Ptr{MYSQL_STMT})
     mysql_display_error(stmt.mysql, response != 0,
                         "Error occured while executing prepared statement")
 
-    retval = mysql_stmt_results_to_dataframe(metadata, stmtptr)
+    retval = mysql_stmt_result_to_dataframe(metadata, stmtptr)
     mysql_free_result(metadata)
     return retval
 end

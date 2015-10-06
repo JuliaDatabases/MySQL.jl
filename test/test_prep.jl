@@ -25,7 +25,7 @@ function run_query_helper(command, msg)
     return true
 end
 
-function show_as_dataframe()
+function show_results()
     command = """SELECT * FROM Employee;"""
 
     stmt = mysql_stmt_init(con)
@@ -38,7 +38,7 @@ function show_as_dataframe()
     mysql_display_error(con, response != 0,
                         "Error occured while preparing statement for query \"$command\"")
 
-    dframe = mysql_stmt_results_to_dataframe(stmt)
+    dframe = mysql_stmt_result_to_dataframe(stmt)
     mysql_stmt_close(stmt)
     println(dframe)
 end

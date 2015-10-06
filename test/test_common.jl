@@ -2,7 +2,7 @@
 # called  `mysqltest` a  user called  `test`  and a  table in  mysqltest
 # called  `Employee`.  It then  inserts some  data, performs  an update,
 # then retrieves the data using  a select query and converts the results
-# to a datafram.
+# to a julia datastructure.
 
 function run_query_helper(command, msg)
     error("API not implemented: `run_query_helper`")
@@ -14,17 +14,17 @@ end
 
 function create_test_database()
     command = """CREATE DATABASE mysqltest;"""
-    @test run_query_helper(command, "Create database")
+    run_query_helper(command, "Create database")
 end
 
 function create_test_user()
     command = "CREATE USER test@$HOST IDENTIFIED BY 'test';"
-    @test run_query_helper(command, "Create user")
+    run_query_helper(command, "Create user")
 end
 
 function grant_test_user_privilege()
     command = "GRANT ALL ON mysqltest.* TO test@$HOST;"
-    @test run_query_helper(command, "Grant privilege")
+    run_query_helper(command, "Grant privilege")
 end
 
 function connect_as_test_user()
@@ -46,7 +46,7 @@ function create_table()
                      empno SMALLINT,
                      PRIMARY KEY (ID)
                  );"""
-    @test run_query_helper(command, "Create table")
+    run_query_helper(command, "Create table")
 end
 
 function insert_values()
@@ -57,17 +57,17 @@ function insert_values()
                  ('Jim', 30000.00, '2015-6-2', '2015-9-5 10:05:10', '12:30:00', 45, 'Management', b'0', 1567),
                  ('Tim', 15000.50, '2015-7-25', '2015-10-10 12:12:25', '12:30:00', 56, 'Accounts', b'1', 3200);
               """
-    @test run_query_helper(command, "Insert")
+    run_query_helper(command, "Insert")
 end
 
 function update_values()
     command = """UPDATE Employee SET Salary = 25000.00 WHERE ID > 2;"""
-    @test run_query_helper(command, "Update")
+    run_query_helper(command, "Update")
 end
 
 function drop_table()
     command = """DROP TABLE Employee;"""
-    @test run_query_helper(command, "Drop table")
+    run_query_helper(command, "Drop table")
 end
 
 function do_multi_statement()
@@ -78,23 +78,23 @@ function do_multi_statement()
     println("Multi query affected rows: $aff_rows")
 end
 
-function show_as_dataframe()
+function show_results()
     error("API not implemented: `run_query_helper`")
 end
 
 function drop_test_user()
     command = """DROP USER test@$HOST;"""
-    @test run_query_helper(command, "Drop user")
+    run_query_helper(command, "Drop user")
 end
 
 function drop_test_database()
     command = """DROP DATABASE mysqltest;"""
-    @test run_query_helper(command, "Drop database")
+    run_query_helper(command, "Drop database")
 end
 
 function cleanup()
     try
-       mysql_disconnect(con)
+        mysql_disconnect(con)
     end
 
     try
@@ -118,27 +118,27 @@ function run_test()
     # Connect as root and setup database, user and privilege
     # for the user.
     connect_as_root()
-    create_test_database()
-    create_test_user()
-    grant_test_user_privilege()
+    @test create_test_database()
+    @test create_test_user()
+    @test grant_test_user_privilege()
     mysql_disconnect(con)
 
     # Connect as test user and do insert, update etc.
     # and finally drop the table.
     connect_as_test_user()
-    create_table()
-    insert_values()
-    update_values()
+    @test create_table()
+    @test insert_values()
+    @test update_values()
 #   Subsequent queries fail after multi statement, need to debug.
     do_multi_statement()
-    show_as_dataframe()
-    drop_table()
+    show_results()
+    @test drop_table()
     mysql_disconnect(con)
 
     # Drop the test user and database.
     connect_as_root()
-    drop_test_user()
-    drop_test_database()
+    @test drop_test_user()
+    @test drop_test_database()
     mysql_disconnect(con)
 end
 
@@ -149,6 +149,7 @@ function test_helper()
     try
         run_test()
     catch err
+        println("\n *** Test Failed: Cleaning up...")
         cleanup()
         throw(err)
     end

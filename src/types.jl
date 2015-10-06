@@ -15,6 +15,8 @@ The record that would be returned by mysql_fetch_row API.
 """
 typealias MYSQL_ROW Ptr{Ptr{Cchar}} # pointer to an array of strings
 
+typealias MYSQL_TYPE Cuint
+
 """
 The field object that contains the metadata of the table. 
 Returned by mysql_fetch_fields API.
@@ -180,3 +182,16 @@ type MYSQL_STMT
     update_max_length::Cint
     extension::Ptr{Cuchar}
 end
+
+"""
+Iterator for the mysql result (MYSQL_RES).
+"""
+type MySQLRowIterator
+    result::MYSQL_RES
+    row::Array{Any}
+    mysqlfield_types::Array{MYSQL_TYPE}
+    rowsleft::Int64
+end
+
+export MYSQL, MYSQL_RES, MYSQL_ROW, MYSQL_TYPE, MYSQL_FIELD, MySQLRowIterator,
+       MYSQL_STMT, MYSQL_TIME, MYSQL_BIND
