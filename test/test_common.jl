@@ -9,7 +9,7 @@ function run_query_helper(command, msg)
 end
 
 function connect_as_root()
-    global con = mysql_init_and_connect(HOST, "root", ROOTPASS, "")
+    global con = mysql_connect(HOST, "root", ROOTPASS, "")
 end
 
 function create_test_database()
@@ -28,7 +28,7 @@ function grant_test_user_privilege()
 end
 
 function connect_as_test_user()
-    global con = mysql_init_and_connect(HOST, "test", "test", "mysqltest")
+    global con = mysql_connect(HOST, "test", "test", "mysqltest")
 end
 
 function create_table()

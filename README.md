@@ -18,7 +18,7 @@ Pkg.clone("https://github.com/JuliaComputing/MySQL.jl")
 Connect to the MySQL server:
 ```
 using MySQL
-con = mysql_init_and_connect(HOST, USER, PASSWD, DBNAME)
+con = mysql_connect(HOST, USER, PASSWD, DBNAME)
 ```
 
 Create/Insert/Update etc:
