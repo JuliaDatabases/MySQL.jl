@@ -10,15 +10,15 @@ function run_query_helper(command, msg)
     end
 
     response = mysql_stmt_prepare(stmt, command)
-    mysql_display_error(con, response != 0,
+    mysql_display_error(con, response,
                         "Error occured while preparing statement for query \"$command\"")
 
     response = mysql_stmt_execute(stmt)
-    mysql_display_error(con, response != 0,
+    mysql_display_error(con, response,
                         "Error occured while executing prepared statement for query \"$command\"")
 
     response = mysql_stmt_close(stmt)
-    mysql_display_error(con, response != 0,
+    mysql_display_error(con, response,
                         "Error occured while closing prepared statement for query \"$command\"")
 
     println("Success: " * msg)
@@ -35,7 +35,7 @@ function show_results()
     end
 
     response = mysql_stmt_prepare(stmt, command)
-    mysql_display_error(con, response != 0,
+    mysql_display_error(con, response,
                         "Error occured while preparing statement for query \"$command\"")
 
     dframe = mysql_stmt_result_to_dataframe(stmt)

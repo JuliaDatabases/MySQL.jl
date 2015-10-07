@@ -57,7 +57,7 @@ If query is not a select query then return the number of affected rows.
 """
 function mysql_execute_query(con::MYSQL, command::String, opformat=MYSQL_DATA_FRAME)
     response = mysql_query(con, command)
-    mysql_display_error(con, response != 0,
+    mysql_display_error(con, response,
                         "Error occured while executing mysql_query on \"$command\"")
 
     result = mysql_store_result(con)
@@ -86,7 +86,7 @@ function mysql_execute_multi_query(con::MYSQL, command::String, opformat=MYSQL_D
     mysql_autocommit(con, convert(Int8, 0))
 
     response = mysql_query(con, command)
-    mysql_display_error(con, response != 0,
+    mysql_display_error(con, response,
                         "Error occured while executing mysql_query on \"$command\"")
 
     result = mysql_store_result(con)
@@ -119,12 +119,16 @@ end
 A handy function to display the `mysql_error` message along with a user message `msg` through `error`
  when `condition` is true.
 """
-function mysql_display_error(con, condition, msg)
+function mysql_display_error(con, condition::Bool, msg)
     if (condition)
         err_string = msg * "\nMySQL ERROR: " * bytestring(mysql_error(con))
         error(err_string)
     end
 end
+
+mysql_display_error(con, condition::Bool) = mysql_display_error(con, condition, "")
+mysql_display_error(con, response, msg) = mysql_display_error(con, response != 0, msg)
+mysql_display_error(con, response) = mysql_display_error(con, response != 0, "")
 
 """
 Given a prepared statement pointer `stmtptr` returns a dataframe containing the results.
@@ -137,7 +141,7 @@ function mysql_stmt_result_to_dataframe(stmtptr::Ptr{MYSQL_STMT})
                         "Error occured while retrieving metadata")
 
     response = mysql_stmt_execute(stmtptr)
-    mysql_display_error(stmt.mysql, response != 0,
+    mysql_display_error(stmt.mysql, response,
                         "Error occured while executing prepared statement")
 
     retval = mysql_stmt_result_to_dataframe(metadata, stmtptr)
