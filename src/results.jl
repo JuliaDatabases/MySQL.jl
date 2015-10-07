@@ -333,7 +333,7 @@ function mysql_stmt_result_to_dataframe(metadata::MYSQL_RES, stmtptr::Ptr{MYSQL_
     
     jfield_types = Array(DataType, nfields)
     field_headers = Array(Symbol, nfields)
-    mysqlfield_types = Array(Uint32, nfields)
+    mysqlfield_types = Array(MYSQL_TYPE, nfields)
     
     mysql_bindarr = Array(MYSQL_BIND, nfields)
 
@@ -346,15 +346,13 @@ function mysql_stmt_result_to_dataframe(metadata::MYSQL_RES, stmtptr::Ptr{MYSQL_
     
         buffer_length::Culong = zero(Culong)
         buffer_type = convert(Cint, mysqlfield_types[i])
-
         bindbuff = C_NULL
+        ctype = jfield_types[i]
 
-        if jfield_types[i] == String
+        if (ctype == String && mysqlfield_types[i] != MYSQL_TYPES.MYSQL_TYPE_TIME)
             buffer_length = field_length
             bindbuff = pointer(Array(Cuchar, field_length))
         else
-            ctype = jfield_types[i]
-
             if (mysqlfield_types[i] == MYSQL_TYPES.MYSQL_TYPE_DATE ||
                 mysqlfield_types[i] == MYSQL_TYPES.MYSQL_TYPE_TIME ||
                 mysqlfield_types[i] == MYSQL_TYPES.MYSQL_TYPE_DATETIME)
@@ -366,26 +364,21 @@ function mysql_stmt_result_to_dataframe(metadata::MYSQL_RES, stmtptr::Ptr{MYSQL_
         end
 
         mysql_bindarr[i] = MYSQL_BIND(reinterpret(Ptr{Void}, bindbuff),
-                               buffer_length, buffer_type)
+                                      buffer_length, buffer_type)
 
     end # end for
     
     df = DataFrame(jfield_types, field_headers, nrows)
     response = mysql_stmt_bind_result(stmtptr, reinterpret(Ptr{MYSQL_BIND},
-                                                           pointer(mysql_bindarr)))
+                                      pointer(mysql_bindarr)))
     if (response != 0)
-        println("the error after bind result is ::: $(bytestring(mysql_stmt_error(stmtptr)))")
-        return df
+        error("Failed to bind results")
     end
 
     for row = 1:nrows
         result = mysql_stmt_fetch(stmtptr)
-        if (result == C_NULL)
-            println("Could not fetch row ::: $(bytestring(mysql_stmt_error(stmtptr)))")
-            return df
-        else
-            stmt_populate_row!(df, mysqlfield_types, row, mysql_bindarr)
-        end
+        stmt_populate_row!(df, mysqlfield_types, row, mysql_bindarr)
     end
+
     return df
 end
