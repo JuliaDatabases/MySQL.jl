@@ -253,58 +253,64 @@ end
 
 """
 Populate a row in the dataframe `df` indexed by `row` given the number of fields `nfields`,
- the type of each field `mysqlfield_types` and an array `jbindarr` to which the results are bound.
+ the type of each field `mysqlfield_types` and an array `bindarr` to which the results are bound.
 """
-function stmt_populate_row!(df, mysqlfield_types::Array{MYSQL_TYPE}, row, jbindarr)
+function stmt_populate_row!(df, mysqlfield_types::Array{MYSQL_TYPE}, row, bindarr)
     for i = 1:length(mysqlfield_types)
+        buffer = bindarr[i].buffer
+
         if (mysqlfield_types[i] == MYSQL_TYPES.MYSQL_TYPE_BIT)
-            value = unsafe_load(jbindarr[i].buffer_bit, 1)
+            buffptr = reinterpret(Ptr{Cuchar}, buffer)
 
         elseif (mysqlfield_types[i] == MYSQL_TYPES.MYSQL_TYPE_TINY ||
                 mysqlfield_types[i] == MYSQL_TYPES.MYSQL_TYPE_ENUM)
-            value = unsafe_load(jbindarr[i].buffer_tiny, 1)
+            buffptr = reinterpret(Ptr{Cchar}, buffer)
 
         elseif (mysqlfield_types[i] == MYSQL_TYPES.MYSQL_TYPE_SHORT)
-            value = unsafe_load(jbindarr[i].buffer_short, 1)
+            buffptr = reinterpret(Ptr{Cshort}, buffer)
 
         elseif (mysqlfield_types[i] == MYSQL_TYPES.MYSQL_TYPE_LONG ||
                 mysqlfield_types[i] == MYSQL_TYPES.MYSQL_TYPE_INT24)
-            value = unsafe_load(jbindarr[i].buffer_int, 1)
+            buffptr = reinterpret(Ptr{Cint}, buffer)
 
         elseif (mysqlfield_types[i] == MYSQL_TYPES.MYSQL_TYPE_LONGLONG)
-            value = unsafe_load(jbindarr[i].buffer_long, 1)
+            buffptr = reinterpret(Ptr{Clong}, buffer)
 
         elseif (mysqlfield_types[i] == MYSQL_TYPES.MYSQL_TYPE_DECIMAL ||
                 mysqlfield_types[i] == MYSQL_TYPES.MYSQL_TYPE_NEWDECIMAL ||
                 mysqlfield_types[i] == MYSQL_TYPES.MYSQL_TYPE_DOUBLE)
-            value = unsafe_load(jbindarr[i].buffer_double, 1)
+            buffptr = reinterpret(Ptr{Cdouble}, buffer)
 
         elseif (mysqlfield_types[i] == MYSQL_TYPES.MYSQL_TYPE_FLOAT)
-            value = unsafe_load(jbindarr[i].buffer_float, 1)
+            buffptr = reinterpret(Ptr{Cfloat}, buffer)
 
         elseif (mysqlfield_types[i] == MYSQL_TYPES.MYSQL_TYPE_DATETIME)
-            mysql_time = unsafe_load(jbindarr[i].buffer_datetime, 1)
-            if (mysql_time.year != 0)   ## to handle invalid data like 0000-00-00T00:00:00
-                value = DateTime(mysql_time.year, mysql_time.month, mysql_time.day,
-                                 mysql_time.hour, mysql_time.minute, mysql_time.second)
-            else
-                value = DateTime()
-            end
+            buffptr = reinterpret(Ptr{MYSQL_TIME}, buffer)
 
         elseif (mysqlfield_types[i] == MYSQL_TYPES.MYSQL_TYPE_DATE)
-            mysql_date = unsafe_load(jbindarr[i].buffer_date, 1)
-            if (mysql_date.year != 0)   ## to handle invalid data like 0000-00-00
-                value = Date(mysql_date.year, mysql_date.month, mysql_date.day)
-            else
-                value = Date()
-            end
+            buffptr = reinterpret(Ptr{MYSQL_TIME}, buffer)
 
         elseif (mysqlfield_types[i] == MYSQL_TYPES.MYSQL_TYPE_TIME)
-            mysql_time = unsafe_load(jbindarr[i].buffer_time, 1)
-            value = "$(mysql_time.hour):$(mysql_time.minute):$(mysql_time.second)"
+            buffptr = reinterpret(Ptr{MYSQL_TIME}, buffer)
 
         else
-            value = bytestring(jbindarr[i].buffer_string)
+            buffptr = reinterpret(Ptr{Cchar}, buffer)
+            value = bytestring(buffptr)
+            df[row, i] = value
+            continue
+        end
+
+        value = unsafe_load(buffptr, 1)
+
+        if (mysqlfield_types[i] == MYSQL_TYPES.MYSQL_TYPE_DATETIME)
+            value = DateTime(value.year, value.month, value.day,
+                             value.hour, value.minute, value.second)
+
+        elseif (mysqlfield_types[i] == MYSQL_TYPES.MYSQL_TYPE_DATE)
+            value = Date(value.year, value.month, value.day)
+
+        elseif (mysqlfield_types[i] == MYSQL_TYPES.MYSQL_TYPE_TIME)
+            value = "$(value.hour):$(value.minute):$(value.second)"
 
         end
 
@@ -328,7 +334,6 @@ function mysql_stmt_result_to_dataframe(metadata::MYSQL_RES, stmtptr::Ptr{MYSQL_
     mysqlfield_types = Array(Uint32, nfields)
     
     mysql_bindarr = Array(MYSQL_BIND, nfields)
-    jbindarr = Array(MYSQL_JULIA_BIND, nfields)
 
     for i = 1:nfields
         mysql_field = unsafe_load(fields, i)
@@ -337,51 +342,50 @@ function mysql_stmt_result_to_dataframe(metadata::MYSQL_RES, stmtptr::Ptr{MYSQL_
         mysqlfield_types[i] = mysql_field.field_type
         field_length = mysql_field.field_length
     
-        buffer_length::Culong = 0
-        buffer_type::Cint = mysqlfield_types[i]
+        buffer_length::Culong = zero(Culong)
+        buffer_type = convert(Cint, mysqlfield_types[i])
 
-        jbind = MYSQL_JULIA_BIND(field_length)
         bindbuff = C_NULL
         
         if (mysqlfield_types[i] == MYSQL_TYPES.MYSQL_TYPE_LONGLONG ||
             mysqlfield_types[i] == MYSQL_TYPES.MYSQL_TYPE_INT24)
             buffer_length = sizeof(Clong)
-            bindbuff = jbind.buffer_long
+            bindbuff = pointer(Array(Clong))
 
         elseif (mysqlfield_types[i] == MYSQL_TYPES.MYSQL_TYPE_BIT)
             buffer_length = sizeof(Cuchar)
-            bindbuff = jbind.buffer_bit
+            bindbuff = pointer(Array(Cuchar))
 
         elseif (mysqlfield_types[i] == MYSQL_TYPES.MYSQL_TYPE_TINY)
             buffer_length = sizeof(Cuchar)
-            bindbuff = jbind.buffer_tiny
+            bindbuff = pointer(Array(Cuchar))
 
         elseif (mysqlfield_types[i] == MYSQL_TYPES.MYSQL_TYPE_SHORT)
             buffer_length = sizeof(Cshort)
-            bindbuff = jbind.buffer_short
+            bindbuff = pointer(Array(Cshort))
 
         elseif (mysqlfield_types[i] == MYSQL_TYPES.MYSQL_TYPE_ENUM ||
                 mysqlfield_types[i] == MYSQL_TYPES.MYSQL_TYPE_LONG)
             buffer_length = sizeof(Cint)
-            bindbuff = jbind.buffer_int
+            bindbuff = pointer(Array(Cint))
 
         elseif (mysqlfield_types[i] == MYSQL_TYPES.MYSQL_TYPE_DECIMAL ||
                 mysqlfield_types[i] == MYSQL_TYPES.MYSQL_TYPE_NEWDECIMAL ||
                 mysqlfield_types[i] == MYSQL_TYPES.MYSQL_TYPE_DOUBLE)
             buffer_length = sizeof(Cdouble)
-            bindbuff = jbind.buffer_double
+            bindbuff = pointer(Array(Cdouble))
 
         elseif (mysqlfield_types[i] == MYSQL_TYPES.MYSQL_TYPE_FLOAT)
             buffer_length = sizeof(Cfloat)
-            bindbuff = jbind.buffer_float
+            bindbuff = pointer(Array(Cfloat))
 
         elseif (mysqlfield_types[i] == MYSQL_TYPES.MYSQL_TYPE_DATE)
             buffer_length = sizeof(MYSQL_TIME)
-            bindbuff = jbind.buffer_date
+            bindbuff = pointer(Array(MYSQL_TIME))
 
         elseif (mysqlfield_types[i] == MYSQL_TYPES.MYSQL_TYPE_TIME)
             buffer_length = sizeof(MYSQL_TIME)
-            bindbuff = jbind.buffer_time
+            bindbuff = pointer(Array(MYSQL_TIME))
 
         elseif (mysqlfield_types[i] == MYSQL_TYPES.MYSQL_TYPE_NULL ||
                 mysqlfield_types[i] == MYSQL_TYPES.MYSQL_TYPE_TIMESTAMP ||
@@ -394,33 +398,32 @@ function mysql_stmt_result_to_dataframe(metadata::MYSQL_RES, stmtptr::Ptr{MYSQL_
             # WARNING:::Please handle me !!!!!
             ### TODO ::: This needs to be handled differently !!!!
             buffer_length = field_length
-            bindbuff = jbind.buffer_string
+            bindbuff = pointer(Array(Cuchar, field_length))
 
         elseif (mysqlfield_types[i] == MYSQL_TYPES.MYSQL_TYPE_YEAR)
             buffer_length = sizeof(Clong)
-            bindbuff = jbind.buffer_long
+            bindbuff = pointer(Array(Clong))
 
         elseif (mysqlfield_types[i] == MYSQL_TYPES.MYSQL_TYPE_DATETIME)
             buffer_length = sizeof(MYSQL_TIME)
-            bindbuff = jbind.buffer_datetime
+            bindbuff = pointer(Array(MYSQL_TIME))
 
         elseif (mysqlfield_types[i] == MYSQL_TYPES.MYSQL_TYPE_VARCHAR ||
                 mysqlfield_types[i] == MYSQL_TYPES.MYSQL_TYPE_VAR_STRING ||
                 mysqlfield_types[i] == MYSQL_TYPES.MYSQL_TYPE_STRING)
             buffer_length = field_length
-            bindbuff = jbind.buffer_string
+            bindbuff = pointer(Array(Cuchar, field_length))
 
         else
             buffer_length = field_length
-            bindbuff = jbind.buffer_string
+            bindbuff = pointer(Array(Cuchar, field_length))
 
         end
         
         mysqlbind = MYSQL_BIND(reinterpret(Ptr{Void}, bindbuff),
-                          buffer_length, buffer_type)
+                               buffer_length, buffer_type)
 
         mysql_bindarr[i] = mysqlbind
-        jbindarr[i] = jbind
     end # end for
     
     df = DataFrame(jfield_types, field_headers, nrows)
@@ -437,7 +440,7 @@ function mysql_stmt_result_to_dataframe(metadata::MYSQL_RES, stmtptr::Ptr{MYSQL_
             println("Could not fetch row ::: $(bytestring(mysql_stmt_error(stmtptr)))")
             return df
         else
-            stmt_populate_row!(df, mysqlfield_types, row, jbindarr)
+            stmt_populate_row!(df, mysqlfield_types, row, mysql_bindarr)
         end
     end
     return df

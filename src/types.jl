@@ -61,38 +61,6 @@ immutable MYSQL_TIME
 end
 
 """
-Support for prepared statement related APIs.
-"""
-immutable MYSQL_JULIA_BIND
-# This should be a Union
-    buffer_bit::Ptr{Cuchar}
-    buffer_tiny::Ptr{Cchar}
-    buffer_short::Ptr{Cshort}
-    buffer_int::Ptr{Cint}
-    buffer_long::Ptr{Clong}
-    buffer_float::Ptr{Cfloat}
-    buffer_double::Ptr{Cdouble}
-    buffer_string::Ptr{Cuchar}
-    buffer_datetime::Ptr{MYSQL_TIME}
-    buffer_date::Ptr{MYSQL_TIME}
-    buffer_time::Ptr{MYSQL_TIME}
-
-    function MYSQL_JULIA_BIND(buff_str_len)
-        new(pointer(Array(Cuchar)),
-            pointer(Array(Cchar)),
-            pointer(Array(Cshort)),
-            pointer(Array(Cint)),
-            pointer(Array(Clong)),
-            pointer(Array(Cfloat)),
-            pointer(Array(Cdouble)),
-            pointer(Array(Cuchar, buff_str_len)), # buffer_string
-            pointer(Array(MYSQL_TIME)),
-            pointer(Array(MYSQL_TIME)),
-            pointer(Array(MYSQL_TIME)), )
-    end
-end
-
-"""
 Mirror to MYSQL_BIND struct in mysql_bind.h
 """
 immutable MYSQL_BIND
