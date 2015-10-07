@@ -28,9 +28,11 @@ function mysql_get_julia_type(mysqltype::MYSQL_TYPE)
     elseif (mysqltype == MYSQL_TYPES.MYSQL_TYPE_LONGLONG)
         return Clong
 
+    elseif (mysqltype == MYSQL_TYPES.MYSQL_TYPE_FLOAT)
+        return Cfloat
+
     elseif (mysqltype == MYSQL_TYPES.MYSQL_TYPE_DECIMAL ||
             mysqltype == MYSQL_TYPES.MYSQL_TYPE_NEWDECIMAL ||
-            mysqltype == MYSQL_TYPES.MYSQL_TYPE_FLOAT ||
             mysqltype == MYSQL_TYPES.MYSQL_TYPE_DOUBLE)
         return Cdouble
 
@@ -73,7 +75,7 @@ function mysql_interpret_field(strval::String, jtype::DataType)
         return convert(Cuchar, strval[1])
 
     elseif (jtype == Cchar || jtype == Cshort || jtype == Cint ||
-            jtype == Clong || jtype == Cdouble)
+            jtype == Clong || jtype == Cfloat || jtype == Cdouble)
         return parse(jtype, strval)
 
     elseif (jtype == Date)
@@ -346,84 +348,26 @@ function mysql_stmt_result_to_dataframe(metadata::MYSQL_RES, stmtptr::Ptr{MYSQL_
         buffer_type = convert(Cint, mysqlfield_types[i])
 
         bindbuff = C_NULL
-        
-        if (mysqlfield_types[i] == MYSQL_TYPES.MYSQL_TYPE_LONGLONG ||
-            mysqlfield_types[i] == MYSQL_TYPES.MYSQL_TYPE_INT24)
-            buffer_length = sizeof(Clong)
-            bindbuff = pointer(Array(Clong))
 
-        elseif (mysqlfield_types[i] == MYSQL_TYPES.MYSQL_TYPE_BIT)
-            buffer_length = sizeof(Cuchar)
-            bindbuff = pointer(Array(Cuchar))
-
-        elseif (mysqlfield_types[i] == MYSQL_TYPES.MYSQL_TYPE_TINY)
-            buffer_length = sizeof(Cuchar)
-            bindbuff = pointer(Array(Cuchar))
-
-        elseif (mysqlfield_types[i] == MYSQL_TYPES.MYSQL_TYPE_SHORT)
-            buffer_length = sizeof(Cshort)
-            bindbuff = pointer(Array(Cshort))
-
-        elseif (mysqlfield_types[i] == MYSQL_TYPES.MYSQL_TYPE_ENUM ||
-                mysqlfield_types[i] == MYSQL_TYPES.MYSQL_TYPE_LONG)
-            buffer_length = sizeof(Cint)
-            bindbuff = pointer(Array(Cint))
-
-        elseif (mysqlfield_types[i] == MYSQL_TYPES.MYSQL_TYPE_DECIMAL ||
-                mysqlfield_types[i] == MYSQL_TYPES.MYSQL_TYPE_NEWDECIMAL ||
-                mysqlfield_types[i] == MYSQL_TYPES.MYSQL_TYPE_DOUBLE)
-            buffer_length = sizeof(Cdouble)
-            bindbuff = pointer(Array(Cdouble))
-
-        elseif (mysqlfield_types[i] == MYSQL_TYPES.MYSQL_TYPE_FLOAT)
-            buffer_length = sizeof(Cfloat)
-            bindbuff = pointer(Array(Cfloat))
-
-        elseif (mysqlfield_types[i] == MYSQL_TYPES.MYSQL_TYPE_DATE)
-            buffer_length = sizeof(MYSQL_TIME)
-            bindbuff = pointer(Array(MYSQL_TIME))
-
-        elseif (mysqlfield_types[i] == MYSQL_TYPES.MYSQL_TYPE_TIME)
-            buffer_length = sizeof(MYSQL_TIME)
-            bindbuff = pointer(Array(MYSQL_TIME))
-
-        elseif (mysqlfield_types[i] == MYSQL_TYPES.MYSQL_TYPE_NULL ||
-                mysqlfield_types[i] == MYSQL_TYPES.MYSQL_TYPE_TIMESTAMP ||
-                mysqlfield_types[i] == MYSQL_TYPES.MYSQL_TYPE_SET ||
-                mysqlfield_types[i] == MYSQL_TYPES.MYSQL_TYPE_TINY_BLOB ||
-                mysqlfield_types[i] == MYSQL_TYPES.MYSQL_TYPE_MEDIUM_BLOB ||
-                mysqlfield_types[i] == MYSQL_TYPES.MYSQL_TYPE_LONG_BLOB ||
-                mysqlfield_types[i] == MYSQL_TYPES.MYSQL_TYPE_BLOB ||
-                mysqlfield_types[i] == MYSQL_TYPES.MYSQL_TYPE_GEOMETRY)
-            # WARNING:::Please handle me !!!!!
-            ### TODO ::: This needs to be handled differently !!!!
+        if jfield_types[i] == String
             buffer_length = field_length
             bindbuff = pointer(Array(Cuchar, field_length))
-
-        elseif (mysqlfield_types[i] == MYSQL_TYPES.MYSQL_TYPE_YEAR)
-            buffer_length = sizeof(Clong)
-            bindbuff = pointer(Array(Clong))
-
-        elseif (mysqlfield_types[i] == MYSQL_TYPES.MYSQL_TYPE_DATETIME)
-            buffer_length = sizeof(MYSQL_TIME)
-            bindbuff = pointer(Array(MYSQL_TIME))
-
-        elseif (mysqlfield_types[i] == MYSQL_TYPES.MYSQL_TYPE_VARCHAR ||
-                mysqlfield_types[i] == MYSQL_TYPES.MYSQL_TYPE_VAR_STRING ||
-                mysqlfield_types[i] == MYSQL_TYPES.MYSQL_TYPE_STRING)
-            buffer_length = field_length
-            bindbuff = pointer(Array(Cuchar, field_length))
-
         else
-            buffer_length = field_length
-            bindbuff = pointer(Array(Cuchar, field_length))
+            ctype = jfield_types[i]
 
+            if (mysqlfield_types[i] == MYSQL_TYPES.MYSQL_TYPE_DATE ||
+                mysqlfield_types[i] == MYSQL_TYPES.MYSQL_TYPE_TIME ||
+                mysqlfield_types[i] == MYSQL_TYPES.MYSQL_TYPE_DATETIME)
+                ctype = MYSQL_TIME
+            end
+
+            buffer_length = sizeof(ctype)
+            bindbuff = pointer(Array(ctype))
         end
-        
-        mysqlbind = MYSQL_BIND(reinterpret(Ptr{Void}, bindbuff),
+
+        mysql_bindarr[i] = MYSQL_BIND(reinterpret(Ptr{Void}, bindbuff),
                                buffer_length, buffer_type)
 
-        mysql_bindarr[i] = mysqlbind
     end # end for
     
     df = DataFrame(jfield_types, field_headers, nrows)
