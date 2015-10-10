@@ -47,13 +47,13 @@ Obtain SELECT results as dataframe:
 command = """SELECT * FROM Employee;"""
 dframe = execute_query(con, command)
 ```
-The `execute_query()` API will take care of handling errors and freeing the memory allocated to the results.
+The `mysql_execute_query()` API will take care of handling errors and freeing the memory allocated to the results.
 
 Obtain SELECT results as julia Array:
 
 ```
 command = """SELECT * FROM Employee;"""
-retarr = execute_query(con, command, opformat=MYSQL_ARRAY)
+retarr = mysql_execute_query(con, command, opformat=MYSQL_ARRAY)
 ```
 
 Iterate over rows:
