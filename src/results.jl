@@ -68,6 +68,23 @@ function mysql_get_julia_type(mysqltype::MYSQL_TYPE)
 end
 
 """
+Get the C type that would be needed when using prepared statement.
+"""
+function mysql_get_ctype(jtype::DataType, mysqltype::MYSQL_TYPE)
+    if (mysqltype == MYSQL_TYPES.MYSQL_TYPE_TIMESTAMP ||
+        mysqltype == MYSQL_TYPES.MYSQL_TYPE_TIME ||
+        mysqltype == MYSQL_TYPES.MYSQL_TYPE_DATE ||
+        mysqltype == MYSQL_TYPES.MYSQL_TYPE_DATETIME)
+        return MYSQL_TIME
+    end
+
+    return jtype
+end
+
+mysql_get_ctype(mysqltype::MYSQL_TYPE) = mysql_get_ctype(mysql_get_julia_type(mysqltype),
+                                                           mysqltype)
+
+"""
 Interpret a string as a julia datatype.
 """
 function mysql_interpret_field(strval::String, jtype::DataType)
@@ -253,6 +270,33 @@ function mysql_result_to_dataframe(result::MYSQL_RES)
     return df
 end
 
+function mysql_binary_interpret_field(buffer::Ptr{Void}, mysqltype)
+    ctype = mysql_get_ctype(mysqltype)
+
+    if (ctype == String)
+        buffptr = reinterpret(Ptr{Cchar}, buffer)
+        value = bytestring(buffptr)
+        return value
+    end
+
+    buffptr = reinterpret(Ptr{ctype}, buffer)
+    value = unsafe_load(buffptr, 1)
+
+    if (mysqltype == MYSQL_TYPES.MYSQL_TYPE_DATETIME)
+        value = DateTime(value.year, value.month, value.day,
+                         value.hour, value.minute, value.second)
+
+    elseif (mysqltype == MYSQL_TYPES.MYSQL_TYPE_DATE)
+        value = Date(value.year, value.month, value.day)
+
+    elseif (mysqltype == MYSQL_TYPES.MYSQL_TYPE_TIME)
+        value = "$(value.hour):$(value.minute):$(value.second)"
+
+    end
+
+    return value
+end
+
 """
 Populate a row in the dataframe `df` indexed by `row` given the number of fields `nfields`,
  the type of each field `mysqlfield_types` and an array `bindarr` to which the results are bound.
@@ -260,63 +304,7 @@ Populate a row in the dataframe `df` indexed by `row` given the number of fields
 function stmt_populate_row!(df, mysqlfield_types::Array{MYSQL_TYPE}, row, bindarr)
     for i = 1:length(mysqlfield_types)
         buffer = bindarr[i].buffer
-
-        if (mysqlfield_types[i] == MYSQL_TYPES.MYSQL_TYPE_BIT)
-            buffptr = reinterpret(Ptr{Cuchar}, buffer)
-
-        elseif (mysqlfield_types[i] == MYSQL_TYPES.MYSQL_TYPE_TINY ||
-                mysqlfield_types[i] == MYSQL_TYPES.MYSQL_TYPE_ENUM)
-            buffptr = reinterpret(Ptr{Cchar}, buffer)
-
-        elseif (mysqlfield_types[i] == MYSQL_TYPES.MYSQL_TYPE_SHORT)
-            buffptr = reinterpret(Ptr{Cshort}, buffer)
-
-        elseif (mysqlfield_types[i] == MYSQL_TYPES.MYSQL_TYPE_LONG ||
-                mysqlfield_types[i] == MYSQL_TYPES.MYSQL_TYPE_INT24)
-            buffptr = reinterpret(Ptr{Cint}, buffer)
-
-        elseif (mysqlfield_types[i] == MYSQL_TYPES.MYSQL_TYPE_LONGLONG)
-            buffptr = reinterpret(Ptr{Clong}, buffer)
-
-        elseif (mysqlfield_types[i] == MYSQL_TYPES.MYSQL_TYPE_DECIMAL ||
-                mysqlfield_types[i] == MYSQL_TYPES.MYSQL_TYPE_NEWDECIMAL ||
-                mysqlfield_types[i] == MYSQL_TYPES.MYSQL_TYPE_DOUBLE)
-            buffptr = reinterpret(Ptr{Cdouble}, buffer)
-
-        elseif (mysqlfield_types[i] == MYSQL_TYPES.MYSQL_TYPE_FLOAT)
-            buffptr = reinterpret(Ptr{Cfloat}, buffer)
-
-        elseif (mysqlfield_types[i] == MYSQL_TYPES.MYSQL_TYPE_DATETIME)
-            buffptr = reinterpret(Ptr{MYSQL_TIME}, buffer)
-
-        elseif (mysqlfield_types[i] == MYSQL_TYPES.MYSQL_TYPE_DATE)
-            buffptr = reinterpret(Ptr{MYSQL_TIME}, buffer)
-
-        elseif (mysqlfield_types[i] == MYSQL_TYPES.MYSQL_TYPE_TIME)
-            buffptr = reinterpret(Ptr{MYSQL_TIME}, buffer)
-
-        else
-            buffptr = reinterpret(Ptr{Cchar}, buffer)
-            value = bytestring(buffptr)
-            df[row, i] = value
-            continue
-        end
-
-        value = unsafe_load(buffptr, 1)
-
-        if (mysqlfield_types[i] == MYSQL_TYPES.MYSQL_TYPE_DATETIME)
-            value = DateTime(value.year, value.month, value.day,
-                             value.hour, value.minute, value.second)
-
-        elseif (mysqlfield_types[i] == MYSQL_TYPES.MYSQL_TYPE_DATE)
-            value = Date(value.year, value.month, value.day)
-
-        elseif (mysqlfield_types[i] == MYSQL_TYPES.MYSQL_TYPE_TIME)
-            value = "$(value.hour):$(value.minute):$(value.second)"
-
-        end
-
-        df[row, i] = value
+        df[row, i] = mysql_binary_interpret_field(buffer, mysqlfield_types[i])
     end    
 end
 
@@ -347,18 +335,12 @@ function mysql_stmt_result_to_dataframe(metadata::MYSQL_RES, stmtptr::Ptr{MYSQL_
         buffer_length::Culong = zero(Culong)
         buffer_type = convert(Cint, mysqlfield_types[i])
         bindbuff = C_NULL
-        ctype = jfield_types[i]
+        ctype = mysql_get_ctype(jfield_types[i], mysql_field.field_type)
 
-        if (ctype == String && mysqlfield_types[i] != MYSQL_TYPES.MYSQL_TYPE_TIME)
+        if (ctype == String)
             buffer_length = field_length
             bindbuff = pointer(Array(Cuchar, field_length))
         else
-            if (mysqlfield_types[i] == MYSQL_TYPES.MYSQL_TYPE_DATE ||
-                mysqlfield_types[i] == MYSQL_TYPES.MYSQL_TYPE_TIME ||
-                mysqlfield_types[i] == MYSQL_TYPES.MYSQL_TYPE_DATETIME)
-                ctype = MYSQL_TIME
-            end
-
             buffer_length = sizeof(ctype)
             bindbuff = pointer(Array(ctype))
         end
