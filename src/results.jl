@@ -81,8 +81,8 @@ function mysql_get_ctype(jtype::DataType, mysqltype::MYSQL_TYPE)
     return jtype
 end
 
-mysql_get_ctype(mysqltype::MYSQL_TYPE) = mysql_get_ctype(mysql_get_julia_type(mysqltype),
-                                                           mysqltype)
+mysql_get_ctype(mysqltype::MYSQL_TYPE) = 
+    mysql_get_ctype(mysql_get_julia_type(mysqltype), mysqltype)
 
 """
 Interpret a string as a julia datatype.
@@ -270,17 +270,14 @@ function mysql_result_to_dataframe(result::MYSQL_RES)
     return df
 end
 
-function mysql_binary_interpret_field(buffer::Ptr{Void}, mysqltype)
-    ctype = mysql_get_ctype(mysqltype)
+mysql_binary_interpret_field(buf, mysqltype) =
+    mysql_binary_interpret_field(buf, mysql_get_ctype(mysqltype), mysqltype)
 
-    if (ctype == String)
-        buffptr = reinterpret(Ptr{Cchar}, buffer)
-        value = bytestring(buffptr)
-        return value
-    end
+mysql_binary_interpret_field(buf, ::Type{String}, _) =
+    bytestring(convert(Ptr{Cchar}, buf))
 
-    buffptr = reinterpret(Ptr{ctype}, buffer)
-    value = unsafe_load(buffptr, 1)
+function mysql_binary_interpret_field(buf, T::Type, mysqltype)
+    value = unsafe_load(convert(Ptr{T}, buf), 1)
 
     if (mysqltype == MYSQL_TYPES.MYSQL_TYPE_DATETIME)
         value = DateTime(value.year, value.month, value.day,
