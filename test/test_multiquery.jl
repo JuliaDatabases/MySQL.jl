@@ -13,7 +13,7 @@ function run_test()
     INSERT INTO test_table VALUES(10);
     UPDATE test_table SET id=20 WHERE id=10;
     SELECT * FROM test_table;
-    DROP TABLE test_table
+    DROP TABLE test_table;
     DROP DATABASE test_db"""
 
     mysql_execute_multi_query(con, query)
