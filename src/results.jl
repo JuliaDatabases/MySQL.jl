@@ -300,9 +300,14 @@ Populate a row in the dataframe `df` indexed by `row` given the number of fields
 """
 function stmt_populate_row!(df, mysqlfield_types::Array{MYSQL_TYPE}, row, bindarr)
     for i = 1:length(mysqlfield_types)
+        if bindarr[i].is_null_value != 0
+            df[row, i] = NA
+            continue
+        end
+
         buffer = bindarr[i].buffer
         df[row, i] = mysql_binary_interpret_field(buffer, mysqlfield_types[i])
-    end    
+    end
 end
 
 """
@@ -336,20 +341,24 @@ function mysql_stmt_result_to_dataframe(metadata::MYSQL_RES, stmtptr::Ptr{MYSQL_
 
         if (ctype == String)
             buffer_length = field_length
-            bindbuff = pointer(Array(Cuchar, field_length))
+            bindbuff = c_malloc(field_length)
         else
             buffer_length = sizeof(ctype)
-            bindbuff = pointer(Array(ctype))
+            bindbuff = c_malloc(sizeof(ctype))
         end
 
-        mysql_bindarr[i] = MYSQL_BIND(reinterpret(Ptr{Void}, bindbuff),
-                                      buffer_length, buffer_type)
+        mysql_bindarr[i] = MYSQL_BIND(bindbuff, buffer_length, buffer_type)
+
+        # now we have to make the is_null pointer point
+        # to is_null_value in the MYSQL_BIND struct.
+        unsafe_store!(convert(Ptr{Ptr{Cchar}},
+                              pointer(mysql_bindarr, i) + 8),
+                      pointer(mysql_bindarr, i) + 103)
 
     end # end for
     
     df = DataFrame(jfield_types, field_headers, nrows)
-    response = mysql_stmt_bind_result(stmtptr, reinterpret(Ptr{MYSQL_BIND},
-                                      pointer(mysql_bindarr)))
+    response = mysql_stmt_bind_result(stmtptr, pointer(mysql_bindarr))
     if (response != 0)
         error("Failed to bind results")
     end
@@ -357,6 +366,10 @@ function mysql_stmt_result_to_dataframe(metadata::MYSQL_RES, stmtptr::Ptr{MYSQL_
     for row = 1:nrows
         result = mysql_stmt_fetch(stmtptr)
         stmt_populate_row!(df, mysqlfield_types, row, mysql_bindarr)
+    end
+
+    for i = 1:nfields
+        c_free(mysql_bindarr[i].buffer)
     end
 
     return df
