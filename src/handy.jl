@@ -8,9 +8,9 @@ function mysql_connect(host::String,
                         user::String,
                         passwd::String,
                         db::String,
-                        port::Integer = 0,
-                        unix_socket::Any = C_NULL,
-                        client_flag::Integer = 0)
+                        port::Integer,
+                        unix_socket::Any,
+                        client_flag::Integer)
 
     mysqlptr::MYSQL = C_NULL
     mysqlptr = mysql_init(mysqlptr)
@@ -26,7 +26,7 @@ function mysql_connect(host::String,
                                   db,
                                   convert(Cint, port),
                                   unix_socket,
-                                  convert(Uint64, client_flag))
+                                  convert(Culong, client_flag))
 
     if mysqlptr == C_NULL
         error("Failed to connect to MySQL database")
@@ -78,41 +78,51 @@ function mysql_execute_query(con::MYSQL, command::String, opformat=MYSQL_DATA_FR
 end
 
 """
-Same as execute query but for multi-statements.
+Returns a tuple of 2 arrays. The first, an array of affected row counts for each query that
+ was not a select. The second, an array of dataframes or arrays, depending on `opformat` for
+ each query that was a select.
 """
 function mysql_execute_multi_query(con::MYSQL, command::String, opformat=MYSQL_DATA_FRAME)
-    # Ideally, we should find out what the current auto-commit mode is
-    # before setting/unsetting it.
-    mysql_autocommit(con, convert(Int8, 0))
-
     response = mysql_query(con, command)
     mysql_display_error(con, response,
                         "Error occured while executing mysql_query on \"$command\"")
 
-    result = mysql_store_result(con)
+    affectedrows = Int[]
     
-    if (result == C_NULL)
-        affectedRows = 0
-
-        while (mysql_next_result(con) == 0)
-            affectedRows = affectedRows + mysql_affected_rows(con)
-        end
-
-        mysql_autocommit(con, convert(Int8, 1))
-        return affectedRows
-    end
-
-    mysql_autocommit(con, convert(Int8, 1))
-
-    retval = Nothing
     if opformat == MYSQL_DATA_FRAME
-        retval = mysql_result_to_dataframe(result)
-    else opformat == MYSQL_ARRAY
-        retval = mysql_get_result_as_array(result)
+        data = DataFrame[]
+    else
+        data = Any[]
     end
 
-    mysql_free_result(result)
-    return retval
+    while true
+        result = mysql_store_result(con)
+        if result != C_NULL # if select query
+            retval = Nothing
+            if opformat == MYSQL_DATA_FRAME
+                retval = mysql_result_to_dataframe(result)
+            else opformat == MYSQL_ARRAY
+                retval = mysql_get_result_as_array(result)
+            end
+            push!(data, retval)
+            mysql_free_result(result)
+
+        elseif mysql_field_count(con) == 0
+            push!(affectedrows, mysql_affected_rows(con))
+        else
+            mysql_display_error(con,
+                                "Query expected to produce results but did not.")
+        end
+        
+        status = mysql_next_result(con)
+        if status > 0
+            mysql_display_error(con, "Could not execute multi statements.")
+        elseif status == -1 # if no more results
+            break
+        end
+    end
+
+    return affectedrows, data
 end
 
 """
@@ -128,7 +138,8 @@ end
 
 mysql_display_error(con, condition::Bool) = mysql_display_error(con, condition, "")
 mysql_display_error(con, response, msg) = mysql_display_error(con, response != 0, msg)
-mysql_display_error(con, response) = mysql_display_error(con, response != 0, "")
+mysql_display_error(con, response) = mysql_display_error(con, response, "")
+mysql_display_error(con, msg::String) = mysql_display_error(con, true, msg)
 
 """
 Given a prepared statement pointer `stmtptr` returns a dataframe containing the results.

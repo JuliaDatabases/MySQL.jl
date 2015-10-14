@@ -70,12 +70,9 @@ function drop_table()
     run_query_helper(command, "Drop table")
 end
 
-function do_multi_statement()
-#    command = """INSERT INTO Employee (Name, Salary, JoinDate, LastLogin, LunchTime, OfficeNo, JobType, Senior, empno) VALUES
-    command = """INSERT INTO Employee (Name) VALUES ('');
-                 UPDATE Employee SET LunchTime = '15:00:00' WHERE LENGTH(Name) > 5;"""
-    aff_rows = mysql_execute_multi_query(con, command)
-    println("Multi query affected rows: $aff_rows")
+function insert_nullrow()
+    command = """INSERT INTO Employee () VALUES ();"""
+    run_query_helper(command, "Insert Null row")
 end
 
 function show_results()
@@ -107,8 +104,8 @@ function run_test()
     @test create_table()
     @test insert_values()
     @test update_values()
+    @test insert_nullrow()
 
-    do_multi_statement()
     show_results()
     @test drop_table()
     mysql_disconnect(con)

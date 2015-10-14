@@ -335,3 +335,11 @@ function mysql_next_result(mysqlptr::MYSQL)
                  Cint, (MYSQL_RES, ),
                  mysqlptr)
 end
+
+"""
+Returns the number of columns for the most recent query on the connection.
+"""
+function mysql_field_count(mysqlptr::MYSQL)
+    return ccall((:mysql_field_count, mysql_lib),
+                 Cuint, (MYSQL, ), mysqlptr)
+end

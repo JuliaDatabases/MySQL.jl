@@ -14,6 +14,6 @@ end
 
 println()
 
-for file in ["test_basic.jl", "test_prep.jl"]
+for file in ["test_basic.jl", "test_prep.jl", "test_multiquery.jl"]
     include(file)
 end
