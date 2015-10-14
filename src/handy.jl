@@ -41,7 +41,7 @@ as client flag options.
 """
 function mysql_connect(hostName::String, userName::String, password::String, db::String)
     return mysql_connect(hostName, userName, password, db, 0,
-                                  C_NULL, CLIENT_MULTI_STATEMENTS)
+                         C_NULL, CLIENT_MULTI_STATEMENTS)
 end
 
 """

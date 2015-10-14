@@ -2,6 +2,7 @@ module MySQL
     include("config.jl")
     include("consts.jl")
     include("types.jl")
+    include("datetime.jl")
     include("api.jl")
     include("handy.jl")
     include("results.jl")

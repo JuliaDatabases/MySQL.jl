@@ -1,7 +1,6 @@
 # Convert C pointers returned from MySQL C calls to Julia Datastructures.
 
 using DataFrames
-using Dates
 using Compat
 
 const MYSQL_DEFAULT_DATE_FORMAT = "yyyy-mm-dd"
@@ -37,8 +36,6 @@ function mysql_get_julia_type(mysqltype::MYSQL_TYPE)
         return Cdouble
 
     elseif (mysqltype == MYSQL_TYPES.MYSQL_TYPE_NULL ||
-            mysqltype == MYSQL_TYPES.MYSQL_TYPE_TIMESTAMP ||
-            mysqltype == MYSQL_TYPES.MYSQL_TYPE_TIME ||
             mysqltype == MYSQL_TYPES.MYSQL_TYPE_SET ||
             mysqltype == MYSQL_TYPES.MYSQL_TYPE_TINY_BLOB ||
             mysqltype == MYSQL_TYPES.MYSQL_TYPE_MEDIUM_BLOB ||
@@ -50,11 +47,17 @@ function mysql_get_julia_type(mysqltype::MYSQL_TYPE)
     elseif (mysqltype == MYSQL_TYPES.MYSQL_TYPE_YEAR)
         return Clong
 
+    elseif (mysqltype == MYSQL_TYPES.MYSQL_TYPE_TIMESTAMP)
+        return Cint
+
     elseif (mysqltype == MYSQL_TYPES.MYSQL_TYPE_DATE)
-        return Date
+        return MySQLDate
+
+    elseif (mysqltype == MYSQL_TYPES.MYSQL_TYPE_TIME)
+        return MySQLTime
 
     elseif (mysqltype == MYSQL_TYPES.MYSQL_TYPE_DATETIME)
-        return DateTime
+        return MySQLDateTime
 
     elseif (mysqltype == MYSQL_TYPES.MYSQL_TYPE_VARCHAR ||
             mysqltype == MYSQL_TYPES.MYSQL_TYPE_VAR_STRING ||
@@ -70,19 +73,15 @@ end
 """
 Get the C type that would be needed when using prepared statement.
 """
-function mysql_get_ctype(jtype::DataType, mysqltype::MYSQL_TYPE)
-    if (mysqltype == MYSQL_TYPES.MYSQL_TYPE_TIMESTAMP ||
-        mysqltype == MYSQL_TYPES.MYSQL_TYPE_TIME ||
-        mysqltype == MYSQL_TYPES.MYSQL_TYPE_DATE ||
-        mysqltype == MYSQL_TYPES.MYSQL_TYPE_DATETIME)
+function mysql_get_ctype(jtype::DataType)
+    if (jtype == MySQLDate || jtype == MySQLTime || jtype == MySQLDateTime)
         return MYSQL_TIME
     end
 
     return jtype
 end
 
-mysql_get_ctype(mysqltype::MYSQL_TYPE) = 
-    mysql_get_ctype(mysql_get_julia_type(mysqltype), mysqltype)
+mysql_get_ctype(mysqltype::MYSQL_TYPE) = mysql_get_ctype(mysql_get_julia_type(mysqltype))
 
 """
 Interpret a string as a julia datatype.
@@ -95,11 +94,14 @@ function mysql_interpret_field(strval::String, jtype::DataType)
             jtype == Clong || jtype == Cfloat || jtype == Cdouble)
         return parse(jtype, strval)
 
-    elseif (jtype == Date)
-        return Date(strval, MYSQL_DEFAULT_DATE_FORMAT)
+    elseif (jtype == MySQLDate)
+        return MySQLDate(strval)
 
-    elseif (jtype == DateTime)
-        return DateTime(strval, MYSQL_DEFAULT_DATETIME_FORMAT)
+    elseif (jtype == MySQLTime)
+        return MySQLTime(strval)
+
+    elseif (jtype == MySQLDateTime)
+        return MySQLDateTime(strval)
 
     else
         return strval
@@ -271,24 +273,27 @@ function mysql_result_to_dataframe(result::MYSQL_RES)
 end
 
 mysql_binary_interpret_field(buf, mysqltype) =
-    mysql_binary_interpret_field(buf, mysql_get_ctype(mysqltype), mysqltype)
+    mysql_binary_interpret_field(buf, mysql_get_ctype(mysqltype))
 
-mysql_binary_interpret_field(buf, ::Type{String}, _) =
+mysql_binary_interpret_field(buf, ::Type{String}) =
     bytestring(convert(Ptr{Cchar}, buf))
 
-function mysql_binary_interpret_field(buf, T::Type, mysqltype)
+function mysql_binary_interpret_field(buf, T::Type)
     value = unsafe_load(convert(Ptr{T}, buf), 1)
 
-    if (mysqltype == MYSQL_TYPES.MYSQL_TYPE_DATETIME)
-        value = DateTime(value.year, value.month, value.day,
-                         value.hour, value.minute, value.second)
+    if (typeof(value) == MYSQL_TIME)
+        if (value.timetype == MYSQL_TIMESTAMP_DATE)
+            return MySQLDate(value)
 
-    elseif (mysqltype == MYSQL_TYPES.MYSQL_TYPE_DATE)
-        value = Date(value.year, value.month, value.day)
+        elseif (value.timetype == MYSQL_TIMESTAMP_TIME)
+            return MySQLTime(value)
 
-    elseif (mysqltype == MYSQL_TYPES.MYSQL_TYPE_TIME)
-        value = "$(value.hour):$(value.minute):$(value.second)"
+        elseif (value.timetype == MYSQL_TIMESTAMP_DATETIME)
+            return MySQLDateTime(value)
 
+        else
+            error("MySQL Time type not recognized.")
+        end
     end
 
     return value
@@ -337,7 +342,7 @@ function mysql_stmt_result_to_dataframe(metadata::MYSQL_RES, stmtptr::Ptr{MYSQL_
         buffer_length::Culong = zero(Culong)
         buffer_type = convert(Cint, mysqlfield_types[i])
         bindbuff = C_NULL
-        ctype = mysql_get_ctype(jfield_types[i], mysql_field.field_type)
+        ctype = mysql_get_ctype(jfield_types[i])
 
         if (ctype == String)
             buffer_length = field_length
@@ -359,6 +364,7 @@ function mysql_stmt_result_to_dataframe(metadata::MYSQL_RES, stmtptr::Ptr{MYSQL_
     
     df = DataFrame(jfield_types, field_headers, nrows)
     response = mysql_stmt_bind_result(stmtptr, pointer(mysql_bindarr))
+
     if (response != 0)
         error("Failed to bind results")
     end

@@ -1,5 +1,3 @@
-using Dates
-
 """
 The MySQL handle passed to C calls.
 """
@@ -57,7 +55,27 @@ immutable MYSQL_TIME
     second::Cuint
     second_part::Culong
     neg::Cchar
-    offset::Cuint
+    timetype::Cuint
+end
+
+
+# Julia types for Time, Date and DateTime.
+
+type MySQLTime
+    hour::Cuint
+    minute::Cuint
+    second::Cuint
+end
+
+type MySQLDate
+    year::Cuint
+    month::Cuint
+    day::Cuint
+end
+
+type MySQLDateTime
+    date::MySQLDate
+    time::MySQLTime
 end
 
 """
@@ -85,22 +103,17 @@ immutable MYSQL_BIND
     extension :: Ptr{Void}
 
     function MYSQL_BIND(in_buffer::Ptr{Void}, in_buffer_length::Culong, in_buffer_type::Cint)
-        new(0, 0, in_buffer, C_NULL, C_NULL, 0, 0, 0, in_buffer_length,
-            0, 0, 0, 0, in_buffer_type, 0, 0, 0, 0, C_NULL)
-    end
+        retval = new(0, 0, in_buffer, C_NULL, C_NULL, 0, 0, 0, in_buffer_length,
+                     0, 0, 0, 0, in_buffer_type, 0, 0, 0, 0, C_NULL)
+        # Now we have to make the is_null pointer point
+        # to is_null_value in the MYSQL_BIND struct.
+        # retptr = pointer_from_objref(retval)
+        # unsafe_store!(convert(Ptr{Ptr{Cchar}}, retptr + 8), # pointer to is_null
+        #               retptr + 103)                         # pointer to is_null_value
+        # ^ This does not work, the retptr is different from the array
+        # pointer we get in results.jl
 
-    function MYSQL_BIND(in_length::Ptr{Culong}, in_is_null::Ptr{Cchar}, in_buffer::Ptr{Void}, in_error::Ptr{Cchar}, in_row_ptr::Ptr{Cuchar},
-            in_store_param_func::Ptr{Void}, in_fetch_result ::Ptr{Void}, in_skip_result ::Ptr{Void}, in_buffer_length::Culong,
-            in_offset::Culong, in_length_value::Culong, in_param_number :: Cuint, in_pack_length :: Cuint, in_buffer_type :: Cint,
-            in_error_value :: Cchar, in_is_unsigned :: Cchar, in_long_data_used :: Cchar, in_is_null_value :: Cchar,
-            in_extension :: Ptr{Void} )
-        new(in_length, in_is_null, in_buffer, in_error, in_row_ptr, in_store_param_func, in_fetch_result, in_skip_result, in_buffer_length,
-            in_offset, in_length_value, in_param_number, in_pack_length, in_buffer_type, in_error_value, in_is_unsigned, in_long_data_used, 
-            in_is_null_value, in_extension)
-    end
-
-    function MYSQL_BIND()
-        new(C_NULL, C_NULL, C_NULL, C_NULL, C_NULL, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, C_NULL)
+        return retval
     end
 end
 
