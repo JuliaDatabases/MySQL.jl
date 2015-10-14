@@ -92,28 +92,6 @@ function drop_test_database()
     run_query_helper(command, "Drop database")
 end
 
-function cleanup()
-    try
-        mysql_disconnect(con)
-    end
-
-    try
-        connect_as_root()
-    end
-
-    try
-        drop_test_user()
-    end
-
-    try
-        drop_test_database()
-    end
-
-    try
-        mysql_disconnect(con)
-    end
-end
-
 function run_test()
     # Connect as root and setup database, user and privilege
     # for the user.
@@ -129,7 +107,7 @@ function run_test()
     @test create_table()
     @test insert_values()
     @test update_values()
-#   Subsequent queries fail after multi statement, need to debug.
+
     do_multi_statement()
     show_results()
     @test drop_table()
@@ -140,17 +118,4 @@ function run_test()
     @test drop_test_user()
     @test drop_test_database()
     mysql_disconnect(con)
-end
-
-"""
-Incase of failure cleanup and throw the error that caused failure.
-"""
-function test_helper()
-    try
-        run_test()
-    catch err
-        println("\n *** Test Failed: Cleaning up...")
-        cleanup()
-        throw(err)
-    end
 end

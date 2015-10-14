@@ -44,4 +44,4 @@ function show_results()
 end
 
 println("\n*** Running Prepared Statement Test ***\n")
-test_helper()
+run_test()

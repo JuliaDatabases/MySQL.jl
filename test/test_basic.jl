@@ -38,4 +38,4 @@ function show_results()
 end
 
 println("\n*** Running Basic Test ***\n")
-test_helper()
+run_test()
