@@ -4,7 +4,7 @@ MySQL.jl
 [![Build Status](https://travis-ci.org/JuliaComputing/MySQL.jl.svg?branch=master)](https://travis-ci.org/JuliaComputing/MySQL.jl)
 
 Julia bindings and helper functions for [MariaDB](https://mariadb.org/)/MySQL C library.
-Query results can be recieved as julia arrays or as [Data Frames](https://github.com/JuliaStats/DataFrames.jl).
+Query results can be received as julia arrays or as [Data Frames](https://github.com/JuliaStats/DataFrames.jl).
 
 # Installation
 
@@ -47,13 +47,13 @@ Obtain SELECT results as dataframe:
 command = """SELECT * FROM Employee;"""
 dframe = execute_query(con, command)
 ```
-The `execute_query()` API will take care of handling errors and freeing the memory allocated to the results.
+The `mysql_execute_query()` API will take care of handling errors and freeing the memory allocated to the results.
 
 Obtain SELECT results as julia Array:
 
 ```
 command = """SELECT * FROM Employee;"""
-retarr = execute_query(con, command, opformat=MYSQL_ARRAY)
+retarr = mysql_execute_query(con, command, opformat=MYSQL_ARRAY)
 ```
 
 Iterate over rows:
@@ -98,7 +98,7 @@ aff_rows = mysql_execute_multi_query(con, command)
 println("Multi query affected rows: $aff_rows")
 ```
 
-Get dataframes using prepared statments:
+Get dataframes using prepared statements:
 
 ```
 command = """SELECT * FROM Employee;"""
