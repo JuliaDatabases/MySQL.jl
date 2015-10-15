@@ -345,8 +345,8 @@ function mysql_stmt_result_to_dataframe(metadata::MYSQL_RES, stmtptr::Ptr{MYSQL_
         ctype = mysql_get_ctype(jfield_types[i])
 
         if (ctype == String)
-            buffer_length = field_length
-            bindbuff = c_malloc(field_length)
+            buffer_length = field_length + 1
+            bindbuff = c_malloc(field_length + 1)
         else
             buffer_length = sizeof(ctype)
             bindbuff = c_malloc(sizeof(ctype))
