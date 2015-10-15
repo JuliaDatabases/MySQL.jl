@@ -343,3 +343,16 @@ function mysql_field_count(mysqlptr::MYSQL)
     return ccall((:mysql_field_count, mysql_lib),
                  Cuint, (MYSQL, ), mysqlptr)
 end
+
+"""
+This API is used to bind input data for the parameter markers in the SQL
+ statement that was passed to `mysql_stmt_prepare()`. It uses `MYSQL_BIND`
+ structures to supply the data. `bind` is the address of an array of `MYSQL_BIND`
+ structures. The client library expects the array to contain one element for
+ each ? parameter marker that is present in the query.
+"""
+function mysql_stmt_bind_param(stmt::Ptr{MYSQL_STMT}, bind::Ptr{MYSQL_BIND})
+    return ccall((:mysql_stmt_bind_param, mysql_lib),
+                 Cuchar, (Ptr{MYSQL_STMT}, Ptr{MYSQL_BIND}, ),
+                 stmt, bind)
+end

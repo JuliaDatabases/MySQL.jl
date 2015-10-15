@@ -33,6 +33,8 @@ baremodule MYSQL_TYPES
     const MYSQL_TYPE_GEOMETRY    = 255
 end
 
+export MYSQL_TYPES
+
 """
 Constant indicating whether multiple statements in queries should be supported or not.
 """
