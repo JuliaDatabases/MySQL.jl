@@ -16,10 +16,10 @@ function run_test()
     DROP TABLE test_table;
     DROP DATABASE test_db"""
 
-    mysql_execute_multi_query(con, query)
-    affrows, data = mysql_execute_multi_query(con, query)    # Run twice.
+    # Run twice: Related to an earlier bug where 2nd run was failing.
+    mysql_execute_query(con, query)
+    data = mysql_execute_query(con, query)
 
-    @show affrows
     @show data
 
     mysql_disconnect(con)

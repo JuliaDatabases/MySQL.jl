@@ -52,47 +52,24 @@ function mysql_disconnect(db::MYSQL)
 end
 
 """
-Execute a query and return results as a dataframe if the query was a select query.
-If query is not a select query then return the number of affected rows.
+A function for executing queries and getting results.
+
+In the case of multi queries returns an array of number of affected
+ rows and DataFrames. The number of affected rows correspond to the
+ non-SELECT queries and the DataFrames for the SELECT queries in the
+ multi-query.
+
+In the case of non-multi queries returns either the number of affected
+ rows for non-SELECT queries or a DataFrame for SELECT queries.
+
+By default, returns SELECT query results as DataFrames.
+ Set `opformat` to `MYSQL_ARRAY` to get results as arrays.
 """
 function mysql_execute_query(con::MYSQL, command::String, opformat=MYSQL_DATA_FRAME)
     response = mysql_query(con, command)
-    mysql_display_error(con, response,
-                        "Error occured while executing mysql_query on \"$command\"")
-
-    result = mysql_store_result(con)
-    if (result == C_NULL)
-        affectedRows = mysql_affected_rows(con)
-        return convert(Int, affectedRows)
-    end
-
-    retval = Nothing
-    if opformat == MYSQL_DATA_FRAME
-        retval = mysql_result_to_dataframe(result)
-    else opformat == MYSQL_ARRAY
-        retval = mysql_get_result_as_array(result)
-    end
-
-    mysql_free_result(result)
-    return retval
-end
-
-"""
-Returns a tuple of 2 arrays. The first, an array of affected row counts for each query that
- was not a select. The second, an array of dataframes or arrays, depending on `opformat` for
- each query that was a select.
-"""
-function mysql_execute_multi_query(con::MYSQL, command::String, opformat=MYSQL_DATA_FRAME)
-    response = mysql_query(con, command)
     mysql_display_error(con, response)
 
-    affectedrows = Int[]
-    
-    if opformat == MYSQL_DATA_FRAME
-        data = DataFrame[]
-    else
-        data = Any[]
-    end
+    data = Any[]
 
     while true
         result = mysql_store_result(con)
@@ -107,7 +84,7 @@ function mysql_execute_multi_query(con::MYSQL, command::String, opformat=MYSQL_D
             mysql_free_result(result)
 
         elseif mysql_field_count(con) == 0
-            push!(affectedrows, mysql_affected_rows(con))
+            push!(data, @compat Int(mysql_affected_rows(con)))
         else
             mysql_display_error(con,
                                 "Query expected to produce results but did not.")
@@ -121,7 +98,10 @@ function mysql_execute_multi_query(con::MYSQL, command::String, opformat=MYSQL_D
         end
     end
 
-    return affectedrows, data
+    if length(data) == 1
+        return data[1]
+    end
+    return data
 end
 
 """
