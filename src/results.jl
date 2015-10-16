@@ -263,7 +263,7 @@ function mysql_result_to_dataframe(result::MYSQL_RES)
         mysqlfield_types[i] = mysql_field.field_type
     end
 
-    df = DataFrame(jfield_types, field_headers, nrows)
+    df = DataFrame(jfield_types, field_headers, @compat Int64(nrows))
 
     for row = 1:nrows
         populate_row!(df, mysqlfield_types, mysql_fetch_row(result), row)
@@ -362,7 +362,7 @@ function mysql_stmt_result_to_dataframe(metadata::MYSQL_RES, stmtptr::Ptr{MYSQL_
 
     end # end for
     
-    df = DataFrame(jfield_types, field_headers, nrows)
+    df = DataFrame(jfield_types, field_headers, @compat Int64(nrows))
     response = mysql_stmt_bind_result(stmtptr, pointer(mysql_bindarr))
 
     if (response != 0)
