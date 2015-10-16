@@ -15,7 +15,7 @@ let
                                    "libmysqlclient_r.so", "libmariadb.so",
                                    "libmysqlclient_r.so.16"]
         @osx_only lib_choices = ["libmysqlclient.dylib"]
-        @windows_only lib_choices = ["libmysql.dll"]
+        @windows_only lib_choices = ["libmysql.dll", "libmariadb.dll"]
         local lib
         for lib in lib_choices
             try
