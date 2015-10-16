@@ -244,6 +244,18 @@ function populate_row!(df, mysqlfield_types::Array{MYSQL_TYPE}, result::MYSQL_RO
     end
 end
 
+function populate_row!(arr::Array, mysqlfield_types::Array{MYSQL_TYPE}, result::MYSQL_ROW, row)
+ for i = 1:length(mysqlfield_types)
+        strval = mysql_load_string_from_resultptr(result, i)
+        if strval == Nothing
+            arr[i][row] = NA
+        else
+            arr[i][row] = mysql_interpret_field(strval,
+                                               mysql_get_julia_type(mysqlfield_types[i]))
+        end
+    end
+end
+
 """
 Returns a dataframe containing the data in `result`.
 """
