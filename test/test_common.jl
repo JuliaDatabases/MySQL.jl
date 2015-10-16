@@ -89,10 +89,20 @@ function drop_test_database()
     run_query_helper(command, "Drop database")
 end
 
+function init_test()
+    mysql_query(con, "DROP DATABASE IF EXISTS mysqltest;")
+    # There seems to be a bug in MySQL that prevents you
+    # from saying "DROP USER IF EXISTS test@127.0.0.1;"
+    # So here we create a user with a harmless privilege and drop the user.
+    mysql_query(con, "GRANT USAGE ON *.* TO 'test'@'127.0.0.1';")
+    mysql_query(con, "DROP USER 'test'@'127.0.0.1';")
+end
+
 function run_test()
     # Connect as root and setup database, user and privilege
     # for the user.
     connect_as_root()
+    init_test()
     @test create_test_database()
     @test create_test_user()
     @test grant_test_user_privilege()
