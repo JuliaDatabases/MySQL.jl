@@ -94,14 +94,12 @@ Execute a multi query:
 ```
 command = """INSERT INTO Employee (Name) VALUES ('');
              UPDATE Employee SET LunchTime = '15:00:00' WHERE LENGTH(Name) > 5;"""
-affrows, data = mysql_execute_multi_query(con, command)
+data = mysql_execute_multi_query(con, command)
 ```
 
-`affrows` contains an array of affected rows for non-select statements in the
- multi statement.
-
 `data` contains an array of dataframes (or arrays if MYSQL_ARRAY was specified as the
- 3rd argument to the above API) for select statements in the multi statement.
+ 3rd argument to the above API) corresponding to the SELECT queries and number of
+ affected rows corresponding to the non-SELECT queries in the multi statement.
 
 Get dataframes using prepared statements:
 
