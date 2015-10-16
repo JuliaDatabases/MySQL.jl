@@ -1,7 +1,25 @@
 """
-The MySQL handle passed to C calls.
+The MySQL handle.
 """
-typealias MYSQL Ptr{Void}
+type MySQLHandle
+    mysqlptr::Ptr{Void}
+    host::String
+    user::String
+    db::String
+end
+
+function Base.show(io::IO, hndl::MySQLHandle)
+    if (hndl.mysqlptr == C_NULL)
+        print(io, "Null MySQL Handle")
+    else
+        print(io, """MySQL Handle
+------------
+Host: $(hndl.host)
+User: $(hndl.user)
+DB:   $(hndl.db)
+""")
+    end
+end
 
 """
 The Pointer to result set for C calls.
@@ -136,7 +154,7 @@ Mirror to MYSQL_STMT struct in mysql.h
 type MYSQL_STMT
     mem_root::MEM_ROOT
     list::LIST
-    mysql::MYSQL
+    mysql::Ptr{Void}
     params::MYSQL_BIND
     bind::MYSQL_BIND
     fields::MYSQL_FIELD
@@ -174,5 +192,5 @@ type MySQLRowIterator
     rowsleft::Int64
 end
 
-export MYSQL, MYSQL_RES, MYSQL_ROW, MYSQL_TYPE, MYSQL_FIELD, MySQLRowIterator,
+export MySQLHandle, MYSQL_RES, MYSQL_ROW, MYSQL_TYPE, MYSQL_FIELD, MySQLRowIterator,
        MYSQL_STMT, MYSQL_TIME, MYSQL_BIND

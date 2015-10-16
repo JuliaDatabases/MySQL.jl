@@ -12,7 +12,7 @@ function mysql_connect(host::String,
                         unix_socket::Any,
                         client_flag::Integer)
 
-    mysqlptr::MYSQL = C_NULL
+    mysqlptr::Ptr{Void} = C_NULL
     mysqlptr = mysql_init(mysqlptr)
 
     if mysqlptr == C_NULL
@@ -32,7 +32,7 @@ function mysql_connect(host::String,
         error("Failed to connect to MySQL database")
     end
 
-    return mysqlptr
+    return MySQLHandle(mysqlptr, host, user, db)
 end
 
 """
@@ -47,9 +47,23 @@ end
 """
 Wrapper over mysql_close. Must be called to close the connection opened by mysql_connect.
 """
-function mysql_disconnect(db::MYSQL)
-    mysql_close(db)
+function mysql_disconnect(hndl)
+    mysql_close(hndl.mysqlptr)
+    hndl.mysqlptr = C_NULL
+    hndl.host = ""
+    hndl.user = ""
+    hndl.db = ""
+    Nothing
 end
+
+# wrappers to take MySQLHandle as input.
+mysql_query(hndl, command) = mysql_query(hndl.mysqlptr, command)
+mysql_store_result(hndl) = mysql_store_result(hndl.mysqlptr)
+mysql_field_count(hndl) = mysql_field_count(hndl.mysqlptr)
+mysql_affected_rows(hndl) = mysql_affected_rows(hndl.mysqlptr)
+mysql_next_result(hndl) = mysql_next_result(hndl.mysqlptr)
+mysql_stmt_init(hndl) = mysql_stmt_init(hndl.mysqlptr)
+mysql_error(hndl) = mysql_error(hndl.mysqlptr)
 
 """
 A function for executing queries and getting results.
@@ -65,14 +79,14 @@ In the case of non-multi queries returns either the number of affected
 By default, returns SELECT query results as DataFrames.
  Set `opformat` to `MYSQL_ARRAY` to get results as arrays.
 """
-function mysql_execute_query(con::MYSQL, command::String, opformat=MYSQL_DATA_FRAME)
-    response = mysql_query(con, command)
-    mysql_display_error(con, response)
+function mysql_execute_query(hndl, command, opformat=MYSQL_DATA_FRAME)
+    response = mysql_query(hndl, command)
+    mysql_display_error(hndl, response)
 
     data = Any[]
 
     while true
-        result = mysql_store_result(con)
+        result = mysql_store_result(hndl)
         if result != C_NULL # if select query
             retval = Nothing
             if opformat == MYSQL_DATA_FRAME
@@ -83,16 +97,16 @@ function mysql_execute_query(con::MYSQL, command::String, opformat=MYSQL_DATA_FR
             push!(data, retval)
             mysql_free_result(result)
 
-        elseif mysql_field_count(con) == 0
-            push!(data, @compat Int(mysql_affected_rows(con)))
+        elseif mysql_field_count(hndl) == 0
+            push!(data, @compat Int(mysql_affected_rows(hndl)))
         else
-            mysql_display_error(con,
+            mysql_display_error(hndl,
                                 "Query expected to produce results but did not.")
         end
         
-        status = mysql_next_result(con)
+        status = mysql_next_result(hndl)
         if status > 0
-            mysql_display_error(con, "Could not execute multi statements.")
+            mysql_display_error(hndl, "Could not execute multi statements.")
         elseif status == -1 # if no more results
             break
         end
@@ -108,17 +122,17 @@ end
 A handy function to display the `mysql_error` message along with a user message `msg` through `error`
  when `condition` is true.
 """
-function mysql_display_error(con, condition::Bool, msg)
+function mysql_display_error(hndl, condition::Bool, msg)
     if (condition)
-        err_string = msg * "\nMySQL ERROR: " * bytestring(mysql_error(con))
+        err_string = msg * "\nMySQL ERROR: " * bytestring(mysql_error(hndl))
         error(err_string)
     end
 end
 
-mysql_display_error(con, condition::Bool) = mysql_display_error(con, condition, "")
-mysql_display_error(con, response, msg) = mysql_display_error(con, response != 0, msg)
-mysql_display_error(con, response) = mysql_display_error(con, response, "")
-mysql_display_error(con, msg::String) = mysql_display_error(con, true, msg)
+mysql_display_error(hndl, condition::Bool) = mysql_display_error(hndl, condition, "")
+mysql_display_error(hndl, response, msg) = mysql_display_error(hndl, response != 0, msg)
+mysql_display_error(hndl, response) = mysql_display_error(hndl, response, "")
+mysql_display_error(hndl, msg::String) = mysql_display_error(hndl, true, msg)
 
 """
 Given a prepared statement pointer `stmtptr` returns a dataframe containing the results.

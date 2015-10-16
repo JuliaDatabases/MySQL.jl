@@ -3,22 +3,22 @@
 include("test_common.jl")
 
 function run_query_helper(command, msg)
-    stmt = mysql_stmt_init(con)
+    stmt = mysql_stmt_init(hndl)
  
     if (stmt == C_NULL)
         error("Error in initialization of statement.")
     end
 
     response = mysql_stmt_prepare(stmt, command)
-    mysql_display_error(con, response,
+    mysql_display_error(hndl, response,
                         "Error occured while preparing statement for query \"$command\"")
 
     response = mysql_stmt_execute(stmt)
-    mysql_display_error(con, response,
+    mysql_display_error(hndl, response,
                         "Error occured while executing prepared statement for query \"$command\"")
 
     response = mysql_stmt_close(stmt)
-    mysql_display_error(con, response,
+    mysql_display_error(hndl, response,
                         "Error occured while closing prepared statement for query \"$command\"")
 
     println("Success: " * msg)
@@ -28,14 +28,14 @@ end
 function show_results()
     command = """SELECT * FROM Employee;"""
 
-    stmt = mysql_stmt_init(con)
+    stmt = mysql_stmt_init(hndl)
 
     if (stmt == C_NULL)
         error("Error in initialization of statement.")
     end
 
     response = mysql_stmt_prepare(stmt, command)
-    mysql_display_error(con, response,
+    mysql_display_error(hndl, response,
                         "Error occured while preparing statement for query \"$command\"")
 
     dframe = mysql_stmt_result_to_dataframe(stmt)

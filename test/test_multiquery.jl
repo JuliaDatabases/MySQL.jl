@@ -17,12 +17,12 @@ function run_test()
     DROP DATABASE test_db"""
 
     # Run twice: Related to an earlier bug where 2nd run was failing.
-    mysql_execute_query(con, query)
-    data = mysql_execute_query(con, query)
+    mysql_execute_query(hndl, query)
+    data = mysql_execute_query(hndl, query)
 
     @show data
 
-    mysql_disconnect(con)
+    mysql_disconnect(hndl)
 end
 
 run_test()
