@@ -244,6 +244,18 @@ function populate_row!(df, mysqlfield_types::Array{MYSQL_TYPE}, result::MYSQL_RO
     end
 end
 
+function populate_row!(arr::Array, mysqlfield_types::Array{MYSQL_TYPE}, result::MYSQL_ROW, row)
+ for i = 1:length(mysqlfield_types)
+        strval = mysql_load_string_from_resultptr(result, i)
+        if strval == Nothing
+            arr[i][row] = NA
+        else
+            arr[i][row] = mysql_interpret_field(strval,
+                                               mysql_get_julia_type(mysqlfield_types[i]))
+        end
+    end
+end
+
 """
 Returns a dataframe containing the data in `result`.
 """
@@ -379,4 +391,28 @@ function mysql_stmt_result_to_dataframe(metadata::MYSQL_RES, stmtptr::Ptr{MYSQL_
     end
 
     return df
+end
+
+	
+function mysql_result_to_columns(result::MYSQL_RES)
+    nfields = mysql_num_fields(result)
+    fields = mysql_fetch_fields(result)
+    nrows = mysql_num_rows(result)
+
+    jfield_types = Array(DataType, nfields)
+    mysqlfield_types = Array(Cuint, nfields)
+
+    resultingArray=Array(Any,0)
+	for i = 1:nfields
+        mysql_field = unsafe_load(fields, i)
+        jfield_types[i] = mysql_get_julia_type(mysql_field.field_type)
+		mysqlfield_types[i] = mysql_field.field_type
+		push!(resultingArray,Array(jfield_types[i],nrows))
+    end
+    
+	for row = 1:nrows
+        populate_row!(resultingArray, mysqlfield_types, mysql_fetch_row(result), row)
+    end
+	
+    return resultingArray	
 end

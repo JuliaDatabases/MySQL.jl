@@ -69,13 +69,18 @@ function mysql_execute_query(con::MYSQL, command::String, opformat=MYSQL_DATA_FR
     retval = Nothing
     if opformat == MYSQL_DATA_FRAME
         retval = mysql_result_to_dataframe(result)
-    else opformat == MYSQL_ARRAY
+    elseif opformat == MYSQL_ARRAY
         retval = mysql_get_result_as_array(result)
+  	elseif opformat == MYSQL_COLUMN_VECTORS
+  		retval = mysql_result_to_columns(result)
+  	else
+	  	#unknown opformat...
     end
 
     mysql_free_result(result)
     return retval
 end
+
 
 """
 Returns a tuple of 2 arrays. The first, an array of affected row counts for each query that
