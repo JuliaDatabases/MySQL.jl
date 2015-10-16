@@ -24,10 +24,10 @@ function mysql_real_connect(mysqlptr::MYSQL,
 
     reconnect_flag::Cuint = MYSQL_OPTION.MYSQL_OPT_RECONNECT
     reconnect_option::Cuchar = 0
-    retVal = mysql_options(mysqlptr, reconnect_flag, reinterpret(Ptr{Void},
+    retval = mysql_options(mysqlptr, reconnect_flag, reinterpret(Ptr{Void},
                            pointer_from_objref(reconnect_option)))
-    if(retVal != 0)
-        println("WARNING:::Options not set !!! The retVal is :: $retVal")
+    if(retval != 0)
+        println("WARNING: Unable to set reconnect option.")
     end
 
     return ccall((:mysql_real_connect, mysql_lib),

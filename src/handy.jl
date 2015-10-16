@@ -84,8 +84,7 @@ Returns a tuple of 2 arrays. The first, an array of affected row counts for each
 """
 function mysql_execute_multi_query(con::MYSQL, command::String, opformat=MYSQL_DATA_FRAME)
     response = mysql_query(con, command)
-    mysql_display_error(con, response,
-                        "Error occured while executing mysql_query on \"$command\"")
+    mysql_display_error(con, response)
 
     affectedrows = Int[]
     
