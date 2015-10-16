@@ -6,6 +6,11 @@ using Compat
 const MYSQL_DEFAULT_DATE_FORMAT = "yyyy-mm-dd"
 const MYSQL_DEFAULT_DATETIME_FORMAT = "yyyy-mm-dd HH:MM:SS"
 
+if VERSION > v"0.3.11"
+    c_malloc = Libc.malloc
+    c_free = Libc.free
+end
+
 """
 Given a MYSQL type get the corresponding julia type.
 """
@@ -346,10 +351,10 @@ function mysql_stmt_result_to_dataframe(metadata::MYSQL_RES, stmtptr::Ptr{MYSQL_
 
         if (ctype == String)
             buffer_length = field_length + 1
-            bindbuff = c_malloc(field_length + 1)
+            bindbuff = @compat c_malloc(field_length + 1)
         else
             buffer_length = sizeof(ctype)
-            bindbuff = c_malloc(sizeof(ctype))
+            bindbuff = @compat c_malloc(sizeof(ctype))
         end
 
         mysql_bindarr[i] = MYSQL_BIND(bindbuff, buffer_length, buffer_type)
@@ -375,7 +380,7 @@ function mysql_stmt_result_to_dataframe(metadata::MYSQL_RES, stmtptr::Ptr{MYSQL_
     end
 
     for i = 1:nfields
-        c_free(mysql_bindarr[i].buffer)
+        @compat c_free(mysql_bindarr[i].buffer)
     end
 
     return df
