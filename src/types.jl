@@ -9,7 +9,7 @@ type MySQLHandle
 end
 
 function Base.show(io::IO, hndl::MySQLHandle)
-    if (hndl.mysqlptr == C_NULL)
+    if hndl.mysqlptr == C_NULL
         print(io, "Null MySQL Handle")
     else
         print(io, """MySQL Handle
@@ -37,7 +37,7 @@ typealias MYSQL_TYPE Cuint
 The field object that contains the metadata of the table. 
 Returned by mysql_fetch_fields API.
 """
-type MYSQL_FIELD
+immutable MYSQL_FIELD
     name :: Ptr{Cchar}             ##  Name of column
     org_name :: Ptr{Cchar}         ##  Original column name, if an alias
     table :: Ptr{Cchar}            ##  Table of column if column was a field
@@ -152,7 +152,7 @@ end
 """
 Mirror to MYSQL_STMT struct in mysql.h
 """
-type MYSQL_STMT
+immutable MYSQL_STMT # This is different in mariadb header file.
     mem_root::MEM_ROOT
     list::LIST
     mysql::Ptr{Void}
@@ -184,6 +184,22 @@ type MYSQL_STMT
 end
 
 """
+The MySQL Statement Handle.
+"""
+type MySQLStatementHandle
+    stmtptr::Ptr{MYSQL_STMT}
+end
+
+function Base.show(io::IO, hndl::MySQLStatementHandle)
+    if hndl.stmtptr == C_NULL
+        print(io, "Null MySQL Statement Handle")
+    else
+        print(io, """MySQL Statement Handle""")
+    end
+end
+
+
+"""
 Iterator for the mysql result (MYSQL_RES).
 """
 type MySQLRowIterator
@@ -194,4 +210,4 @@ type MySQLRowIterator
 end
 
 export MySQLHandle, MYSQL_RES, MYSQL_ROW, MYSQL_TYPE, MYSQL_FIELD, MySQLRowIterator,
-       MYSQL_STMT, MYSQL_TIME, MYSQL_BIND
+       MYSQL_STMT, MYSQL_TIME, MYSQL_BIND, MySQLStatementHandle

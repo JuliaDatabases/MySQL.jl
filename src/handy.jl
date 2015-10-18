@@ -61,7 +61,7 @@ end
 
 # wrappers to take MySQLHandle as input as well as check for NULL pointer.
 for func = (:mysql_query, :mysql_store_result, :mysql_field_count, :mysql_affected_rows,
-            :mysql_next_result, :mysql_stmt_init, :mysql_error, :mysql_execute_query, :mysql_display_error)
+            :mysql_next_result, :mysql_error, :mysql_execute_query)
     eval(quote
         function ($func)(hndl, args...)
             if hndl.mysqlptr == C_NULL
@@ -86,7 +86,7 @@ In the case of non-multi queries returns either the number of affected
 By default, returns SELECT query results as DataFrames.
  Set `opformat` to `MYSQL_ARRAY` to get results as arrays.
 """
-function mysql_execute_query(mysqlptr, command, opformat=MYSQL_DATA_FRAME)
+function mysql_execute_query(mysqlptr::Ptr{Void}, command, opformat=MYSQL_DATA_FRAME)
     response = mysql_query(mysqlptr, command)
     mysql_display_error(mysqlptr, response)
 
@@ -129,17 +129,24 @@ end
 A handy function to display the `mysql_error` message along with a user message `msg` through `error`
  when `condition` is true.
 """
-function mysql_display_error(mysqlptr, condition::Bool, msg)
+function mysql_display_error(hndl, condition::Bool, msg)
     if (condition)
-        err_string = msg * "\nMySQL ERROR: " * bytestring(mysql_error(mysqlptr))
+        err_string = msg * "\nMySQL ERROR: " * bytestring(mysql_error(hndl))
         error(err_string)
     end
 end
 
-mysql_display_error(mysqlptr, condition::Bool) = mysql_display_error(mysqlptr, condition, "")
-mysql_display_error(mysqlptr, response, msg) = mysql_display_error(mysqlptr, response != 0, msg)
-mysql_display_error(mysqlptr, response) = mysql_display_error(mysqlptr, response, "")
-mysql_display_error(mysqlptr, msg::String) = mysql_display_error(mysqlptr, true, msg)
+function mysql_display_error(hndl::MySQLStatementHandle, condition::Bool, msg)
+    if (condition)
+        err_string = msg * "\nMySQL ERROR: " * bytestring(mysql_stmt_error(hndl))
+        error(err_string)
+    end
+end
+
+mysql_display_error(hndl, condition::Bool) = mysql_display_error(hndl, condition, "")
+mysql_display_error(hndl, response, msg) = mysql_display_error(hndl, response != 0, msg)
+mysql_display_error(hndl, response) = mysql_display_error(hndl, response, "")
+mysql_display_error(hndl, msg::String) = mysql_display_error(hndl, true, msg)
 
 """
 Given a prepared statement pointer `stmtptr` returns a dataframe containing the results.
@@ -158,4 +165,36 @@ function mysql_stmt_result_to_dataframe(stmtptr::Ptr{MYSQL_STMT})
     retval = mysql_stmt_result_to_dataframe(metadata, stmtptr)
     mysql_free_result(metadata)
     return retval
+end
+
+function mysql_stmt_init(hndl::MySQLHandle)
+    if hndl.mysqlptr == C_NULL
+        error("mysql_stmt_init called with NULL connection.")
+    end
+    MySQLStatementHandle(mysql_stmt_init(hndl.mysqlptr))
+end
+
+function mysql_stmt_close(hndl::MySQLStatementHandle)
+    if hndl.stmtptr == C_NULL
+        error("mysql_stmt_close called with Null statement handle")
+    end
+
+    response = mysql_stmt_close(hndl.stmtptr)
+    hndl.stmtptr = C_NULL
+    return response
+end
+
+# wrappers to take MySQLStatementHandle as input as well as check for NULL pointer.
+for func = (:mysql_stmt_execute, :mysql_stmt_prepare, :mysql_stmt_error,
+            :mysql_stmt_store_result, :mysql_stmt_result_metadata,
+            :mysql_stmt_num_rows, :mysql_stmt_fetch, :mysql_stmt_bind_result,
+            :mysql_stmt_bind_param, :mysql_stmt_affected_rows, :mysql_stmt_result_to_dataframe)
+    eval(quote
+        function ($func)(hndl, args...)
+            if hndl.stmtptr == C_NULL
+                error($(string(func)) * " called with NULL statement handle.")
+            end
+            ($func)(hndl.stmtptr, args...)
+        end
+    end)
 end
