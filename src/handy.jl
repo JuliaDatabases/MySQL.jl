@@ -59,14 +59,18 @@ function mysql_disconnect(hndl)
     Nothing
 end
 
-# wrappers to take MySQLHandle as input.
-mysql_query(hndl, command) = mysql_query(hndl.mysqlptr, command)
-mysql_store_result(hndl) = mysql_store_result(hndl.mysqlptr)
-mysql_field_count(hndl) = mysql_field_count(hndl.mysqlptr)
-mysql_affected_rows(hndl) = mysql_affected_rows(hndl.mysqlptr)
-mysql_next_result(hndl) = mysql_next_result(hndl.mysqlptr)
-mysql_stmt_init(hndl) = mysql_stmt_init(hndl.mysqlptr)
-mysql_error(hndl) = mysql_error(hndl.mysqlptr)
+# wrappers to take MySQLHandle as input as well as check for NULL pointer.
+for func = (:mysql_query, :mysql_store_result, :mysql_field_count, :mysql_affected_rows,
+            :mysql_next_result, :mysql_stmt_init, :mysql_error, :mysql_execute_query, :mysql_display_error)
+    eval(quote
+        function ($func)(hndl, args...)
+            if hndl.mysqlptr == C_NULL
+                error($(string(func)) * " called with NULL connection.")
+            end
+            ($func)(hndl.mysqlptr, args...)
+        end
+    end)
+end
 
 """
 A function for executing queries and getting results.
@@ -82,14 +86,14 @@ In the case of non-multi queries returns either the number of affected
 By default, returns SELECT query results as DataFrames.
  Set `opformat` to `MYSQL_ARRAY` to get results as arrays.
 """
-function mysql_execute_query(hndl, command, opformat=MYSQL_DATA_FRAME)
-    response = mysql_query(hndl, command)
-    mysql_display_error(hndl, response)
+function mysql_execute_query(mysqlptr, command, opformat=MYSQL_DATA_FRAME)
+    response = mysql_query(mysqlptr, command)
+    mysql_display_error(mysqlptr, response)
 
     data = Any[]
 
     while true
-        result = mysql_store_result(hndl)
+        result = mysql_store_result(mysqlptr)
         if result != C_NULL # if select query
             retval = Nothing
             if opformat == MYSQL_DATA_FRAME
@@ -100,16 +104,16 @@ function mysql_execute_query(hndl, command, opformat=MYSQL_DATA_FRAME)
             push!(data, retval)
             mysql_free_result(result)
 
-        elseif mysql_field_count(hndl) == 0
-            push!(data, @compat Int(mysql_affected_rows(hndl)))
+        elseif mysql_field_count(mysqlptr) == 0
+            push!(data, @compat Int(mysql_affected_rows(mysqlptr)))
         else
-            mysql_display_error(hndl,
+            mysql_display_error(mysqlptr,
                                 "Query expected to produce results but did not.")
         end
         
-        status = mysql_next_result(hndl)
+        status = mysql_next_result(mysqlptr)
         if status > 0
-            mysql_display_error(hndl, "Could not execute multi statements.")
+            mysql_display_error(mysqlptr, "Could not execute multi statements.")
         elseif status == -1 # if no more results
             break
         end
@@ -125,17 +129,17 @@ end
 A handy function to display the `mysql_error` message along with a user message `msg` through `error`
  when `condition` is true.
 """
-function mysql_display_error(hndl, condition::Bool, msg)
+function mysql_display_error(mysqlptr, condition::Bool, msg)
     if (condition)
-        err_string = msg * "\nMySQL ERROR: " * bytestring(mysql_error(hndl))
+        err_string = msg * "\nMySQL ERROR: " * bytestring(mysql_error(mysqlptr))
         error(err_string)
     end
 end
 
-mysql_display_error(hndl, condition::Bool) = mysql_display_error(hndl, condition, "")
-mysql_display_error(hndl, response, msg) = mysql_display_error(hndl, response != 0, msg)
-mysql_display_error(hndl, response) = mysql_display_error(hndl, response, "")
-mysql_display_error(hndl, msg::String) = mysql_display_error(hndl, true, msg)
+mysql_display_error(mysqlptr, condition::Bool) = mysql_display_error(mysqlptr, condition, "")
+mysql_display_error(mysqlptr, response, msg) = mysql_display_error(mysqlptr, response != 0, msg)
+mysql_display_error(mysqlptr, response) = mysql_display_error(mysqlptr, response, "")
+mysql_display_error(mysqlptr, msg::String) = mysql_display_error(mysqlptr, true, msg)
 
 """
 Given a prepared statement pointer `stmtptr` returns a dataframe containing the results.
