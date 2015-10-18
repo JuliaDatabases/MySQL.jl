@@ -15,58 +15,58 @@ end
 Given a MYSQL type get the corresponding julia type.
 """
 function mysql_get_julia_type(mysqltype::MYSQL_TYPE)
-    if (mysqltype == MYSQL_TYPES.MYSQL_TYPE_BIT)
+    if (mysqltype == MYSQL_TYPE_BIT)
         return Cuchar
 
-    elseif (mysqltype == MYSQL_TYPES.MYSQL_TYPE_TINY ||
-            mysqltype == MYSQL_TYPES.MYSQL_TYPE_ENUM)
+    elseif (mysqltype == MYSQL_TYPE_TINY ||
+            mysqltype == MYSQL_TYPE_ENUM)
         return Cchar
 
-    elseif (mysqltype == MYSQL_TYPES.MYSQL_TYPE_SHORT)
+    elseif (mysqltype == MYSQL_TYPE_SHORT)
         return Cshort
 
-    elseif (mysqltype == MYSQL_TYPES.MYSQL_TYPE_LONG ||
-            mysqltype == MYSQL_TYPES.MYSQL_TYPE_INT24)
+    elseif (mysqltype == MYSQL_TYPE_LONG ||
+            mysqltype == MYSQL_TYPE_INT24)
         return Cint
 
-    elseif (mysqltype == MYSQL_TYPES.MYSQL_TYPE_LONGLONG)
+    elseif (mysqltype == MYSQL_TYPE_LONGLONG)
         return Clong
 
-    elseif (mysqltype == MYSQL_TYPES.MYSQL_TYPE_FLOAT)
+    elseif (mysqltype == MYSQL_TYPE_FLOAT)
         return Cfloat
 
-    elseif (mysqltype == MYSQL_TYPES.MYSQL_TYPE_DECIMAL ||
-            mysqltype == MYSQL_TYPES.MYSQL_TYPE_NEWDECIMAL ||
-            mysqltype == MYSQL_TYPES.MYSQL_TYPE_DOUBLE)
+    elseif (mysqltype == MYSQL_TYPE_DECIMAL ||
+            mysqltype == MYSQL_TYPE_NEWDECIMAL ||
+            mysqltype == MYSQL_TYPE_DOUBLE)
         return Cdouble
 
-    elseif (mysqltype == MYSQL_TYPES.MYSQL_TYPE_NULL ||
-            mysqltype == MYSQL_TYPES.MYSQL_TYPE_SET ||
-            mysqltype == MYSQL_TYPES.MYSQL_TYPE_TINY_BLOB ||
-            mysqltype == MYSQL_TYPES.MYSQL_TYPE_MEDIUM_BLOB ||
-            mysqltype == MYSQL_TYPES.MYSQL_TYPE_LONG_BLOB ||
-            mysqltype == MYSQL_TYPES.MYSQL_TYPE_BLOB ||
-            mysqltype == MYSQL_TYPES.MYSQL_TYPE_GEOMETRY)
+    elseif (mysqltype == MYSQL_TYPE_NULL ||
+            mysqltype == MYSQL_TYPE_SET ||
+            mysqltype == MYSQL_TYPE_TINY_BLOB ||
+            mysqltype == MYSQL_TYPE_MEDIUM_BLOB ||
+            mysqltype == MYSQL_TYPE_LONG_BLOB ||
+            mysqltype == MYSQL_TYPE_BLOB ||
+            mysqltype == MYSQL_TYPE_GEOMETRY)
         return String
 
-    elseif (mysqltype == MYSQL_TYPES.MYSQL_TYPE_YEAR)
+    elseif (mysqltype == MYSQL_TYPE_YEAR)
         return Clong
 
-    elseif (mysqltype == MYSQL_TYPES.MYSQL_TYPE_TIMESTAMP)
+    elseif (mysqltype == MYSQL_TYPE_TIMESTAMP)
         return Cint
 
-    elseif (mysqltype == MYSQL_TYPES.MYSQL_TYPE_DATE)
+    elseif (mysqltype == MYSQL_TYPE_DATE)
         return MySQLDate
 
-    elseif (mysqltype == MYSQL_TYPES.MYSQL_TYPE_TIME)
+    elseif (mysqltype == MYSQL_TYPE_TIME)
         return MySQLTime
 
-    elseif (mysqltype == MYSQL_TYPES.MYSQL_TYPE_DATETIME)
+    elseif (mysqltype == MYSQL_TYPE_DATETIME)
         return MySQLDateTime
 
-    elseif (mysqltype == MYSQL_TYPES.MYSQL_TYPE_VARCHAR ||
-            mysqltype == MYSQL_TYPES.MYSQL_TYPE_VAR_STRING ||
-            mysqltype == MYSQL_TYPES.MYSQL_TYPE_STRING)
+    elseif (mysqltype == MYSQL_TYPE_VARCHAR ||
+            mysqltype == MYSQL_TYPE_VAR_STRING ||
+            mysqltype == MYSQL_TYPE_STRING)
         return String
 
     else
@@ -351,10 +351,10 @@ function mysql_stmt_result_to_dataframe(metadata::MYSQL_RES, stmtptr::Ptr{MYSQL_
 
         if (ctype == String)
             buffer_length = field_length + 1
-            bindbuff = @compat c_malloc(field_length + 1)
+            bindbuff = c_malloc(field_length + 1)
         else
             buffer_length = sizeof(ctype)
-            bindbuff = @compat c_malloc(sizeof(ctype))
+            bindbuff = c_malloc(sizeof(ctype))
         end
 
         mysql_bindarr[i] = MYSQL_BIND(bindbuff, buffer_length, buffer_type)
@@ -380,7 +380,7 @@ function mysql_stmt_result_to_dataframe(metadata::MYSQL_RES, stmtptr::Ptr{MYSQL_
     end
 
     for i = 1:nfields
-        @compat c_free(mysql_bindarr[i].buffer)
+        c_free(mysql_bindarr[i].buffer)
     end
 
     return df

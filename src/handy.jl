@@ -8,9 +8,9 @@ function mysql_connect(host::String,
                         user::String,
                         passwd::String,
                         db::String,
-                        port::Integer,
-                        unix_socket::Any,
-                        client_flag::Integer)
+                        port::Cuint,
+                        unix_socket::Ptr{Cchar},
+                        client_flag::Culong)
 
     mysqlptr::Ptr{Void} = C_NULL
     mysqlptr = mysql_init(mysqlptr)
@@ -24,9 +24,9 @@ function mysql_connect(host::String,
                                   user,
                                   passwd,
                                   db,
-                                  convert(Cint, port),
+                                  port,
                                   unix_socket,
-                                  convert(Culong, client_flag))
+                                  client_flag)
 
     if mysqlptr == C_NULL
         error("Failed to connect to MySQL database")
@@ -40,14 +40,17 @@ Wrapper over mysql_real_connect with CLIENT_MULTI_STATEMENTS passed
 as client flag options.
 """
 function mysql_connect(hostName::String, userName::String, password::String, db::String)
-    return mysql_connect(hostName, userName, password, db, 0,
-                         C_NULL, CLIENT_MULTI_STATEMENTS)
+    return mysql_connect(hostName, userName, password, db, convert(Cuint, 0),
+                         convert(Ptr{Cchar}, C_NULL), CLIENT_MULTI_STATEMENTS)
 end
 
 """
 Wrapper over mysql_close. Must be called to close the connection opened by mysql_connect.
 """
 function mysql_disconnect(hndl)
+    if (hndl.mysqlptr == C_NULL)
+        error("Disconnect called with NULL connection.")
+    end
     mysql_close(hndl.mysqlptr)
     hndl.mysqlptr = C_NULL
     hndl.host = ""

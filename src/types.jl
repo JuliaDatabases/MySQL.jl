@@ -96,6 +96,8 @@ type MySQLDateTime
     time::MySQLTime
 end
 
+export MySQLDate, MySQLTime, MySQLDateTime, MYSQL_TIME
+
 """
 Mirror to MYSQL_BIND struct in mysql_bind.h
 """
@@ -120,18 +122,17 @@ immutable MYSQL_BIND
     is_null_value :: Cchar
     extension :: Ptr{Void}
 
-    function MYSQL_BIND(in_buffer::Ptr{Void}, in_buffer_length::Culong, in_buffer_type::Cint)
-        retval = new(0, 0, in_buffer, C_NULL, C_NULL, 0, 0, 0, in_buffer_length,
-                     0, 0, 0, 0, in_buffer_type, 0, 0, 0, 0, C_NULL)
-        # Now we have to make the is_null pointer point
-        # to is_null_value in the MYSQL_BIND struct.
-        # retptr = pointer_from_objref(retval)
-        # unsafe_store!(convert(Ptr{Ptr{Cchar}}, retptr + 8), # pointer to is_null
-        #               retptr + 103)                         # pointer to is_null_value
-        # ^ This does not work, the retptr is different from the array
-        # pointer we get in results.jl
+    function MYSQL_BIND(buff::Ptr{Void}, bufflen, bufftype)
+        new(0, 0, buff, C_NULL, C_NULL, 0, 0, 0, convert(Culong, bufflen),
+            0, 0, 0, 0, bufftype, 0, 0, 0, 0, C_NULL)
+    end
 
-        return retval
+    function MYSQL_BIND(arr::Array, bufftype)
+        MYSQL_BIND(convert(Ptr{Void}, pointer(arr)), sizeof(arr), bufftype)
+    end
+
+    function MYSQL_BIND(str::String, bufftype)
+        MYSQL_BIND(convert(Ptr{Void}, pointer(str)), sizeof(str), bufftype)
     end
 end
 

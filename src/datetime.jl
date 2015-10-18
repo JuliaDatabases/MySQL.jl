@@ -50,3 +50,16 @@ end
 function Base.show(io::IO, dtime::MySQLDateTime)
     print(io, convert(String, dtime))
 end
+
+function Base.convert(::Type{MYSQL_TIME}, time::MySQLTime)
+    MYSQL_TIME(0, 0, 0, time.hour, time.minute, time.second, 0, 0, 0)
+end
+
+function Base.convert(::Type{MYSQL_TIME}, date::MySQLDate)
+    MYSQL_TIME(date.year, date.month, date.day, 0, 0, 0, 0, 0, 0)
+end
+
+function Base.convert(::Type{MYSQL_TIME}, dtime::MySQLDateTime)
+    MYSQL_TIME(dtime.date.year, dtime.date.month, dtime.date.day,
+               dtime.time.hour, dtime.time.minute, dtime.time.second, 0, 0, 0)
+end

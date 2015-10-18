@@ -18,11 +18,11 @@ function mysql_real_connect(mysqlptr::Ptr{Void},
                               user::String,
                               passwd::String,
                               db::String,
-                              port::Cint,
-                              unix_socket::Any,
+                              port::Cuint,
+                              unix_socket::Ptr{Cchar},
                               client_flag::Culong)
 
-    reconnect_flag::Cuint = MYSQL_OPTION.MYSQL_OPT_RECONNECT
+    reconnect_flag::Cuint = MYSQL_OPT_RECONNECT
     reconnect_option::Cuchar = 0
     retval = mysql_options(mysqlptr, reconnect_flag, reinterpret(Ptr{Void},
                            pointer_from_objref(reconnect_option)))
@@ -31,8 +31,8 @@ function mysql_real_connect(mysqlptr::Ptr{Void},
     end
 
     return ccall((:mysql_real_connect, mysql_lib),
-                 Ptr{Cuchar},
-                 (Ptr{Cuchar},
+                 Ptr{Void},
+                 (Ptr{Void},
                   Ptr{Cuchar},
                   Ptr{Cuchar},
                   Ptr{Cuchar},
@@ -165,9 +165,9 @@ Creates the prepared statement. There should be only 1 statement
 function mysql_stmt_prepare(stmtptr::Ptr{MYSQL_STMT}, sql::String)
     s = utf8(sql)
     return ccall((:mysql_stmt_prepare, mysql_lib),
-                 Cint, # TODO: Confirm proper type to use here
-                 (Ptr{Cuchar}, Ptr{Cchar}, Culong),
-                 stmtptr,      s,          length(s))
+                 Cint,
+                 (Ptr{Void}, Ptr{Cchar}, Culong),
+                 stmtptr,      s,        length(s))
 end
 
 """
@@ -355,4 +355,13 @@ function mysql_stmt_bind_param(stmt::Ptr{MYSQL_STMT}, bind::Ptr{MYSQL_BIND})
     return ccall((:mysql_stmt_bind_param, mysql_lib),
                  Cuchar, (Ptr{MYSQL_STMT}, Ptr{MYSQL_BIND}, ),
                  stmt, bind)
+end
+
+"""
+Returns number of affected rows for prepared statement. `mysql_stmt_execute` must
+ be called before this.
+"""
+function mysql_stmt_affected_rows(stmt::Ptr{MYSQL_STMT})
+    return ccall((:mysql_stmt_affected_rows, mysql_lib),
+                 Culong, (Ptr{Void}, ), stmt)
 end

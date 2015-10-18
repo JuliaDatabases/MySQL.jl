@@ -13,5 +13,5 @@ module MySQL
            mysql_query, mysql_execute_query, mysql_execute_multi_query,
            mysql_stmt_init, mysql_stmt_prepare, mysql_stmt_execute,
            mysql_stmt_close, mysql_stmt_result_to_dataframe, mysql_store_result,
-           mysql_free_result, mysql_stmt_bind_param
+           mysql_free_result, mysql_stmt_bind_param, mysql_stmt_affected_rows
 end
