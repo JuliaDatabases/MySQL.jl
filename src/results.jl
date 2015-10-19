@@ -30,7 +30,7 @@ function mysql_get_julia_type(mysqltype::MYSQL_TYPE)
         return Cint
 
     elseif (mysqltype == MYSQL_TYPE_LONGLONG)
-        return Clong
+        return Int64
 
     elseif (mysqltype == MYSQL_TYPE_FLOAT)
         return Cfloat
@@ -96,7 +96,7 @@ function mysql_interpret_field(strval::String, jtype::DataType)
         return convert(Cuchar, strval[1])
 
     elseif (jtype == Cchar || jtype == Cshort || jtype == Cint ||
-            jtype == Clong || jtype == Cfloat || jtype == Cdouble)
+            jtype == Int64 || jtype == Cfloat || jtype == Cdouble)
         return parse(jtype, strval)
 
     elseif (jtype == MySQLDate)

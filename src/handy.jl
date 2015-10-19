@@ -10,7 +10,7 @@ function mysql_connect(host::String,
                         db::String,
                         port::Cuint,
                         unix_socket::Ptr{Cchar},
-                        client_flag::Culong)
+                        client_flag::Unsigned)
 
     mysqlptr::Ptr{Void} = C_NULL
     mysqlptr = mysql_init(mysqlptr)
