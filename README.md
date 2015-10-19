@@ -1,7 +1,7 @@
 MySQL.jl
 ======
 
-[![Build Status](https://travis-ci.org/JuliaComputing/MySQL.jl.svg?branch=master)](https://travis-ci.org/JuliaComputing/MySQL.jl)
+[![Build Status](https://travis-ci.org/JuliaDB/MySQL.jl.svg?branch=master)](https://travis-ci.org/JuliaDB/MySQL.jl)
 
 Julia bindings and helper functions for [MariaDB](https://mariadb.org/)/MySQL C library.
 Query results can be received as julia arrays or as [Data Frames](https://github.com/JuliaStats/DataFrames.jl).
