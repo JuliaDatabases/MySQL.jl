@@ -20,7 +20,7 @@ function mysql_real_connect(mysqlptr::Ptr{Void},
                               db::String,
                               port::Cuint,
                               unix_socket::Ptr{Cchar},
-                              client_flag::Unsigned)
+                              @compat client_flag::UInt32)
 
     reconnect_flag::Cuint = MYSQL_OPT_RECONNECT
     reconnect_option::Cuchar = 0

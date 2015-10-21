@@ -58,7 +58,7 @@ export MYSQL_TYPE_DECIMAL,
        MYSQL_TYPE_GEOMETRY
 
 # Constant indicating whether multiple statements in queries should be supported.
-const CLIENT_MULTI_STATEMENTS = ( unsigned(1) << 16)
+@compat const CLIENT_MULTI_STATEMENTS = UInt32( unsigned(1) << 16)
 
 # Options to be passed to mysql_options API.
 @compat const MYSQL_OPT_CONNECT_TIMEOUT = UInt32(0)
