@@ -1,5 +1,7 @@
 # Handy wrappers to functions defined in api.jl.
 
+using Compat
+
 """
 A handy function that wraps mysql_init and mysql_real_connect. Also does error
 checking on the pointers returned by init and real_connect.
@@ -10,7 +12,7 @@ function mysql_connect(host::String,
                         db::String,
                         port::Cuint,
                         unix_socket::Ptr{Cchar},
-                        client_flag::Culong)
+                        client_flag)
 
     mysqlptr::Ptr{Void} = C_NULL
     mysqlptr = mysql_init(mysqlptr)
