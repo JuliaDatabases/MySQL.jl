@@ -27,28 +27,28 @@ function MySQLDateTime(mtime::MYSQL_TIME)
     MySQLDateTime(MySQLDate(mtime), MySQLTime(mtime))
 end
 
-function Base.convert(::Type{String}, time::MySQLTime)
+function Base.convert(::Type{AbstractString}, time::MySQLTime)
     "$(time.hour):$(time.minute):$(time.second)"
 end
 
-function Base.convert(::Type{String}, date::MySQLDate)
+function Base.convert(::Type{AbstractString}, date::MySQLDate)
     "$(date.year)-$(date.month)-$(date.day)"
 end
 
-function Base.convert(::Type{String}, dtime::MySQLDateTime)
-    convert(String, dtime.date) * " " * convert(String, dtime.time)
+function Base.convert(::Type{AbstractString}, dtime::MySQLDateTime)
+    convert(AbstractString, dtime.date) * " " * convert(AbstractString, dtime.time)
 end
 
 function Base.show(io::IO, date::MySQLDate)
-    print(io, convert(String, date))
+    print(io, convert(AbstractString, date))
 end
 
 function Base.show(io::IO, time::MySQLTime)
-    print(io, convert(String, time))
+    print(io, convert(AbstractString, time))
 end
 
 function Base.show(io::IO, dtime::MySQLDateTime)
-    print(io, convert(String, dtime))
+    print(io, convert(AbstractString, dtime))
 end
 
 function Base.convert(::Type{MYSQL_TIME}, time::MySQLTime)

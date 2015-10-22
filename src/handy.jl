@@ -6,10 +6,10 @@ using Compat
 A handy function that wraps mysql_init and mysql_real_connect. Also does error
 checking on the pointers returned by init and real_connect.
 """
-function mysql_connect(host::String,
-                        user::String,
-                        passwd::String,
-                        db::String,
+function mysql_connect(host::AbstractString,
+                        user::AbstractString,
+                        passwd::AbstractString,
+                        db::AbstractString,
                         port::Cuint,
                         unix_socket::Ptr{Cchar},
                         client_flag)
@@ -41,7 +41,7 @@ end
 Wrapper over mysql_real_connect with CLIENT_MULTI_STATEMENTS passed
 as client flag options.
 """
-function mysql_connect(hostName::String, userName::String, password::String, db::String)
+function mysql_connect(hostName::AbstractString, userName::AbstractString, password::AbstractString, db::AbstractString)
     return mysql_connect(hostName, userName, password, db, convert(Cuint, 0),
                          convert(Ptr{Cchar}, C_NULL), CLIENT_MULTI_STATEMENTS)
 end
@@ -58,7 +58,7 @@ function mysql_disconnect(hndl)
     hndl.host = ""
     hndl.user = ""
     hndl.db = ""
-    Nothing
+    Void
 end
 
 # wrappers to take MySQLHandle as input as well as check for NULL pointer.
@@ -97,7 +97,7 @@ function mysql_execute_query(mysqlptr::Ptr{Void}, command, opformat=MYSQL_DATA_F
     while true
         result = mysql_store_result(mysqlptr)
         if result != C_NULL # if select query
-            retval = Nothing
+            retval = Void
             if opformat == MYSQL_DATA_FRAME
                 retval = mysql_result_to_dataframe(result)
             else opformat == MYSQL_ARRAY
@@ -148,7 +148,7 @@ end
 mysql_display_error(hndl, condition::Bool) = mysql_display_error(hndl, condition, "")
 mysql_display_error(hndl, response, msg) = mysql_display_error(hndl, response != 0, msg)
 mysql_display_error(hndl, response) = mysql_display_error(hndl, response, "")
-mysql_display_error(hndl, msg::String) = mysql_display_error(hndl, true, msg)
+mysql_display_error(hndl, msg::AbstractString) = mysql_display_error(hndl, true, msg)
 
 """
 Given a prepared statement pointer `stmtptr` returns a dataframe containing the results.

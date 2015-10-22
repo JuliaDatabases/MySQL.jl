@@ -47,7 +47,7 @@ function mysql_get_julia_type(mysqltype::MYSQL_TYPE)
             mysqltype == MYSQL_TYPE_LONG_BLOB ||
             mysqltype == MYSQL_TYPE_BLOB ||
             mysqltype == MYSQL_TYPE_GEOMETRY)
-        return String
+        return AbstractString
 
     elseif (mysqltype == MYSQL_TYPE_YEAR)
         return Clong
@@ -67,10 +67,10 @@ function mysql_get_julia_type(mysqltype::MYSQL_TYPE)
     elseif (mysqltype == MYSQL_TYPE_VARCHAR ||
             mysqltype == MYSQL_TYPE_VAR_STRING ||
             mysqltype == MYSQL_TYPE_STRING)
-        return String
+        return AbstractString
 
     else
-        return String
+        return AbstractString
 
     end
 end
@@ -91,7 +91,7 @@ mysql_get_ctype(mysqltype::MYSQL_TYPE) = mysql_get_ctype(mysql_get_julia_type(my
 """
 Interpret a string as a julia datatype.
 """
-function mysql_interpret_field(strval::String, jtype::DataType)
+function mysql_interpret_field(strval::AbstractString, jtype::DataType)
     if (jtype == Cuchar)
         return convert(Cuchar, strval[1])
 
@@ -122,13 +122,13 @@ function mysql_load_string_from_resultptr(result::MYSQL_ROW, idx)
     deref = unsafe_load(result, idx)
 
     if deref == C_NULL
-        return Nothing
+        return Void
     end
 
     strval = bytestring(deref)
 
     if length(strval) == 0
-        return Nothing
+        return Void
     end
 
     return strval
@@ -185,8 +185,8 @@ function mysql_get_row_as_vector!(result::MYSQL_ROW, mysqlfield_types::Array{MYS
     for i = 1:length(mysqlfield_types)
         strval = mysql_load_string_from_resultptr(result, i)
 
-        if strval == Nothing
-            retvec[i] = Nothing
+        if strval == Void
+            retvec[i] = Void
         else
             retvec[i] = mysql_interpret_field(strval,
                                               mysql_get_julia_type(mysqlfield_types[i]))
@@ -240,7 +240,7 @@ function populate_row!(df, mysqlfield_types::Array{MYSQL_TYPE}, result::MYSQL_RO
     for i = 1:length(mysqlfield_types)
         strval = mysql_load_string_from_resultptr(result, i)
 
-        if strval == Nothing
+        if strval == Void
             df[row, i] = NA
         else
             df[row, i] = mysql_interpret_field(strval,
@@ -280,7 +280,7 @@ end
 mysql_binary_interpret_field(buf, mysqltype) =
     mysql_binary_interpret_field(buf, mysql_get_ctype(mysqltype))
 
-mysql_binary_interpret_field(buf, ::Type{String}) =
+mysql_binary_interpret_field(buf, ::Type{AbstractString}) =
     bytestring(convert(Ptr{Cchar}, buf))
 
 function mysql_binary_interpret_field(buf, T::Type)
@@ -349,7 +349,7 @@ function mysql_stmt_result_to_dataframe(metadata::MYSQL_RES, stmtptr::Ptr{MYSQL_
         bindbuff = C_NULL
         ctype = mysql_get_ctype(jfield_types[i])
 
-        if (ctype == String)
+        if (ctype == AbstractString)
             buffer_length = field_length + 1
             bindbuff = c_malloc(field_length + 1)
         else

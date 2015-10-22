@@ -3,9 +3,9 @@ The MySQL handle.
 """
 type MySQLHandle
     mysqlptr::Ptr{Void}
-    host::String
-    user::String
-    db::String
+    host::AbstractString
+    user::AbstractString
+    db::AbstractString
 end
 
 function Base.show(io::IO, hndl::MySQLHandle)
@@ -131,7 +131,7 @@ immutable MYSQL_BIND
         MYSQL_BIND(convert(Ptr{Void}, pointer(arr)), sizeof(arr), bufftype)
     end
 
-    function MYSQL_BIND(str::String, bufftype)
+    function MYSQL_BIND(str::AbstractString, bufftype)
         MYSQL_BIND(convert(Ptr{Void}, pointer(str)), sizeof(str), bufftype)
     end
 end
