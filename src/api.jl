@@ -14,10 +14,10 @@ Used to connect to database server. Returns a MYSQL handle on success and
 C_NULL on failure.
 """
 function mysql_real_connect(mysqlptr::Ptr{Void},
-                              host::String,
-                              user::String,
-                              passwd::String,
-                              db::String,
+                              host::AbstractString,
+                              user::AbstractString,
+                              passwd::AbstractString,
+                              db::AbstractString,
                               port::Cuint,
                               unix_socket::Ptr{Cchar},
                               @compat client_flag::UInt32)
@@ -135,7 +135,7 @@ Creates the sql string where the special chars are escaped
 """
 function mysql_real_escape_string(mysqlptr::Ptr{Void},
                                   to::Vector{Cuchar},
-                                  from::String,
+                                  from::AbstractString,
                                   length::Culong)
     return ccall((:mysql_real_escape_string, mysql_lib),
                  Cuint,
@@ -162,7 +162,7 @@ end
 """
 Creates the prepared statement. There should be only 1 statement
 """
-function mysql_stmt_prepare(stmtptr::Ptr{MYSQL_STMT}, sql::String)
+function mysql_stmt_prepare(stmtptr::Ptr{MYSQL_STMT}, sql::AbstractString)
     s = utf8(sql)
     return ccall((:mysql_stmt_prepare, mysql_lib),
                  Cint,
@@ -237,7 +237,7 @@ end
 """
 Executes the query and returns the status of the same.
 """
-function mysql_query(mysqlptr::Ptr{Void}, sql::String)
+function mysql_query(mysqlptr::Ptr{Void}, sql::AbstractString)
     return ccall((:mysql_query, mysql_lib),
                  Cchar,
                  (Ptr{Void}, Ptr{Cuchar}),
