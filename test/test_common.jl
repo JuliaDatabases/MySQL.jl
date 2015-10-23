@@ -4,6 +4,8 @@
 # then retrieves the data using  a select query and converts the results
 # to a julia datastructure.
 
+using DataFrames
+
 function run_query_helper(command, msg)
     error("API not implemented: `run_query_helper`")
 end
@@ -125,4 +127,29 @@ function run_test()
     @test drop_test_user()
     @test drop_test_database()
     mysql_disconnect(hndl)
+end
+
+"""
+A function to check if two dataframes are equal
+"""
+function dfisequal(dfa, dfb)
+    if size(dfa) != size(dfb)
+        return false
+    end
+
+    row, col = size(dfa)
+
+    for i = 1:col
+        for j = 1:row
+            if isna(dfa[col][row]) && isna(dfb[col][row])
+                continue
+            elseif isna(dfa[col][row]) || isna(dfb[col][row])
+                return false
+            elseif dfa[col][row] != dfb[col][row]
+                return false
+            end
+        end
+    end
+
+    return true
 end

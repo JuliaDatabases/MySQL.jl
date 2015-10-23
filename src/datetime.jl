@@ -63,3 +63,15 @@ function Base.convert(::Type{MYSQL_TIME}, dtime::MySQLDateTime)
     MYSQL_TIME(dtime.date.year, dtime.date.month, dtime.date.day,
                dtime.time.hour, dtime.time.minute, dtime.time.second, 0, 0, 0)
 end
+
+function ==(a::MySQLDate, b::MySQLDate)
+    a.year == b.year && a.month == b.month && a.day == b.day
+end
+
+function ==(a::MySQLTime, b::MySQLTime)
+    a.hour == b.hour && a.minute == b.minute && a.second == b.second
+end
+
+function ==(a::MySQLDateTime, b::MySQLDateTime)
+    a.date == b.date && a.time == b.time
+end
