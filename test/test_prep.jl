@@ -2,6 +2,24 @@
 
 include("test_common.jl")
 
+const DataFrameResultsPrep = DataFrame(
+    ID=[1, 2, 3, 4, 5], 
+    Name=@data(["John", "Tom", "Jim", "Tim", NA]),
+    Salary=@data([10000.5, 20000.5, 25000.0, 25000.0, NA]),
+    JoinDate=@data([MySQLDate("2015-8-3"), MySQLDate("2015-8-4"),
+              MySQLDate("2015-6-2"), MySQLDate("2015-7-25"), NA]),
+    LastLogin=@data([MySQLDateTime("2015-9-5 12:31:30"),
+               MySQLDateTime("2015-10-12 13:12:14"),
+               MySQLDateTime("2015-9-5 10:5:10"),
+               MySQLDateTime("2015-10-10 12:12:25"), NA]),
+    LunchTime=@data([MySQLTime("12:0:0"), MySQLTime("13:0:0"),
+               MySQLTime("12:30:0"), MySQLTime("12:30:0"), NA]),
+    OfficeNo=@data([1, 12, 45, 56, NA]),
+    JobType=@data([NA, NA, NA, NA, NA]),
+    Senior=@data([NA, NA, NA, NA, NA]),
+    empno=@data([1301, 1422, 1567, 3200, NA]))
+
+
 function run_query_helper(command, msg)
     stmt = mysql_stmt_init(hndl)
  
@@ -132,6 +150,7 @@ function show_results()
     dframe = mysql_stmt_result_to_dataframe(stmt)
     mysql_stmt_close(stmt)
     println(dframe)
+    @test dfisequal(dframe, DataFrameResultsPrep)
 end
 
 println("\n*** Running Prepared Statement Test ***\n")
