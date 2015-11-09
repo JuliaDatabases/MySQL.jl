@@ -115,6 +115,37 @@ function mysql_interpret_field(strval::AbstractString, jtype::DataType)
 
 end
 
+function mysql_interpret_field(strval,jtype::Cuchar)
+	return strval[1]
+end
+
+function mysql_interpret_field{T<:Number}(strval,jtype::T)	
+	return parse(T, strval)
+end
+
+function mysql_interpret_field{T<:AbstractString}(strval,jtype::T)
+	return strval
+end
+
+function mysql_interpret_field(strval,jtype::AbstractString)
+	return strval
+end
+
+function mysql_interpret_field(strval,jtype::MySQLDate)
+	return MySQLDate(strval)
+end
+
+function mysql_interpret_field(strval,jtype::MySQLTime)
+	return MySQLTime(strval)
+end
+
+function mysql_interpret_field(strval,jtype::MySQLDateTime)
+	return MySQLDateTime(strval)
+end
+function mysql_interpret_field(strval,jtype)
+	return mysql_interpret_field(strval,typeof(jtype))
+end
+
 """
 Load a bytestring from `result` pointer given the field index `idx`.
 """
@@ -236,17 +267,36 @@ end
 """
 Fill the row indexed by `row` of the dataframe `df` with values from `result`.
 """
-function populate_row!(df, mysqlfield_types::Array{MYSQL_TYPE}, result::MYSQL_ROW, row)
+function populate_row!(df, mysqlfield_types::Array{MYSQL_TYPE}, result::MYSQL_ROW, row,jfield_types_instances)
     for i = 1:length(mysqlfield_types)
         strval = mysql_load_string_from_resultptr(result, i)
-
-        if strval == Void
+		if strval == Void
             df[row, i] = NA
-        else
-            df[row, i] = mysql_interpret_field(strval,
-                                               mysql_get_julia_type(mysqlfield_types[i]))
+        else			
+            df[row, i] = mysql_interpret_field(strval,jfield_types_instances[i])
         end
     end
+end
+
+"""
+Creates a vector of instances with types specified by the vector coltypes
+"""
+function create_typelist(coltypes)
+	res=Any[]
+	for i=1:length(coltypes)
+		if coltypes[i]<:Number
+			push!(res,zero(coltypes[i]))			
+			#this should always hold:
+			#@assert (typeof(res[i])==coltypes[i]);
+		elseif coltypes[i]<:AbstractString
+			push!(res,convert(UTF8String,""))	#UTF8String is an arbitrary choice here		
+		else
+			#todo: MySQLDate,MySQLTime,MySQLDateTime
+			error("this is not yet working/implemented")
+		end
+		
+	end
+	return res
 end
 
 """
@@ -270,10 +320,11 @@ function mysql_result_to_dataframe(result::MYSQL_RES)
 
     df = DataFrame(jfield_types, field_headers, @compat Int64(nrows))
 
-    for row = 1:nrows
-        populate_row!(df, mysqlfield_types, mysql_fetch_row(result), row)
-    end
-
+    jfield_types_instances=create_typelist(jfield_types) #Column types will be the same for each row	
+		
+	for row = 1:nrows
+		populate_row!(df, mysqlfield_types, mysql_fetch_row(result), row,jfield_types_instances)
+	end
     return df
 end
 
