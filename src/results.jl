@@ -286,13 +286,16 @@ function create_typelist(coltypes)
 	for i=1:length(coltypes)
 		if coltypes[i]<:Number
 			push!(res,zero(coltypes[i]))			
-			#this should always hold:
-			#@assert (typeof(res[i])==coltypes[i]);
 		elseif coltypes[i]<:AbstractString
 			push!(res,convert(UTF8String,""))	#UTF8String is an arbitrary choice here		
+		elseif coltypes[i]==MySQLDate
+			push!(MySQLDate(1,1,1))
+		elseif coltypes[i]==MySQLTime
+			push!(MySQLTime(1,1,1))
+		elseif coltypes[i]==MySQLDateTime
+			push!(MySQLDateTime(MySQLDate(1,1,1),MySQLTime(1,1,1)))
 		else
-			#todo: MySQLDate,MySQLTime,MySQLDateTime
-			error("this is not yet working/implemented")
+			error("Unknown column type: $(coltypes[i])")			
 		end
 		
 	end
