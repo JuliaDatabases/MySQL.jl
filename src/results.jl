@@ -224,8 +224,8 @@ end
 """
 Fill the row indexed by `row` of the dataframe `df` with values from `result`.
 """
-function populate_row!(df, mysqlfield_types::Array{MYSQL_TYPE}, result::MYSQL_ROW, row, jfield_types)
-    for i = 1:length(mysqlfield_types)
+function populate_row!(df, nfields, result::MYSQL_ROW, row, jfield_types)
+    for i = 1:nfields
         strval = mysql_load_string_from_resultptr(result, i)
 		if strval == Void
             df[row, i] = NA
@@ -257,7 +257,7 @@ function mysql_result_to_dataframe(result::MYSQL_RES)
     df = DataFrame(jfield_types, field_headers, @compat Int64(nrows))
 	
 	for row = 1:nrows
-		populate_row!(df, mysqlfield_types, mysql_fetch_row(result), row, jfield_types)
+		populate_row!(df, nfields, mysql_fetch_row(result), row, jfield_types)
 	end
     return df
 end
