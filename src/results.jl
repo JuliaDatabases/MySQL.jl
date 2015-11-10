@@ -172,23 +172,35 @@ Get the result row `result` as a vector given the field types in an
 function mysql_get_row_as_vector(result::MYSQL_ROW)
     mysqlfield_types = mysql_get_field_types(result)
     retvec = Vector(Any, length(mysqlfield_types))
-    mysql_get_row_as_vector!(result, mysqlfield_types, retvec)
+    jfield_types = mysql_get_jtype_array(mysqlfield_types)
+    mysql_get_row_as_vector!(result, jfield_types, retvec)
     return retvec
 end
 
 function mysql_get_row_as_vector!(result::MYSQL_ROW,
-                                  mysqlfield_types::Array{MYSQL_TYPE},
+                                  jfield_types::Array{Type},
                                   retvec::Vector{Any})
-    for i = 1:length(mysqlfield_types)
+    for i = 1:length(jfield_types)
         strval = mysql_load_string_from_resultptr(result, i)
 
         if strval == Void
             retvec[i] = Void
         else
-            retvec[i] = mysql_interpret_field(strval,
-                                     mysql_get_julia_type(mysqlfield_types[i]))
+            retvec[i] = mysql_interpret_field(strval, jfield_types[i])
         end
     end
+end
+
+"""
+Convert a mysql field type array to a julia type array.
+"""
+function mysql_get_jtype_array(mysqlfield_types::Array{MYSQL_TYPE})
+    nfields = length(mysqlfield_types)
+    jfield_types = Array(Type, nfields)
+    for i = 1:nfields
+        jfield_types[i] = mysql_get_julia_type(mysqlfield_types[i])
+    end
+    return jfield_types
 end
 
 """
@@ -200,11 +212,11 @@ function mysql_get_result_as_array(result::MYSQL_RES)
 
     retarr = Array(Array{Any}, nrows)
     mysqlfield_types = mysql_get_field_types(result)
-
+    jfield_types = mysql_get_jtype_array(mysqlfield_types)
     for i = 1:nrows
         retarr[i] = Array(Any, nfields)
         mysql_get_row_as_vector!(mysql_fetch_row(result),
-                                 mysqlfield_types, retarr[i])
+                                 jfield_types, retarr[i])
     end
 
     return retarr
@@ -213,8 +225,9 @@ end
 function MySQLRowIterator(result)
     nfields = mysql_num_fields(result)
     mysqlfield_types = mysql_get_field_types(result)
+    jfield_types = mysql_get_jtype_array(mysqlfield_types)
     nrows = mysql_num_rows(result)
-    MySQLRowIterator(result, Array(Any, nfields), mysqlfield_types, nrows)
+    MySQLRowIterator(result, Array(Any, nfields), jfield_types, nrows)
 end
 
 function Base.start(itr::MySQLRowIterator)
@@ -222,7 +235,7 @@ function Base.start(itr::MySQLRowIterator)
 end
 
 function Base.next(itr::MySQLRowIterator, state)
-    mysql_get_row_as_vector!(mysql_fetch_row(itr.result), itr.mysqlfield_types,
+    mysql_get_row_as_vector!(mysql_fetch_row(itr.result), itr.jfield_types,
                              itr.row)
     itr.rowsleft -= 1
     return (itr.row, state)
