@@ -91,60 +91,17 @@ mysql_get_ctype(mysqltype::MYSQL_TYPE) = mysql_get_ctype(mysql_get_julia_type(my
 """
 Interpret a string as a julia datatype.
 """
-function mysql_interpret_field(strval::AbstractString, jtype::DataType)
-    if (jtype == Cuchar)
-        return convert(Cuchar, strval[1])
+mysql_interpret_field(strval::AbstractString, jtype::Type{Cuchar})=strval[1]
 
-    elseif (jtype == Cchar || jtype == Cshort || jtype == Cint ||
-            jtype == Int64 || jtype == Cfloat || jtype == Cdouble)
-        return parse(jtype, strval)
+mysql_interpret_field{T<:Number}(strval::AbstractString, jtype::Type{T})=parse(T, strval)
 
-    elseif (jtype == MySQLDate)
-        return MySQLDate(strval)
+mysql_interpret_field{T<:AbstractString}(strval::AbstractString, jtype::Type{T})=strval
 
-    elseif (jtype == MySQLTime)
-        return MySQLTime(strval)
+mysql_interpret_field(strval::AbstractString, jtype::Type{MySQLDate})=MySQLDate(strval)
 
-    elseif (jtype == MySQLDateTime)
-        return MySQLDateTime(strval)
+mysql_interpret_field(strval::AbstractString, jtype::Type{MySQLTime})=MySQLTime(strval)
 
-    else
-        return strval
-
-    end
-
-end
-
-function mysql_interpret_field(strval, jtype::Cuchar)
-	return strval[1]
-end
-
-function mysql_interpret_field{T<:Number}(strval, jtype::T)	
-	return parse(T, strval)
-end
-
-function mysql_interpret_field{T<:AbstractString}(strval, jtype::T)
-	return strval
-end
-
-function mysql_interpret_field(strval, jtype::AbstractString)
-	return strval
-end
-
-function mysql_interpret_field(strval, jtype::MySQLDate)
-	return MySQLDate(strval)
-end
-
-function mysql_interpret_field(strval, jtype::MySQLTime)
-	return MySQLTime(strval)
-end
-
-function mysql_interpret_field(strval, jtype::MySQLDateTime)
-	return MySQLDateTime(strval)
-end
-function mysql_interpret_field(strval,jtype)
-	return mysql_interpret_field(strval, typeof(jtype))
-end
+mysql_interpret_field(strval::AbstractString, jtype::Type{MySQLDateTime})=MySQLDateTime(strval)
 
 """
 Load a bytestring from `result` pointer given the field index `idx`.
@@ -267,38 +224,15 @@ end
 """
 Fill the row indexed by `row` of the dataframe `df` with values from `result`.
 """
-function populate_row!(df, mysqlfield_types::Array{MYSQL_TYPE}, result::MYSQL_ROW, row, jfield_types_instances)
+function populate_row!(df, mysqlfield_types::Array{MYSQL_TYPE}, result::MYSQL_ROW, row, jfield_types)
     for i = 1:length(mysqlfield_types)
         strval = mysql_load_string_from_resultptr(result, i)
 		if strval == Void
             df[row, i] = NA
         else			
-            df[row, i] = mysql_interpret_field(strval, jfield_types_instances[i])
+            df[row, i] = mysql_interpret_field(strval, jfield_types[i])
         end
     end
-end
-
-"""
-Creates a vector of instances with types specified by the vector coltypes
-"""
-function create_typelist(coltypes)
-	res=Any[]
-	for i=1:length(coltypes)
-		if coltypes[i]<:Number
-			push!(res, zero(coltypes[i]))			
-		elseif coltypes[i]<:AbstractString
-			push!(res, convert(UTF8String, ""))	#UTF8String is an arbitrary choice here		
-		elseif coltypes[i]==MySQLDate
-			push!(res, MySQLDate(1,1,1))
-		elseif coltypes[i]==MySQLTime
-			push!(res, MySQLTime(1,1,1))
-		elseif coltypes[i]==MySQLDateTime
-			push!(res, MySQLDateTime(MySQLDate(1,1,1), MySQLTime(1,1,1)))
-		else
-			error("Unknown column type: $(coltypes[i])")			
-		end		
-	end
-	return res
 end
 
 """
@@ -321,9 +255,9 @@ function mysql_result_to_dataframe(result::MYSQL_RES)
     end
 
     df = DataFrame(jfield_types, field_headers, @compat Int64(nrows))
-    jfield_types_instances=create_typelist(jfield_types) #Column types will be the same for each row			
+	
 	for row = 1:nrows
-		populate_row!(df, mysqlfield_types, mysql_fetch_row(result), row, jfield_types_instances)
+		populate_row!(df, mysqlfield_types, mysql_fetch_row(result), row, jfield_types)
 	end
     return df
 end

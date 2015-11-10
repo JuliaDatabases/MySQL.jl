@@ -1,5 +1,7 @@
 # Constructors for the julia Date, Time and DateTime types.
 
+import Base.==
+
 function MySQLTime(timestr)
     h, m, s = split(timestr, ':')
     MySQLTime(parse(Cint, h), parse(Cint, m), parse(Cint, s))
