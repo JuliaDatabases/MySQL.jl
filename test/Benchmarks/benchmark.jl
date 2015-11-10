@@ -24,7 +24,7 @@ function mysql_benchmarks(queries; use_prepare=0, use_multiquery = 0, operation=
     elseif use_multiquery == 1
         println("*** Multi query test ")
         temp = join(queries)
-        @time mysql_execute_multi_query(conn, temp)
+        @time mysql_execute_query(conn, temp)
     else
         println("*** Normal test ")
         @time for i = 1:size(queries, 1)
@@ -60,7 +60,7 @@ function init_test()
         empno SMALLINT,
         PRIMARY KEY (ID));"""
 
-    mysql_execute_multi_query(conn, query)
+    mysql_execute_query(conn, query)
     println("*** Done initializing test.")
 end
 
