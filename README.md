@@ -94,7 +94,7 @@ Execute a multi query:
 ```
 command = """INSERT INTO Employee (Name) VALUES ('');
              UPDATE Employee SET LunchTime = '15:00:00' WHERE LENGTH(Name) > 5;"""
-data = mysql_execute_multi_query(con, command)
+data = mysql_execute_query(con, command)
 ```
 
 `data` contains an array of dataframes (or arrays if MYSQL_ARRAY was specified as the
