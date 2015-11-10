@@ -91,29 +91,17 @@ mysql_get_ctype(mysqltype::MYSQL_TYPE) = mysql_get_ctype(mysql_get_julia_type(my
 """
 Interpret a string as a julia datatype.
 """
-function mysql_interpret_field(strval::AbstractString, jtype::DataType)
-    if (jtype == Cuchar)
-        return convert(Cuchar, strval[1])
+mysql_interpret_field(strval::AbstractString, jtype::Type{Cuchar})=strval[1]
 
-    elseif (jtype == Cchar || jtype == Cshort || jtype == Cint ||
-            jtype == Int64 || jtype == Cfloat || jtype == Cdouble)
-        return parse(jtype, strval)
+mysql_interpret_field{T<:Number}(strval::AbstractString, jtype::Type{T})=parse(T, strval)
 
-    elseif (jtype == MySQLDate)
-        return MySQLDate(strval)
+mysql_interpret_field{T<:AbstractString}(strval::AbstractString, jtype::Type{T})=strval
 
-    elseif (jtype == MySQLTime)
-        return MySQLTime(strval)
+mysql_interpret_field(strval::AbstractString, jtype::Type{MySQLDate})=MySQLDate(strval)
 
-    elseif (jtype == MySQLDateTime)
-        return MySQLDateTime(strval)
+mysql_interpret_field(strval::AbstractString, jtype::Type{MySQLTime})=MySQLTime(strval)
 
-    else
-        return strval
-
-    end
-
-end
+mysql_interpret_field(strval::AbstractString, jtype::Type{MySQLDateTime})=MySQLDateTime(strval)
 
 """
 Load a bytestring from `result` pointer given the field index `idx`.
@@ -236,15 +224,13 @@ end
 """
 Fill the row indexed by `row` of the dataframe `df` with values from `result`.
 """
-function populate_row!(df, mysqlfield_types::Array{MYSQL_TYPE}, result::MYSQL_ROW, row)
+function populate_row!(df, mysqlfield_types::Array{MYSQL_TYPE}, result::MYSQL_ROW, row, jfield_types)
     for i = 1:length(mysqlfield_types)
         strval = mysql_load_string_from_resultptr(result, i)
-
-        if strval == Void
+		if strval == Void
             df[row, i] = NA
-        else
-            df[row, i] = mysql_interpret_field(strval,
-                                               mysql_get_julia_type(mysqlfield_types[i]))
+        else			
+            df[row, i] = mysql_interpret_field(strval, jfield_types[i])
         end
     end
 end
@@ -269,11 +255,10 @@ function mysql_result_to_dataframe(result::MYSQL_RES)
     end
 
     df = DataFrame(jfield_types, field_headers, @compat Int64(nrows))
-
-    for row = 1:nrows
-        populate_row!(df, mysqlfield_types, mysql_fetch_row(result), row)
-    end
-
+	
+	for row = 1:nrows
+		populate_row!(df, mysqlfield_types, mysql_fetch_row(result), row, jfield_types)
+	end
     return df
 end
 
