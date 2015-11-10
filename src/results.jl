@@ -86,22 +86,29 @@ function mysql_get_ctype(jtype::DataType)
     return jtype
 end
 
-mysql_get_ctype(mysqltype::MYSQL_TYPE) = mysql_get_ctype(mysql_get_julia_type(mysqltype))
+mysql_get_ctype(mysqltype::MYSQL_TYPE) = 
+    mysql_get_ctype(mysql_get_julia_type(mysqltype))
 
 """
 Interpret a string as a julia datatype.
 """
-mysql_interpret_field(strval::AbstractString, jtype::Type{Cuchar})=strval[1]
+mysql_interpret_field(strval::AbstractString,
+                      jtype::Type{Cuchar}) = strval[1]
 
-mysql_interpret_field{T<:Number}(strval::AbstractString, jtype::Type{T})=parse(T, strval)
+mysql_interpret_field{T<:Number}(strval::AbstractString,
+                                 jtype::Type{T}) = parse(T, strval)
 
-mysql_interpret_field{T<:AbstractString}(strval::AbstractString, jtype::Type{T})=strval
+mysql_interpret_field{T<:AbstractString}(strval::AbstractString,
+                                         jtype::Type{T}) = strval
 
-mysql_interpret_field(strval::AbstractString, jtype::Type{MySQLDate})=MySQLDate(strval)
+mysql_interpret_field(strval::AbstractString,
+                      jtype::Type{MySQLDate}) = MySQLDate(strval)
 
-mysql_interpret_field(strval::AbstractString, jtype::Type{MySQLTime})=MySQLTime(strval)
+mysql_interpret_field(strval::AbstractString,
+                      jtype::Type{MySQLTime}) = MySQLTime(strval)
 
-mysql_interpret_field(strval::AbstractString, jtype::Type{MySQLDateTime})=MySQLDateTime(strval)
+mysql_interpret_field(strval::AbstractString,
+                      jtype::Type{MySQLDateTime}) = MySQLDateTime(strval)
 
 """
 Load a bytestring from `result` pointer given the field index `idx`.
@@ -123,8 +130,8 @@ function mysql_load_string_from_resultptr(result::MYSQL_ROW, idx)
 end
 
 """
-Returns an array of MYSQL_FIELD. This array contains metadata information such as
- field type and field length etc. (see types.jl)
+Returns an array of MYSQL_FIELD. This array contains metadata information such
+ as field type and field length etc. (see types.jl)
 """
 function mysql_get_field_metadata(result::MYSQL_RES)
     nfields = mysql_num_fields(result)
@@ -159,7 +166,8 @@ function mysql_get_field_types(mysqlfields::Array{MYSQL_FIELD})
 end
 
 """
-Get the result row `result` as a vector given the field types in an array `mysqlfield_types`.
+Get the result row `result` as a vector given the field types in an
+ array `mysqlfield_types`.
 """
 function mysql_get_row_as_vector(result::MYSQL_ROW)
     mysqlfield_types = mysql_get_field_types(result)
@@ -168,8 +176,9 @@ function mysql_get_row_as_vector(result::MYSQL_ROW)
     return retvec
 end
 
-function mysql_get_row_as_vector!(result::MYSQL_ROW, mysqlfield_types::Array{MYSQL_TYPE},
-                                     retvec::Vector{Any})
+function mysql_get_row_as_vector!(result::MYSQL_ROW,
+                                  mysqlfield_types::Array{MYSQL_TYPE},
+                                  retvec::Vector{Any})
     for i = 1:length(mysqlfield_types)
         strval = mysql_load_string_from_resultptr(result, i)
 
@@ -177,7 +186,7 @@ function mysql_get_row_as_vector!(result::MYSQL_ROW, mysqlfield_types::Array{MYS
             retvec[i] = Void
         else
             retvec[i] = mysql_interpret_field(strval,
-                                              mysql_get_julia_type(mysqlfield_types[i]))
+                                     mysql_get_julia_type(mysqlfield_types[i]))
         end
     end
 end
@@ -194,7 +203,8 @@ function mysql_get_result_as_array(result::MYSQL_RES)
 
     for i = 1:nrows
         retarr[i] = Array(Any, nfields)
-        mysql_get_row_as_vector!(mysql_fetch_row(result), mysqlfield_types, retarr[i])
+        mysql_get_row_as_vector!(mysql_fetch_row(result),
+                                 mysqlfield_types, retarr[i])
     end
 
     return retarr
@@ -212,7 +222,8 @@ function Base.start(itr::MySQLRowIterator)
 end
 
 function Base.next(itr::MySQLRowIterator, state)
-    mysql_get_row_as_vector!(mysql_fetch_row(itr.result), itr.mysqlfield_types, itr.row)
+    mysql_get_row_as_vector!(mysql_fetch_row(itr.result), itr.mysqlfield_types,
+                             itr.row)
     itr.rowsleft -= 1
     return (itr.row, state)
 end
@@ -227,9 +238,9 @@ Fill the row indexed by `row` of the dataframe `df` with values from `result`.
 function populate_row!(df, nfields, result::MYSQL_ROW, row, jfield_types)
     for i = 1:nfields
         strval = mysql_load_string_from_resultptr(result, i)
-		if strval == Void
+        if strval == Void
             df[row, i] = NA
-        else			
+        else
             df[row, i] = mysql_interpret_field(strval, jfield_types[i])
         end
     end
@@ -255,10 +266,9 @@ function mysql_result_to_dataframe(result::MYSQL_RES)
     end
 
     df = DataFrame(jfield_types, field_headers, @compat Int64(nrows))
-	
-	for row = 1:nrows
-		populate_row!(df, nfields, mysql_fetch_row(result), row, jfield_types)
-	end
+    for row = 1:nrows
+        populate_row!(df, nfields, mysql_fetch_row(result), row, jfield_types)
+    end
     return df
 end
 
@@ -290,10 +300,12 @@ function mysql_binary_interpret_field(buf, T::Type)
 end
 
 """
-Populate a row in the dataframe `df` indexed by `row` given the number of fields `nfields`,
- the type of each field `mysqlfield_types` and an array `bindarr` to which the results are bound.
+Populate a row in the dataframe `df` indexed by `row` given the number of
+ fields `nfields`, the type of each field `mysqlfield_types` and an array
+ `bindarr` to which the results are bound.
 """
-function stmt_populate_row!(df, mysqlfield_types::Array{MYSQL_TYPE}, row, bindarr)
+function stmt_populate_row!(df, mysqlfield_types::Array{MYSQL_TYPE}, row,
+                            bindarr)
     for i = 1:length(mysqlfield_types)
         if bindarr[i].is_null_value != 0
             df[row, i] = NA
@@ -306,10 +318,11 @@ function stmt_populate_row!(df, mysqlfield_types::Array{MYSQL_TYPE}, row, bindar
 end
 
 """
-Given the result metadata `metadata` and the prepared statement pointer `stmtptr`,
- get the result as a dataframe.
+Given the result metadata `metadata` and the prepared statement pointer
+ `stmtptr`, get the result as a dataframe.
 """
-function mysql_stmt_result_to_dataframe(metadata::MYSQL_RES, stmtptr::Ptr{MYSQL_STMT})
+function mysql_stmt_result_to_dataframe(metadata::MYSQL_RES,
+                                        stmtptr::Ptr{MYSQL_STMT})
     nfields = mysql_num_fields(metadata)
     fields = mysql_fetch_fields(metadata)
     
