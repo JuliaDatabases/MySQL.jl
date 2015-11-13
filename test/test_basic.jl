@@ -57,11 +57,12 @@ function show_results()
     command = """SELECT * FROM Employee;"""
     dframe = mysql_execute_query(hndl, command)
     println("\n *** Results as Dataframe: \n", dframe)
-    println(DataFrameResults)
+    println("\n *** Expected Result: \n", DataFrameResults)
     @test dfisequal(dframe, DataFrameResults)
 
     retarr = mysql_execute_query(hndl, command, MYSQL_ARRAY)
     println("\n *** Results as Array: \n", retarr)
+    println("\n *** Expected Result: \n", ArrayResults)
 
     println("\n *** Results using Iterator: \n")
     response = mysql_query(hndl, command)

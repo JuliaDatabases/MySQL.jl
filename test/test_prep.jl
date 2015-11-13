@@ -149,7 +149,8 @@ function show_results()
 
     dframe = mysql_stmt_result_to_dataframe(stmt)
     mysql_stmt_close(stmt)
-    println(dframe)
+    println("\n *** Results as dataframe: \n", dframe)
+    println("\n *** Expected result: \n", DataFrameResultsPrep)
     @test dfisequal(dframe, DataFrameResultsPrep)
 end
 

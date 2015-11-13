@@ -22,7 +22,7 @@ end
 
 function insert_queries(number_of_datasets)
     println("*** Generating insert queries for $number_of_datasets tuples")
-    insert_query = Array(String, number_of_datasets)
+    insert_query = Array(AbstractString, number_of_datasets)
     varcha, rfloat, datetime, tint, enume, mint, rint, bint, dfloat, dpfloat, chara, sint = create_queries(number_of_datasets)
     for i = 1:number_of_datasets
         insert_query[i] = "INSERT INTO Employee (Name, Salary, LastLogin, OfficeNo, JobType,h, n, z, z1, z2, cha, empno) VALUES ('$(varcha[i])', $(rfloat[i]), '$(datetime[i])', $(tint[i]), '$(enume[i])', $(mint[i]), $(rint[i]), $(bint[i]), $(dfloat[i]), $(dpfloat[i]), '$(chara[i])', $(sint[i]));"
@@ -35,7 +35,7 @@ end
 function update_queries(number_of_datasets)
     println("*** Generating update queries for $number_of_datasets tuples")
     number_of_datasets = number_of_datasets
-    update_query = Array(String, number_of_datasets)
+    update_query = Array(AbstractString, number_of_datasets)
     varcha, rfloat, datetime, tint, enume, mint, rint, bint, dfloat, dpfloat, chara, sint = create_queries(number_of_datasets)
     for i = 1:number_of_datasets
         update_query[i] = "UPDATE Employee SET Name='$(varcha[i])', Salary=$(rfloat[i]), LastLogin='$(datetime[i])', OfficeNo=$(tint[i]), JobType='$(enume[i])', h=$(mint[i]), n=$(rint[i]), z=$(bint[i]), z1=$(dfloat[i]), z2=$(dpfloat[i]), cha='$(chara[i])', empno=$(sint[i]) where ID = $i;"
