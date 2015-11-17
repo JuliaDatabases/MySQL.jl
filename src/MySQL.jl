@@ -6,6 +6,8 @@ module MySQL
     include("api.jl")
     include("handy.jl")
     include("results.jl")
+    include("dbapi_types.jl")
+    include("dbapi.jl")
 
     export mysql_get_julia_type, mysql_interpret_field, mysql_load_string_from_resultptr,
            mysql_get_row_as_vector, mysql_get_result_as_array, mysql_result_to_dataframe, 
