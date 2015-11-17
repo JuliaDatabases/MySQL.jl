@@ -204,7 +204,7 @@ Iterator for the mysql result (MYSQL_RES).
 """
 type MySQLRowIterator
     result::MYSQL_RES
-    row::Array{Any, 1}
+    row::Tuple
     jfield_types::Array{Type, 1}
     rowsleft::Int64
 end

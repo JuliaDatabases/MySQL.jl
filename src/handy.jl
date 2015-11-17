@@ -94,15 +94,20 @@ function mysql_execute_query(mysqlptr::Ptr{Void}, command, opformat=MYSQL_DATA_F
 
     data = Any[]
 
+    if opformat == MYSQL_DATA_FRAME
+        convfunc = mysql_result_to_dataframe
+    elseif opformat == MYSQL_ARRAY
+        convfunc = mysql_get_result_as_array
+    elseif opformat == MYSQL_TUPLES
+        convfunc = mysql_get_result_as_tuples
+    else
+        error("Invalid output format: $opformat")
+    end
+
     while true
         result = mysql_store_result(mysqlptr)
         if result != C_NULL # if select query
-            retval = Void
-            if opformat == MYSQL_DATA_FRAME
-                retval = mysql_result_to_dataframe(result)
-            else opformat == MYSQL_ARRAY
-                retval = mysql_get_result_as_array(result)
-            end
+            retval = convfunc(result)
             push!(data, retval)
             mysql_free_result(result)
 
