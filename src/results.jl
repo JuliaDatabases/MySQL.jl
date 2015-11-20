@@ -191,7 +191,7 @@ end
 
 function mysql_get_row_as_tuple(result::MYSQL_ROW, jfield_types::Array{Type})
     vec = mysql_get_row_as_vector(result, jfield_types)
-    return (vec...)
+    return tuple(vec...)
 end
 
 """

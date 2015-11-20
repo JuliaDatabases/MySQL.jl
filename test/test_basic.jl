@@ -74,7 +74,7 @@ function show_results()
     i = 1
     for row in MySQLRowIterator(result)
         println(row)
-        @test row == (ArrayResults[i]...)
+        @test row == tuple(ArrayResults[i]...)
         i += 1
     end
 
@@ -84,7 +84,7 @@ function show_results()
     tupres = mysql_execute_query(hndl, command, MYSQL_TUPLES)
     println(tupres)
     for i in length(tupres)
-        @test tupres[i] == (ArrayResults[i]...)
+        @test tupres[i] == tuple(ArrayResults[i]...)
     end
 end
 
