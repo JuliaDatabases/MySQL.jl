@@ -56,7 +56,14 @@ command = """SELECT * FROM Employee;"""
 retarr = mysql_execute_query(con, command, opformat=MYSQL_ARRAY)
 ```
 
-Iterate over rows:
+Obtain SELECT results as julia Array with each row as a tuple:
+
+```
+command = """SELECT * FROM Employee;"""
+retarr = mysql_execute_query(con, command, opformat=MYSQL_TUPLES)
+```
+
+Iterate over rows (get each row as a tuple):
 
 ```
 response = mysql_query(con, "SELECT * FROM some_table;")
