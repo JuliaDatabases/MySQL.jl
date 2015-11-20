@@ -167,12 +167,10 @@ end
 
 """
 Get the result row `result` as a vector given the field types in an
- array `mysqlfield_types`.
+ array `jfield_types`.
 """
-function mysql_get_row_as_vector(result::MYSQL_ROW)
-    mysqlfield_types = mysql_get_field_types(result)
-    retvec = Vector(Any, length(mysqlfield_types))
-    jfield_types = mysql_get_jtype_array(mysqlfield_types)
+function mysql_get_row_as_vector(result::MYSQL_ROW, jfield_types::Array{Type})
+    retvec = Array(Any, length(jfield_types))
     mysql_get_row_as_vector!(result, jfield_types, retvec)
     return retvec
 end
@@ -189,6 +187,11 @@ function mysql_get_row_as_vector!(result::MYSQL_ROW,
             retvec[i] = mysql_interpret_field(strval, jfield_types[i])
         end
     end
+end
+
+function mysql_get_row_as_tuple(result::MYSQL_ROW, jfield_types::Array{Type})
+    vec = mysql_get_row_as_vector(result, jfield_types)
+    return tuple(vec...)
 end
 
 """
@@ -222,12 +225,24 @@ function mysql_get_result_as_array(result::MYSQL_RES)
     return retarr
 end
 
+function mysql_get_result_as_tuples(result::MYSQL_RES)
+    nrows = mysql_num_rows(result)
+    retarr = Array(Tuple, nrows)
+    mysqlfield_types = mysql_get_field_types(result)
+    jfield_types = mysql_get_jtype_array(mysqlfield_types)
+    for i = 1:nrows
+        retarr[i] = mysql_get_row_as_tuple(mysql_fetch_row(result), jfield_types)
+    end
+
+    return retarr
+end
+
 function MySQLRowIterator(result)
     nfields = mysql_num_fields(result)
     mysqlfield_types = mysql_get_field_types(result)
     jfield_types = mysql_get_jtype_array(mysqlfield_types)
     nrows = mysql_num_rows(result)
-    MySQLRowIterator(result, Array(Any, nfields), jfield_types, nrows)
+    MySQLRowIterator(result, (), jfield_types, nrows)
 end
 
 function Base.start(itr::MySQLRowIterator)
@@ -235,8 +250,7 @@ function Base.start(itr::MySQLRowIterator)
 end
 
 function Base.next(itr::MySQLRowIterator, state)
-    mysql_get_row_as_vector!(mysql_fetch_row(itr.result), itr.jfield_types,
-                             itr.row)
+    itr.row = mysql_get_row_as_tuple(mysql_fetch_row(itr.result), itr.jfield_types)
     itr.rowsleft -= 1
     return (itr.row, state)
 end

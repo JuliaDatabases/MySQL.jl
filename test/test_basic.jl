@@ -74,13 +74,18 @@ function show_results()
     i = 1
     for row in MySQLRowIterator(result)
         println(row)
-        for j = 1:length(row)
-            @test row[j] == ArrayResults[i][j]
-        end
+        @test row == tuple(ArrayResults[i]...)
         i += 1
     end
 
     mysql_free_result(result)
+
+    println("\n *** Results as tuples: \n")
+    tupres = mysql_execute_query(hndl, command, MYSQL_TUPLES)
+    println(tupres)
+    for i in length(tupres)
+        @test tupres[i] == tuple(ArrayResults[i]...)
+    end
 end
 
 println("\n*** Running Basic Test ***\n")
