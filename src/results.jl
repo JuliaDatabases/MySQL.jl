@@ -53,7 +53,7 @@ function mysql_get_julia_type(mysqltype::MYSQL_TYPE)
         return Clong
 
     elseif (mysqltype == MYSQL_TYPE_TIMESTAMP)
-        return Cint
+        return MySQLDateTime
 
     elseif (mysqltype == MYSQL_TYPE_DATE)
         return MySQLDate

@@ -1,5 +1,7 @@
 # Constructors for the julia Date, Time and DateTime types.
 
+using Requires
+
 import Base.==
 
 function MySQLTime(timestr)
@@ -76,4 +78,12 @@ end
 
 function ==(a::MySQLDateTime, b::MySQLDateTime)
     a.date == b.date && a.time == b.time
+end
+
+@require Dates begin
+using Dates
+Base.convert(::Type{Date}, date::MySQLDate) = Date(date.year, date.month, date.day)
+Base.convert(::Type{DateTime}, dtime::MySQLDateTime) =
+    DateTime(dtime.date.year, dtime.date.month, dtime.date.day,
+             dtime.time.hour, dtime.time.minute, dtime.time.second)
 end
