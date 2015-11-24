@@ -31,7 +31,7 @@ The record that would be returned by mysql_fetch_row API.
 """
 typealias MYSQL_ROW Ptr{Ptr{Cchar}} # pointer to an array of strings
 
-typealias MYSQL_TYPE Cuint
+typealias MYSQL_TYPE UInt32
 
 """
 The field object that contains the metadata of the table. 

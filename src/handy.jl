@@ -205,3 +205,17 @@ for func = (:mysql_stmt_execute, :mysql_stmt_prepare, :mysql_stmt_error,
         end
     end)
 end
+
+"""
+Get a `MYSQL_BIND` instance given the mysql type `typ` and a `value`.
+"""
+mysql_bind_init(typ::MYSQL_TYPE, value) =
+    mysql_bind_init(mysql_get_julia_type(typ), typ, value)
+
+mysql_bind_init(jtype::Union{Type{Date}, Type{DateTime}}, typ, value) =
+    MYSQL_BIND([convert(MYSQL_TIME, convert(jtype, value))], typ)
+
+mysql_bind_init(::Type{AbstractString}, typ, value) = MYSQL_BIND(value, typ)
+mysql_bind_init(jtype, typ, value) = MYSQL_BIND([convert(jtype, value)], typ)
+
+export mysql_bind_init
