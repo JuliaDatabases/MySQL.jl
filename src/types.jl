@@ -85,18 +85,7 @@ type MySQLTime
     second::Cuint
 end
 
-type MySQLDate
-    year::Cuint
-    month::Cuint
-    day::Cuint
-end
-
-type MySQLDateTime
-    date::MySQLDate
-    time::MySQLTime
-end
-
-export MySQLDate, MySQLTime, MySQLDateTime, MYSQL_TIME
+export MySQLTime, MYSQL_TIME
 
 """
 Mirror to MYSQL_BIND struct in mysql_bind.h

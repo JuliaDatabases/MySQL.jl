@@ -2,24 +2,25 @@
 # test_common.jl
 
 using DataFrames
+using Dates
 
 include("test_common.jl")
 
 const ArrayResults = Array{Any}[
-    [1, "John", 10000.5f0, MySQLDate("2015-8-3"),
-     MySQLDateTime("2015-9-5 12:31:30"), MySQLTime("12:0:0"),
+    [1, "John", 10000.5f0, convert(Date, "2015-8-3"),
+     convert(DateTime, "2015-9-5 12:31:30"), MySQLTime("12:0:0"),
      1, "HR", 0x01, 1301],
 
-    [2, "Tom", 20000.25f0, MySQLDate("2015-8-4"),
-     MySQLDateTime("2015-10-12 13:12:14"), MySQLTime("13:0:0"),
+    [2, "Tom", 20000.25f0, convert(Date, "2015-8-4"),
+     convert(DateTime, "2015-10-12 13:12:14"), MySQLTime("13:0:0"),
      12, "HR", 0x01, 1422],
 
-    [3, "Jim", 25000.0f0, MySQLDate("2015-6-2"),
-     MySQLDateTime("2015-9-5 10:5:10"), MySQLTime("12:30:0"),
+    [3, "Jim", 25000.0f0, convert(Date, "2015-6-2"),
+     convert(DateTime, "2015-9-5 10:5:10"), MySQLTime("12:30:0"),
      45, "Management", Void, 1567],
 
-    [4, "Tim", 25000.0f0, MySQLDate("2015-7-25"),
-     MySQLDateTime("2015-10-10 12:12:25"), MySQLTime("12:30:0"),
+    [4, "Tim", 25000.0f0, convert(Date, "2015-7-25"),
+     convert(DateTime, "2015-10-10 12:12:25"), MySQLTime("12:30:0"),
      56, "Accounts", 0x01, 3200],
 
     [5, Void, Void, Void, Void, Void, Void, Void, Void, Void]]
@@ -28,12 +29,12 @@ const DataFrameResults = DataFrame(
     ID=[1, 2, 3, 4, 5], 
     Name=@data(["John", "Tom", "Jim", "Tim", NA]),
     Salary=@data([10000.5, 20000.3, 25000.0, 25000.0, NA]),
-    JoinDate=@data([MySQLDate("2015-8-3"), MySQLDate("2015-8-4"),
-              MySQLDate("2015-6-2"), MySQLDate("2015-7-25"), NA]),
-    LastLogin=@data([MySQLDateTime("2015-9-5 12:31:30"),
-               MySQLDateTime("2015-10-12 13:12:14"),
-               MySQLDateTime("2015-9-5 10:5:10"),
-               MySQLDateTime("2015-10-10 12:12:25"), NA]),
+    JoinDate=@data([convert(Date, "2015-8-3"), convert(Date, "2015-8-4"),
+              convert(Date, "2015-6-2"), convert(Date, "2015-7-25"), NA]),
+    LastLogin=@data([convert(DateTime, "2015-9-5 12:31:30"),
+               convert(DateTime, "2015-10-12 13:12:14"),
+               convert(DateTime, "2015-9-5 10:5:10"),
+               convert(DateTime, "2015-10-10 12:12:25"), NA]),
     LunchTime=@data([MySQLTime("12:0:0"), MySQLTime("13:0:0"),
                MySQLTime("12:30:0"), MySQLTime("12:30:0"), NA]),
     OfficeNo=@data([1, 12, 45, 56, NA]),
