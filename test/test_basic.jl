@@ -13,19 +13,19 @@ include("test_common.jl")
 
 const ArrayResults = Array{Any}[
     [1, "John", 10000.5f0, convert(Date, "2015-8-3"),
-     convert(DateTime, "2015-9-5 12:31:30"), MySQLTime("12:0:0"),
+     convert(DateTime, "2015-9-5 12:31:30"), convert(DateTime, "12:0:0"),
      1, "HR", 0x01, 1301],
 
     [2, "Tom", 20000.25f0, convert(Date, "2015-8-4"),
-     convert(DateTime, "2015-10-12 13:12:14"), MySQLTime("13:0:0"),
+     convert(DateTime, "2015-10-12 13:12:14"), convert(DateTime, "13:0:0"),
      12, "HR", 0x01, 1422],
 
     [3, "Jim", 25000.0f0, convert(Date, "2015-6-2"),
-     convert(DateTime, "2015-9-5 10:5:10"), MySQLTime("12:30:0"),
+     convert(DateTime, "2015-9-5 10:5:10"), convert(DateTime, "12:30:0"),
      45, "Management", Void, 1567],
 
     [4, "Tim", 25000.0f0, convert(Date, "2015-7-25"),
-     convert(DateTime, "2015-10-10 12:12:25"), MySQLTime("12:30:0"),
+     convert(DateTime, "2015-10-10 12:12:25"), convert(DateTime, "12:30:0"),
      56, "Accounts", 0x01, 3200],
 
     [5, Void, Void, Void, Void, Void, Void, Void, Void, Void]]
@@ -40,8 +40,8 @@ const DataFrameResults = DataFrame(
                convert(DateTime, "2015-10-12 13:12:14"),
                convert(DateTime, "2015-9-5 10:5:10"),
                convert(DateTime, "2015-10-10 12:12:25"), NA]),
-    LunchTime=@data([MySQLTime("12:0:0"), MySQLTime("13:0:0"),
-               MySQLTime("12:30:0"), MySQLTime("12:30:0"), NA]),
+    LunchTime=@data([convert(DateTime, "12:0:0"), convert(DateTime, "13:0:0"),
+               convert(DateTime, "12:30:0"), convert(DateTime, "12:30:0"), NA]),
     OfficeNo=@data([1, 12, 45, 56, NA]),
     JobType=@data(["HR", "HR", "Management", "Accounts", NA]),
     Senior=@data([0x01, 0x01, NA, 0x01, NA]),

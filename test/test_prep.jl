@@ -12,8 +12,8 @@ const DataFrameResultsPrep = DataFrame(
                convert(DateTime, "2015-10-12 13:12:14"),
                convert(DateTime, "2015-9-5 10:5:10"),
                convert(DateTime, "2015-10-10 12:12:25"), NA]),
-    LunchTime=@data([MySQLTime("12:0:0"), MySQLTime("13:0:0"),
-               MySQLTime("12:30:0"), MySQLTime("12:30:0"), NA]),
+    LunchTime=@data([convert(DateTime, "12:0:0"), convert(DateTime, "13:0:0"),
+               convert(DateTime, "12:30:0"), convert(DateTime, "12:30:0"), NA]),
     OfficeNo=@data([1, 12, 45, 56, NA]),
     JobType=@data([NA, NA, NA, NA, NA]),
     Senior=@data([NA, NA, NA, NA, NA]),
@@ -84,25 +84,25 @@ function insert_values()
 
     values = [("John", [convert(Float32, 10000.50)], [convert(MYSQL_TIME, convert(Date, "2015-8-3"))],
                [convert(MYSQL_TIME, convert(DateTime, "2015-9-5 12:31:30"))],
-               [convert(MYSQL_TIME, MySQLTime("12:00:00"))], [convert(Cchar, 1)],
+               [convert(MYSQL_TIME, convert(DateTime, "12:00:00"))], [convert(Cchar, 1)],
                # [convert(Culong, 1)],
                [convert(Cshort, 1301)]),
 
               ("Tom", [convert(Float32, 20000.25)], [convert(MYSQL_TIME, convert(Date, "2015-8-4"))],
                [convert(MYSQL_TIME, convert(DateTime, "2015-10-12 13:12:14"))],
-               [convert(MYSQL_TIME, MySQLTime("13:00:00"))], [convert(Cchar, 12)],
+               [convert(MYSQL_TIME, convert(DateTime, "13:00:00"))], [convert(Cchar, 12)],
                # [convert(Culong, 1)],
                [convert(Cshort, 1422)]),
 
               ("Jim", [convert(Float32, 30000.00)], [convert(MYSQL_TIME, convert(Date, "2015-6-2"))],
                [convert(MYSQL_TIME, convert(DateTime, "2015-9-5 10:05:10"))],
-               [convert(MYSQL_TIME, MySQLTime("12:30:00"))], [convert(Cchar, 45)],
+               [convert(MYSQL_TIME, convert(DateTime, "12:30:00"))], [convert(Cchar, 45)],
                # [convert(Culong, 0)], 
                [convert(Cshort, 1567)]),
 
               ("Tim", [convert(Float32, 15000.50)], [convert(MYSQL_TIME, convert(Date, "2015-7-25"))],
                [convert(MYSQL_TIME, convert(DateTime, "2015-10-10 12:12:25"))],
-               [convert(MYSQL_TIME, MySQLTime("12:30:00"))], [convert(Cchar, 56)],
+               [convert(MYSQL_TIME, convert(DateTime, "12:30:00"))], [convert(Cchar, 56)],
                # [convert(Culong, 0)],
                [convert(Cshort, 3200)])]
 

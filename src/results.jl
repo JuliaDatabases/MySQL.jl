@@ -59,7 +59,7 @@ function mysql_get_julia_type(mysqltype::MYSQL_TYPE)
         return Date
 
     elseif (mysqltype == MYSQL_TYPE_TIME)
-        return MySQLTime
+        return DateTime
 
     elseif (mysqltype == MYSQL_TYPE_DATETIME)
         return DateTime
@@ -79,7 +79,7 @@ end
 Get the C type that would be needed when using prepared statement.
 """
 function mysql_get_ctype(jtype::DataType)
-    if (jtype == Date || jtype == MySQLTime || jtype == DateTime)
+    if (jtype == Date || jtype == DateTime)
         return MYSQL_TIME
     end
 
@@ -102,9 +102,6 @@ mysql_interpret_field{T<:AbstractString}(strval::AbstractString, ::Type{T}) =
 
 mysql_interpret_field(strval::AbstractString, ::Type{Date}) =
     convert(Date, strval)
-
-mysql_interpret_field(strval::AbstractString, ::Type{MySQLTime}) =
-    MySQLTime(strval)
 
 mysql_interpret_field(strval::AbstractString, ::Type{DateTime}) =
     convert(DateTime, strval)
@@ -307,14 +304,12 @@ mysql_binary_interpret_field(buf, ::Type{AbstractString}) =
 function mysql_binary_interpret_field(buf, T::Type)
     value = unsafe_load(convert(Ptr{T}, buf), 1)
 
-    if (typeof(value) == MYSQL_TIME)
-        if (value.timetype == MYSQL_TIMESTAMP_DATE)
+    if typeof(value) == MYSQL_TIME
+        if value.timetype == MYSQL_TIMESTAMP_DATE
             return convert(Date, value)
 
-        elseif (value.timetype == MYSQL_TIMESTAMP_TIME)
-            return MySQLTime(value)
-
-        elseif (value.timetype == MYSQL_TIMESTAMP_DATETIME)
+        elseif (value.timetype == MYSQL_TIMESTAMP_TIME
+                || value.timetype == MYSQL_TIMESTAMP_DATETIME)
             return convert(DateTime, value)
 
         else
