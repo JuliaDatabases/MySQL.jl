@@ -1,6 +1,10 @@
 # Constructors for the julia Date, Time and DateTime types.
 
-using Dates
+if VERSION < v"0.4-"
+    using Dates
+else
+    using Base.Dates
+end
 
 import Base.==
 

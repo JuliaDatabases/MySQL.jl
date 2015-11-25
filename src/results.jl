@@ -2,9 +2,11 @@
 
 using DataFrames
 using Compat
-using Dates
 
-if VERSION > v"0.3.11"
+if VERSION < v"0.4-"
+    using Dates
+else
+    using Base.Dates
     c_malloc = Libc.malloc
     c_free = Libc.free
 end
