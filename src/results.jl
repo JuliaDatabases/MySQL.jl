@@ -3,10 +3,10 @@
 using DataFrames
 using Compat
 
-const MYSQL_DEFAULT_DATE_FORMAT = "yyyy-mm-dd"
-const MYSQL_DEFAULT_DATETIME_FORMAT = "yyyy-mm-dd HH:MM:SS"
-
-if VERSION > v"0.3.11"
+if VERSION < v"0.4-"
+    using Dates
+else
+    using Base.Dates
     c_malloc = Libc.malloc
     c_free = Libc.free
 end
@@ -53,16 +53,16 @@ function mysql_get_julia_type(mysqltype::MYSQL_TYPE)
         return Clong
 
     elseif (mysqltype == MYSQL_TYPE_TIMESTAMP)
-        return Cint
+        return DateTime
 
     elseif (mysqltype == MYSQL_TYPE_DATE)
-        return MySQLDate
+        return Date
 
     elseif (mysqltype == MYSQL_TYPE_TIME)
-        return MySQLTime
+        return DateTime
 
     elseif (mysqltype == MYSQL_TYPE_DATETIME)
-        return MySQLDateTime
+        return DateTime
 
     elseif (mysqltype == MYSQL_TYPE_VARCHAR ||
             mysqltype == MYSQL_TYPE_VAR_STRING ||
@@ -79,7 +79,7 @@ end
 Get the C type that would be needed when using prepared statement.
 """
 function mysql_get_ctype(jtype::DataType)
-    if (jtype == MySQLDate || jtype == MySQLTime || jtype == MySQLDateTime)
+    if (jtype == Date || jtype == DateTime)
         return MYSQL_TIME
     end
 
@@ -92,23 +92,19 @@ mysql_get_ctype(mysqltype::MYSQL_TYPE) =
 """
 Interpret a string as a julia datatype.
 """
-mysql_interpret_field(strval::AbstractString,
-                      jtype::Type{Cuchar}) = strval[1]
+mysql_interpret_field(strval::AbstractString, ::Type{Cuchar}) = strval[1]
 
-mysql_interpret_field{T<:Number}(strval::AbstractString,
-                                 jtype::Type{T}) = parse(T, strval)
+mysql_interpret_field{T<:Number}(strval::AbstractString, ::Type{T}) =
+    parse(T, strval)
 
-mysql_interpret_field{T<:AbstractString}(strval::AbstractString,
-                                         jtype::Type{T}) = strval
+mysql_interpret_field{T<:AbstractString}(strval::AbstractString, ::Type{T}) =
+    strval
 
-mysql_interpret_field(strval::AbstractString,
-                      jtype::Type{MySQLDate}) = MySQLDate(strval)
+mysql_interpret_field(strval::AbstractString, ::Type{Date}) =
+    convert(Date, strval)
 
-mysql_interpret_field(strval::AbstractString,
-                      jtype::Type{MySQLTime}) = MySQLTime(strval)
-
-mysql_interpret_field(strval::AbstractString,
-                      jtype::Type{MySQLDateTime}) = MySQLDateTime(strval)
+mysql_interpret_field(strval::AbstractString, ::Type{DateTime}) =
+    convert(DateTime, strval)
 
 """
 Load a bytestring from `result` pointer given the field index `idx`.
@@ -308,15 +304,13 @@ mysql_binary_interpret_field(buf, ::Type{AbstractString}) =
 function mysql_binary_interpret_field(buf, T::Type)
     value = unsafe_load(convert(Ptr{T}, buf), 1)
 
-    if (typeof(value) == MYSQL_TIME)
-        if (value.timetype == MYSQL_TIMESTAMP_DATE)
-            return MySQLDate(value)
+    if typeof(value) == MYSQL_TIME
+        if value.timetype == MYSQL_TIMESTAMP_DATE
+            return convert(Date, value)
 
-        elseif (value.timetype == MYSQL_TIMESTAMP_TIME)
-            return MySQLTime(value)
-
-        elseif (value.timetype == MYSQL_TIMESTAMP_DATETIME)
-            return MySQLDateTime(value)
+        elseif (value.timetype == MYSQL_TIMESTAMP_TIME
+                || value.timetype == MYSQL_TIMESTAMP_DATETIME)
+            return convert(DateTime, value)
 
         else
             error("MySQL Time type not recognized.")

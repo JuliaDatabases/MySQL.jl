@@ -76,27 +76,7 @@ immutable MYSQL_TIME
     timetype::Cuint
 end
 
-
-# Julia types for Time, Date and DateTime.
-
-type MySQLTime
-    hour::Cuint
-    minute::Cuint
-    second::Cuint
-end
-
-type MySQLDate
-    year::Cuint
-    month::Cuint
-    day::Cuint
-end
-
-type MySQLDateTime
-    date::MySQLDate
-    time::MySQLTime
-end
-
-export MySQLDate, MySQLTime, MySQLDateTime, MYSQL_TIME
+export MYSQL_TIME
 
 """
 Mirror to MYSQL_BIND struct in mysql_bind.h
