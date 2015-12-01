@@ -150,4 +150,4 @@ const MYSQL_TIMESTAMP_DATE     = 0
 const MYSQL_TIMESTAMP_DATETIME = 1
 const MYSQL_TIMESTAMP_TIME     = 2
 
-const NOT_NULL_FLAG = UInt32(1)
+@compat const NOT_NULL_FLAG = UInt32(1)

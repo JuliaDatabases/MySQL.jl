@@ -92,7 +92,7 @@ mysql_get_ctype(mysqltype::MYSQL_TYPE) =
 """
 Interpret a string as a julia datatype.
 """
-mysql_interpret_field(strval::AbstractString, ::Type{Cuchar}) = UInt8(strval[1])
+@compat mysql_interpret_field(strval::AbstractString, ::Type{Cuchar}) = UInt8(strval[1])
 
 mysql_interpret_field{T<:Number}(strval::AbstractString, ::Type{T}) =
     parse(T, strval)

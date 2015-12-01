@@ -2,6 +2,7 @@
 # test_common.jl
 
 using DataFrames
+using Compat
 
 if VERSION < v"0.4-"
     using Dates
@@ -11,7 +12,7 @@ end
 
 include("test_common.jl")
 
-const ArrayResults = Array{Any}[
+@compat const ArrayResults = Array{Any}[
     [1, Nullable("John"), Nullable(10000.5f0), Nullable(convert(Date, "2015-08-03")),
      Nullable(convert(DateTime, "2015-09-05 12:31:30")),
      Nullable(convert(DateTime, "1970-01-01 12:00:00")),
@@ -65,7 +66,7 @@ function run_query_helper(command, msg)
     end
 end
 
-function compare_values(u::Nullable, v::Nullable)
+@compat function compare_values(u::Nullable, v::Nullable)
     if !isnull(u) && !isnull(v)
         return u.value == v.value
     elseif isnull(u) && isnull(v)
