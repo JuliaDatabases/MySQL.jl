@@ -92,7 +92,7 @@ mysql_get_ctype(mysqltype::MYSQL_TYPE) =
 """
 Interpret a string as a julia datatype.
 """
-mysql_interpret_field(strval::AbstractString, ::Type{Cuchar}) = strval[1]
+mysql_interpret_field(strval::AbstractString, ::Type{Cuchar}) = UInt8(strval[1])
 
 mysql_interpret_field{T<:Number}(strval::AbstractString, ::Type{T}) =
     parse(T, strval)
@@ -207,7 +207,7 @@ end
 Returns true if `field` is nullable (i.e, it is not declared as `NOT NULL`)
 """
 function mysql_is_nullable(field::MYSQL_FIELD)
-    field.flags & NOT_NULL_FLAG != 0
+    field.flags & NOT_NULL_FLAG == 0
 end
 
 """
