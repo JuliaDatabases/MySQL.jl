@@ -53,13 +53,13 @@ function update_values()
 
     bindarr = MYSQL_BIND[]
 
-    salaryparam = [convert(Float32, 25000.0)]
-    idparam = [convert(Int32, 2)]
+    salaryparam = mysql_bind_init(MYSQL_TYPE_FLOAT, 25000)
+    idparam = mysql_bind_init(MYSQL_TYPE_LONG, 2)
 
-    push!(bindarr, MYSQL_BIND(salaryparam, MYSQL_TYPE_FLOAT))
-    push!(bindarr, MYSQL_BIND(idparam, MYSQL_TYPE_LONG))
+    push!(bindarr, salaryparam)
+    push!(bindarr, idparam)
 
-    response = mysql_stmt_bind_param(stmt, pointer(bindarr))
+    response = mysql_stmt_bind_param(stmt, bindarr)
     mysql_display_error(hndl, response)
 
     response = mysql_stmt_execute(stmt)
@@ -82,42 +82,23 @@ function insert_values()
     response = mysql_stmt_prepare(stmt, command)
     mysql_display_error(hndl, response)
 
-    values = [("John", [convert(Float32, 10000.50)], [convert(MYSQL_TIME, convert(Date, "2015-8-3"))],
-               [convert(MYSQL_TIME, convert(DateTime, "2015-9-5 12:31:30"))],
-               [convert(MYSQL_TIME, convert(DateTime, "12:00:00"))], [convert(Cchar, 1)],
-               # [convert(Culong, 1)],
-               [convert(Cshort, 1301)]),
+    values = [("John", 10000.50, "2015-8-3", "2015-9-5 12:31:30", "12:00:00", 1, 1301),
+              ("Tom", 20000.25, "2015-8-4", "2015-10-12 13:12:14", "13:00:00", 12, 1422),
+              ("Jim", 30000.00, "2015-6-2", "2015-9-5 10:05:10", "12:30:00", 45, 1567),
+              ("Tim", 15000.50, "2015-7-25", "2015-10-10 12:12:25", "12:30:00", 56, 3200)]
 
-              ("Tom", [convert(Float32, 20000.25)], [convert(MYSQL_TIME, convert(Date, "2015-8-4"))],
-               [convert(MYSQL_TIME, convert(DateTime, "2015-10-12 13:12:14"))],
-               [convert(MYSQL_TIME, convert(DateTime, "13:00:00"))], [convert(Cchar, 12)],
-               # [convert(Culong, 1)],
-               [convert(Cshort, 1422)]),
-
-              ("Jim", [convert(Float32, 30000.00)], [convert(MYSQL_TIME, convert(Date, "2015-6-2"))],
-               [convert(MYSQL_TIME, convert(DateTime, "2015-9-5 10:05:10"))],
-               [convert(MYSQL_TIME, convert(DateTime, "12:30:00"))], [convert(Cchar, 45)],
-               # [convert(Culong, 0)], 
-               [convert(Cshort, 1567)]),
-
-              ("Tim", [convert(Float32, 15000.50)], [convert(MYSQL_TIME, convert(Date, "2015-7-25"))],
-               [convert(MYSQL_TIME, convert(DateTime, "2015-10-10 12:12:25"))],
-               [convert(MYSQL_TIME, convert(DateTime, "12:30:00"))], [convert(Cchar, 56)],
-               # [convert(Culong, 0)],
-               [convert(Cshort, 3200)])]
+    typs = [MYSQL_TYPE_VARCHAR, MYSQL_TYPE_FLOAT, MYSQL_TYPE_DATE,
+            MYSQL_TYPE_DATETIME, MYSQL_TYPE_TIME, MYSQL_TYPE_TINY,
+            MYSQL_TYPE_SHORT]
 
     affrows = 0
     for value in values
         bindarr = MYSQL_BIND[]
-        push!(bindarr, MYSQL_BIND(value[1], MYSQL_TYPE_VARCHAR))
-        push!(bindarr, MYSQL_BIND(value[2], MYSQL_TYPE_FLOAT))
-        push!(bindarr, MYSQL_BIND(value[3], MYSQL_TYPE_DATE))
-        push!(bindarr, MYSQL_BIND(value[4], MYSQL_TYPE_DATETIME))
-        push!(bindarr, MYSQL_BIND(value[5], MYSQL_TYPE_TIME))
-        push!(bindarr, MYSQL_BIND(value[6], MYSQL_TYPE_TINY))
-        push!(bindarr, MYSQL_BIND(value[7], MYSQL_TYPE_SHORT))
+        for i in 1:length(typs)
+            push!(bindarr, mysql_bind_init(typs[i], value[i]))
+        end
 
-        response = mysql_stmt_bind_param(stmt, pointer(bindarr))
+        response = mysql_stmt_bind_param(stmt, bindarr)
         mysql_display_error(hndl, response)
         
         response = mysql_stmt_execute(stmt)

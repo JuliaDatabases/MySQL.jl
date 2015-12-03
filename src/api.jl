@@ -357,6 +357,9 @@ function mysql_stmt_bind_param(stmt::Ptr{MYSQL_STMT}, bind::Ptr{MYSQL_BIND})
                  stmt, bind)
 end
 
+mysql_stmt_bind_param(stmt, bind::Array{MYSQL_BIND, 1}) =
+    mysql_stmt_bind_param(stmt, pointer(bind))
+
 """
 Returns number of affected rows for prepared statement. `mysql_stmt_execute` must
  be called before this.
