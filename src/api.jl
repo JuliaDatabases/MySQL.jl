@@ -22,14 +22,6 @@ function mysql_real_connect(mysqlptr::Ptr{Void},
                               unix_socket::Ptr{Cchar},
                               @compat client_flag::UInt32)
 
-    reconnect_flag::Cuint = MYSQL_OPT_RECONNECT
-    reconnect_option::Cuchar = 0
-    retval = mysql_options(mysqlptr, reconnect_flag, reinterpret(Ptr{Void},
-                           pointer_from_objref(reconnect_option)))
-    if(retval != 0)
-        println("WARNING: Unable to set reconnect option.")
-    end
-
     return ccall((:mysql_real_connect, mysql_lib),
                  Ptr{Void},
                  (Ptr{Void},
@@ -66,6 +58,14 @@ function mysql_options(mysqlptr::Ptr{Void},
                  mysqlptr,
                  option_type,
                  option)
+end
+
+mysql_options(mysqlptr, option_type, option::AbstractString) =
+    mysql_options(mysqlptr, option_type, convert(Ptr{Void}, pointer(option)))
+
+function mysql_options(mysqlptr, option_type, option)
+    v = [option]
+    return mysql_options(mysqlptr, option_type, convert(Ptr{Void}, pointer(v)))
 end
 
 """

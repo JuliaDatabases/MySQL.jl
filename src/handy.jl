@@ -3,6 +3,17 @@
 using Compat
 
 """
+Set multiple options specified in the dictionary opts.  The keys represent the option type,
+ for example `MYSQL_OPT_RECONNECT` and the values are the value of the corresponding option.
+"""
+function mysql_options(hndl, opts)
+    for (k, v) in opts
+        response = mysql_options(hndl, k, v)
+        mysql_display_error(hndl, response, "Failed to set mysql options.")
+    end
+end
+
+"""
 A handy function that wraps mysql_init and mysql_real_connect. Also does error
 checking on the pointers returned by init and real_connect.
 """
@@ -12,7 +23,7 @@ function mysql_connect(host::AbstractString,
                         db::AbstractString,
                         port::Cuint,
                         unix_socket::Ptr{Cchar},
-                        client_flag)
+                        client_flag; opts = Dict())
 
     mysqlptr::Ptr{Void} = C_NULL
     mysqlptr = mysql_init(mysqlptr)
@@ -20,6 +31,8 @@ function mysql_connect(host::AbstractString,
     if mysqlptr == C_NULL
         error("Failed to initialize MySQL database")
     end
+
+    mysql_options(mysqlptr, opts)
 
     mysqlptr = mysql_real_connect(mysqlptr,
                                   host,
@@ -41,9 +54,10 @@ end
 Wrapper over mysql_real_connect with CLIENT_MULTI_STATEMENTS passed
 as client flag options.
 """
-function mysql_connect(hostName::AbstractString, userName::AbstractString, password::AbstractString, db::AbstractString)
-    return mysql_connect(hostName, userName, password, db, convert(Cuint, 0),
-                         convert(Ptr{Cchar}, C_NULL), CLIENT_MULTI_STATEMENTS)
+function mysql_connect(host::AbstractString, user::AbstractString,
+                       passwd::AbstractString, db::AbstractString; opts = Dict())
+    return mysql_connect(host, user, passwd, db, convert(Cuint, 0),
+                         convert(Ptr{Cchar}, C_NULL), CLIENT_MULTI_STATEMENTS, opts=opts)
 end
 
 """
@@ -63,9 +77,9 @@ end
 
 # wrappers to take MySQLHandle as input as well as check for NULL pointer.
 for func = (:mysql_query, :mysql_store_result, :mysql_field_count, :mysql_affected_rows,
-            :mysql_next_result, :mysql_error, :mysql_execute_query)
+            :mysql_next_result, :mysql_error, :mysql_execute_query, :mysql_options)
     eval(quote
-        function ($func)(hndl, args...)
+        function ($func)(hndl::MySQLHandle, args...)
             if hndl.mysqlptr == C_NULL
                 error($(string(func)) * " called with NULL connection.")
             end
