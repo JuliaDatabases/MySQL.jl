@@ -58,7 +58,7 @@ function mysql_disconnect(hndl)
     hndl.host = ""
     hndl.user = ""
     hndl.db = ""
-    Void
+    nothing
 end
 
 # wrappers to take MySQLHandle as input as well as check for NULL pointer.

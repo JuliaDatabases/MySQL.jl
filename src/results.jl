@@ -92,7 +92,7 @@ mysql_get_ctype(mysqltype::MYSQL_TYPE) =
 """
 Interpret a string as a julia datatype.
 """
-mysql_interpret_field(strval::AbstractString, ::Type{Cuchar}) = strval[1]
+@compat mysql_interpret_field(strval::AbstractString, ::Type{Cuchar}) = UInt8(strval[1])
 
 mysql_interpret_field{T<:Number}(strval::AbstractString, ::Type{T}) =
     parse(T, strval)
@@ -113,13 +113,13 @@ function mysql_load_string_from_resultptr(result::MYSQL_ROW, idx)
     deref = unsafe_load(result, idx)
 
     if deref == C_NULL
-        return Void
+        return nothing
     end
 
     strval = bytestring(deref)
 
     if length(strval) == 0
-        return Void
+        return nothing
     end
 
     return strval
@@ -165,28 +165,29 @@ end
 Get the result row `result` as a vector given the field types in an
  array `jfield_types`.
 """
-function mysql_get_row_as_vector(result::MYSQL_ROW, jfield_types::Array{Type})
+function mysql_get_row_as_vector(result::MYSQL_ROW, jfield_types::Array{Type},
+                                 isnullable)
     retvec = Array(Any, length(jfield_types))
-    mysql_get_row_as_vector!(result, jfield_types, retvec)
+    mysql_get_row_as_vector!(result, retvec, jfield_types, isnullable)
     return retvec
 end
 
-function mysql_get_row_as_vector!(result::MYSQL_ROW,
-                                  jfield_types::Array{Type},
-                                  retvec::Vector{Any})
+function mysql_get_row_as_vector!(result::MYSQL_ROW, retvec::Vector{Any},
+                                  jfield_types::Array{Type}, isnullable::Array{Bool})
     for i = 1:length(jfield_types)
         strval = mysql_load_string_from_resultptr(result, i)
 
-        if strval == Void
-            retvec[i] = Void
+        if strval == nothing
+            retvec[i] = Nullable{jfield_types[i]}()
         else
-            retvec[i] = mysql_interpret_field(strval, jfield_types[i])
+            val = mysql_interpret_field(strval, jfield_types[i])
+            retvec[i] = isnullable[i] ? Nullable(val) : val
         end
     end
 end
 
-function mysql_get_row_as_tuple(result::MYSQL_ROW, jfield_types::Array{Type})
-    vec = mysql_get_row_as_vector(result, jfield_types)
+function mysql_get_row_as_tuple(result::MYSQL_ROW, jfield_types::Array{Type}, isnullable)
+    vec = mysql_get_row_as_vector(result, jfield_types, isnullable)
     return tuple(vec...)
 end
 
@@ -203,6 +204,26 @@ function mysql_get_jtype_array(mysqlfield_types::Array{MYSQL_TYPE})
 end
 
 """
+Returns true if `field` is nullable (i.e, it is not declared as `NOT NULL`)
+"""
+function mysql_is_nullable(field::MYSQL_FIELD)
+    field.flags & NOT_NULL_FLAG == 0
+end
+
+"""
+Get an array of boolean values indicating whether the column is
+ declared as `NULL`(true) or `NOT NULL`(false).
+"""
+function mysql_get_nullable(result::MYSQL_RES)
+    fields = mysql_get_field_metadata(result)
+    isnullable = Array(Bool, length(fields))
+    for i = 1:length(fields)
+        isnullable[i] = mysql_is_nullable(fields[i])
+    end
+    return isnullable
+end
+
+"""
 Get the result as an array with each row as a vector.
 """
 function mysql_get_result_as_array(result::MYSQL_RES)
@@ -212,10 +233,11 @@ function mysql_get_result_as_array(result::MYSQL_RES)
     retarr = Array(Array{Any}, nrows)
     mysqlfield_types = mysql_get_field_types(result)
     jfield_types = mysql_get_jtype_array(mysqlfield_types)
+    isnullable = mysql_get_nullable(result)
     for i = 1:nrows
         retarr[i] = Array(Any, nfields)
-        mysql_get_row_as_vector!(mysql_fetch_row(result),
-                                 jfield_types, retarr[i])
+        mysql_get_row_as_vector!(mysql_fetch_row(result), retarr[i],
+                                 jfield_types, isnullable)
     end
 
     return retarr
@@ -226,8 +248,9 @@ function mysql_get_result_as_tuples(result::MYSQL_RES)
     retarr = Array(Tuple, nrows)
     mysqlfield_types = mysql_get_field_types(result)
     jfield_types = mysql_get_jtype_array(mysqlfield_types)
+    isnullable = mysql_get_nullable(result)
     for i = 1:nrows
-        retarr[i] = mysql_get_row_as_tuple(mysql_fetch_row(result), jfield_types)
+        retarr[i] = mysql_get_row_as_tuple(mysql_fetch_row(result), jfield_types, isnullable)
     end
 
     return retarr
@@ -238,7 +261,8 @@ function MySQLRowIterator(result)
     mysqlfield_types = mysql_get_field_types(result)
     jfield_types = mysql_get_jtype_array(mysqlfield_types)
     nrows = mysql_num_rows(result)
-    MySQLRowIterator(result, (), jfield_types, nrows)
+    isnullable = mysql_get_nullable(result)
+    MySQLRowIterator(result, (), jfield_types, isnullable, nrows)
 end
 
 function Base.start(itr::MySQLRowIterator)
@@ -246,7 +270,9 @@ function Base.start(itr::MySQLRowIterator)
 end
 
 function Base.next(itr::MySQLRowIterator, state)
-    itr.row = mysql_get_row_as_tuple(mysql_fetch_row(itr.result), itr.jfield_types)
+    row = mysql_fetch_row(itr.result)
+    row == C_NULL && error("Unable to fetch row, you must re-execute the query.")
+    itr.row = mysql_get_row_as_tuple(row, itr.jfield_types, itr.isnullable)
     itr.rowsleft -= 1
     return (itr.row, state)
 end
@@ -261,7 +287,7 @@ Fill the row indexed by `row` of the dataframe `df` with values from `result`.
 function populate_row!(df, nfields, result::MYSQL_ROW, row, jfield_types)
     for i = 1:nfields
         strval = mysql_load_string_from_resultptr(result, i)
-        if strval == Void
+        if strval == nothing
             df[row, i] = NA
         else
             df[row, i] = mysql_interpret_field(strval, jfield_types[i])

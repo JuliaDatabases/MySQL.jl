@@ -186,6 +186,7 @@ type MySQLRowIterator
     result::MYSQL_RES
     row::Tuple
     jfield_types::Array{Type, 1}
+    isnullable::Array{Bool, 1}
     rowsleft::Int64
 end
 
