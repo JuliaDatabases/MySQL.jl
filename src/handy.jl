@@ -77,7 +77,8 @@ end
 
 # wrappers to take MySQLHandle as input as well as check for NULL pointer.
 for func = (:mysql_query, :mysql_store_result, :mysql_field_count, :mysql_affected_rows,
-            :mysql_next_result, :mysql_error, :mysql_execute_query, :mysql_options)
+            :mysql_next_result, :mysql_error, :mysql_execute_query, :mysql_options,
+            :mysql_insert_id)
     eval(quote
         function ($func)(hndl::MySQLHandle, args...)
             if hndl.mysqlptr == C_NULL
@@ -232,4 +233,4 @@ mysql_bind_init(jtype::@compat(Union{Type{Date}, Type{DateTime}}), typ, value) =
 mysql_bind_init(::Type{AbstractString}, typ, value) = MYSQL_BIND(value, typ)
 mysql_bind_init(jtype, typ, value) = MYSQL_BIND([convert(jtype, value)], typ)
 
-export mysql_bind_init
+export mysql_bind_init, mysql_insert_id
