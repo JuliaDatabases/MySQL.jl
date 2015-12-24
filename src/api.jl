@@ -368,3 +368,11 @@ function mysql_stmt_affected_rows(stmt::Ptr{MYSQL_STMT})
     return ccall((:mysql_stmt_affected_rows, mysql_lib),
                  Culong, (Ptr{Void}, ), stmt)
 end
+
+"""
+Get the last insert id for auto increment id's.
+"""
+function mysql_insert_id(mysqlptr::Ptr{Void})
+    return ccall((:mysql_insert_id, mysql_lib),
+                 Culong, (Ptr{Void}, ), mysqlptr)
+end
