@@ -1,0 +1,204 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="chrome=1">
+    <title>MySQL.jl by JuliaDB</title>
+
+    <link rel="stylesheet" href="stylesheets/styles.css">
+    <link rel="stylesheet" href="stylesheets/github-light.css">
+    <meta name="viewport" content="width=device-width">
+    <!--[if lt IE 9]>
+    <script src="//html5shiv.googlecode.com/svn/trunk/html5.js"></script>
+    <![endif]-->
+  </head>
+  <body>
+    <div class="wrapper">
+      <header>
+        <h1>MySQL.jl</h1>
+        <p>Access MySQL from Julia</p>
+
+        <p class="view"><a href="https://github.com/JuliaDB/MySQL.jl">View the Project on GitHub <small>JuliaDB/MySQL.jl</small></a></p>
+
+
+        <ul>
+          <li><a href="https://github.com/JuliaDB/MySQL.jl/zipball/master">Download <strong>ZIP File</strong></a></li>
+          <li><a href="https://github.com/JuliaDB/MySQL.jl/tarball/master">Download <strong>TAR Ball</strong></a></li>
+          <li><a href="https://github.com/JuliaDB/MySQL.jl">View On <strong>GitHub</strong></a></li>
+        </ul>
+      </header>
+      <section>
+        <h1>
+<a id="mysqljl" class="anchor" href="#mysqljl" aria-hidden="true"><span class="octicon octicon-link"></span></a>MySQL.jl</h1>
+
+<p><a href="https://travis-ci.org/JuliaDB/MySQL.jl"><img src="https://travis-ci.org/JuliaDB/MySQL.jl.svg?branch=master" alt="Build Status"></a></p>
+
+<p>Julia bindings and helper functions for <a href="https://mariadb.org/">MariaDB</a>/MySQL C library.
+Query results can be received as julia arrays or as <a href="https://github.com/JuliaStats/DataFrames.jl">Data Frames</a>.</p>
+
+<h1>
+<a id="installation" class="anchor" href="#installation" aria-hidden="true"><span class="octicon octicon-link"></span></a>Installation</h1>
+
+<p>To get the master version:</p>
+
+<pre><code>Pkg.clone("https://github.com/JuliaComputing/MySQL.jl")
+</code></pre>
+
+<h1>
+<a id="example-usage" class="anchor" href="#example-usage" aria-hidden="true"><span class="octicon octicon-link"></span></a>Example usage</h1>
+
+<p>Connect to the MySQL server:</p>
+
+<pre><code>using MySQL
+con = mysql_connect(HOST, USER, PASSWD, DBNAME)
+</code></pre>
+
+<p>Create/Insert/Update etc:</p>
+
+<pre><code>command = """CREATE TABLE Employee
+             (
+                 ID INT NOT NULL AUTO_INCREMENT,
+                 Name VARCHAR(255),
+                 Salary FLOAT,
+                 JoinDate DATE,
+                 LastLogin DATETIME,
+                 LunchTime TIME,
+                 PRIMARY KEY (ID)
+             );"""
+response = mysql_query(con, command)
+if (response == 0)
+    println("Create table succeeded.")
+else
+    println("Create table failed.")
+end
+</code></pre>
+
+<p>Obtain SELECT results as dataframe:</p>
+
+<pre><code>command = """SELECT * FROM Employee;"""
+dframe = execute_query(con, command)
+</code></pre>
+
+<p>The <code>mysql_execute_query()</code> API will take care of handling errors and freeing the memory allocated to the results.</p>
+
+<p>Obtain SELECT results as julia Array:</p>
+
+<pre><code>command = """SELECT * FROM Employee;"""
+retarr = mysql_execute_query(con, command, opformat=MYSQL_ARRAY)
+</code></pre>
+
+<p>Obtain SELECT results as julia Array with each row as a tuple:</p>
+
+<pre><code>command = """SELECT * FROM Employee;"""
+retarr = mysql_execute_query(con, command, opformat=MYSQL_TUPLES)
+</code></pre>
+
+<p>Iterate over rows (get each row as a tuple):</p>
+
+<pre><code>response = mysql_query(con, "SELECT * FROM some_table;")
+mysql_display_error(con, response != 0,
+                    "Error occured while executing mysql_query on \"$command\"")
+
+result = mysql_store_result(con)
+
+for row in MySQLRowIterator(result)
+    println(row)
+end
+
+mysql_free_result(result)
+</code></pre>
+
+<p>Get metadata of fields:</p>
+
+<pre><code>response = mysql_query(con, "SELECT * FROM some_table;")
+mysql_display_error(con, response != 0,
+                    "Error occured while executing mysql_query on \"$command\"")
+
+result = mysql_store_result(con)
+mysqlfields = mysql_get_field_metadata(result)
+for i = 1:length(mysqlfields)
+    field = mysqlfields[i]
+    println("Field name is: ", bytestring(field.name))
+    println("Field length is: ", field_length)
+    println("Field type is: ", field_type)
+end
+</code></pre>
+
+<p>Execute a multi query:</p>
+
+<pre><code>command = """INSERT INTO Employee (Name) VALUES ('');
+             UPDATE Employee SET LunchTime = '15:00:00' WHERE LENGTH(Name) &gt; 5;"""
+data = mysql_execute_query(con, command)
+</code></pre>
+
+<p><code>data</code> contains an array of dataframes (or arrays if MYSQL_ARRAY was specified as the
+ 3rd argument to the above API) corresponding to the SELECT queries and number of
+ affected rows corresponding to the non-SELECT queries in the multi statement.</p>
+
+<p>Get dataframes using prepared statements:</p>
+
+<pre><code>command = """SELECT * FROM Employee;"""
+
+stmt = mysql_stmt_init(con)
+
+if (stmt == C_NULL)
+    error("Error in initialization of statement.")
+end
+
+response = mysql_stmt_prepare(stmt, command)
+mysql_display_error(con, response != 0,
+                    "Error occured while preparing statement for query \"$command\"")
+
+dframe = mysql_stmt_result_to_dataframe(stmt)
+mysql_stmt_close(stmt)
+</code></pre>
+
+<p>Close the connection:</p>
+
+<pre><code>mysql_disconnect(con)
+</code></pre>
+
+<h1>
+<a id="how-to-solve-mysql-library-not-found-error" class="anchor" href="#how-to-solve-mysql-library-not-found-error" aria-hidden="true"><span class="octicon octicon-link"></span></a>How to solve MySQL library not found error</h1>
+
+<p>This error may occur during <code>using MySQL</code>. To resolve this-</p>
+
+<ul>
+<li>Ubuntu: Just add the MariaDB/MySQL .so file to lib_choices array in src/config.jl. If it is already there
+make sure LD_LIBRARY_PATH contains the MariaDB/MySQL .so file directory path. Usually this is something like
+<code>/usr/local/lib/mariadb/</code>.</li>
+<li>OSX: Same as above. In this case the file will be something like libmysqlclient.dylib.</li>
+<li>Windows: There is no <code>@windows_only lib_choices</code> currently. Please add one and send a pull request.</li>
+</ul>
+
+<h1>
+<a id="tests" class="anchor" href="#tests" aria-hidden="true"><span class="octicon octicon-link"></span></a>Tests</h1>
+
+<p>To run the tests you must have MySQL server running on the host. Set the constants HOST and ROOTPASS 
+in test/runtests.jl to the host and root password on your test setup. Run the tests using:</p>
+
+<pre><code>Pkg.test("MySQL")
+</code></pre>
+
+<h1>
+<a id="performance" class="anchor" href="#performance" aria-hidden="true"><span class="octicon octicon-link"></span></a>Performance</h1>
+
+<p>A total of 67,000 insert queries were executed batch wise in batch sizes of 50, 100, 150 ... so on.
+ The time taken for all the queries to complete is plotted on the y axis and the batch sizes on x axis.</p>
+
+<p><img src="https://raw.githubusercontent.com/nkottary/nishanth.github.io/master/plot.png" alt="alt tag"></p>
+
+<h1>
+<a id="acknowledgement" class="anchor" href="#acknowledgement" aria-hidden="true"><span class="octicon octicon-link"></span></a>Acknowledgement</h1>
+
+<p>We acknowledge the contributions of <a href="http://www.justdial.com">JustDial</a> towards this work.</p>
+      </section>
+      <footer>
+        <p>This project is maintained by <a href="https://github.com/JuliaDB">JuliaDB</a></p>
+        <p><small>Hosted on GitHub Pages &mdash; Theme by <a href="https://github.com/orderedlist">orderedlist</a></small></p>
+      </footer>
+    </div>
+    <script src="javascripts/scale.fix.js"></script>
+    
+  </body>
+</html>
