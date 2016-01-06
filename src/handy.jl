@@ -78,7 +78,7 @@ end
 # wrappers to take MySQLHandle as input as well as check for NULL pointer.
 for func = (:mysql_query, :mysql_store_result, :mysql_field_count, :mysql_affected_rows,
             :mysql_next_result, :mysql_error, :mysql_execute_query, :mysql_options,
-            :mysql_insert_id)
+            :mysql_insert_id, :mysql_commit, :mysql_rollback)
     eval(quote
         function ($func)(hndl::MySQLHandle, args...)
             if hndl.mysqlptr == C_NULL

@@ -12,14 +12,22 @@ const MYSQL_DATE_FORMAT = Dates.DateFormat("yyyy-mm-dd")
 const MYSQL_DATETIME_FORMAT = Dates.DateFormat("yyyy-mm-dd HH:MM:SS")
 
 function Base.convert(::Type{Date}, datestr::AbstractString)
-    Date(datestr, MYSQL_DATE_FORMAT)
+    try
+        Date(datestr, MYSQL_DATE_FORMAT)
+    catch
+        return Date()
+    end
 end
 
 function Base.convert(::Type{DateTime}, dtimestr::AbstractString)
     if !contains(dtimestr, " ")
         dtimestr = "1970-01-01 " * dtimestr
     end
-    DateTime(dtimestr, MYSQL_DATETIME_FORMAT)
+    try
+        return DateTime(dtimestr, MYSQL_DATETIME_FORMAT)
+    catch
+        return DateTime()
+    end
 end
 
 function Base.convert(::Type{DateTime}, mtime::MYSQL_TIME)
