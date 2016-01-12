@@ -24,29 +24,13 @@ function mysql_connect(host::AbstractString,
                         port::Cuint,
                         unix_socket::Ptr{Cchar},
                         client_flag; opts = Dict())
-
-    mysqlptr::Ptr{Void} = C_NULL
-    mysqlptr = mysql_init(mysqlptr)
-
-    if mysqlptr == C_NULL
-        error("Failed to initialize MySQL database")
-    end
-
-    mysql_options(mysqlptr, opts)
-
-    mysqlptr = mysql_real_connect(mysqlptr,
-                                  host,
-                                  user,
-                                  passwd,
-                                  db,
-                                  port,
-                                  unix_socket,
-                                  client_flag)
-
-    if mysqlptr == C_NULL
-        error("Failed to connect to MySQL database")
-    end
-
+    _mysqlptr = C_NULL
+    _mysqlptr = mysql_init(_mysqlptr)
+    _mysqlptr == C_NULL && error("Failed to initialize MySQL database")
+    mysql_options(_mysqlptr, opts)
+    mysqlptr = mysql_real_connect(_mysqlptr, host, user, passwd,
+                                  db, port, unix_socket, client_flag)
+    mysqlptr == C_NULL && error(bytestring(mysql_error(_mysqlptr)))
     return MySQLHandle(mysqlptr, host, user, db)
 end
 
