@@ -9,20 +9,43 @@ Query results can be received as julia arrays or as [Data Frames](https://github
 # Installation
 
 To get the master version:
-```
+```julia
 Pkg.clone("https://github.com/JuliaComputing/MySQL.jl")
 ```
 
 # Example usage
 
-Connect to the MySQL server:
+## Using DBAPI
+
+[DBAPI.jl](https://github.com/JuliaDB/DBAPI.jl) is an abstract interface designed to be a common interface for all julia database drivers.  Example:
+
+```julia
+conn = connect(MySQLInterface, "127.0.0.1", "root", "rootbeer", "mydb")
+csr = cursor(conn)
+execute!(csr, "CREATE TABLE mydb.mytable (id int not null auto_increment, name varchar(50) not null, age int, birthday date, primary key (id));")
+execute!(csr, "SELECT * from mydb.mytable;")
+
+# SELECT queries produce result, to retrieve results:
+r = rows(csr)    # Returns an iterator
+for row in r
+    # do stuff with row
+end
+close(csr)
+close(conn)
 ```
+
+## Internal API's
+
+Using internal API's gives you more control over low level features.
+
+Connect to the MySQL server:
+```julia
 using MySQL
 con = mysql_connect(HOST, USER, PASSWD, DBNAME)
 ```
 
 Create/Insert/Update etc:
-```
+```julia
 command = """CREATE TABLE Employee
              (
                  ID INT NOT NULL AUTO_INCREMENT,
@@ -43,7 +66,7 @@ end
 
 Obtain SELECT results as dataframe:
 
-```
+```julia
 command = """SELECT * FROM Employee;"""
 dframe = execute_query(con, command)
 ```
@@ -51,21 +74,21 @@ The `mysql_execute_query()` API will take care of handling errors and freeing th
 
 Obtain SELECT results as julia Array:
 
-```
+```julia
 command = """SELECT * FROM Employee;"""
 retarr = mysql_execute_query(con, command, opformat=MYSQL_ARRAY)
 ```
 
 Obtain SELECT results as julia Array with each row as a tuple:
 
-```
+```julia
 command = """SELECT * FROM Employee;"""
 retarr = mysql_execute_query(con, command, opformat=MYSQL_TUPLES)
 ```
 
 Iterate over rows (get each row as a tuple):
 
-```
+```julia
 response = mysql_query(con, "SELECT * FROM some_table;")
 mysql_display_error(con, response != 0,
                     "Error occured while executing mysql_query on \"$command\"")
@@ -81,7 +104,7 @@ mysql_free_result(result)
 
 Get metadata of fields:
 
-```
+```julia
 response = mysql_query(con, "SELECT * FROM some_table;")
 mysql_display_error(con, response != 0,
                     "Error occured while executing mysql_query on \"$command\"")
@@ -98,7 +121,7 @@ end
 
 Execute a multi query:
 
-```
+```julia
 command = """INSERT INTO Employee (Name) VALUES ('');
              UPDATE Employee SET LunchTime = '15:00:00' WHERE LENGTH(Name) > 5;"""
 data = mysql_execute_query(con, command)
@@ -110,7 +133,7 @@ data = mysql_execute_query(con, command)
 
 Get dataframes using prepared statements:
 
-```
+```julia
 command = """SELECT * FROM Employee;"""
 
 stmt = mysql_stmt_init(con)
@@ -129,7 +152,7 @@ mysql_stmt_close(stmt)
 
 Close the connection:
 
-```
+```julia
 mysql_disconnect(con)
 ```
 
@@ -146,16 +169,9 @@ make sure LD_LIBRARY_PATH contains the MariaDB/MySQL .so file directory path. Us
 
 To run the tests you must have MySQL server running on the host. Set the constants HOST and ROOTPASS 
 in test/runtests.jl to the host and root password on your test setup. Run the tests using:
-```
+```julia
 Pkg.test("MySQL")
 ```
-
-# Performance
-
-A total of 67,000 insert queries were executed batch wise in batch sizes of 50, 100, 150 ... so on.
- The time taken for all the queries to complete is plotted on the y axis and the batch sizes on x axis.
-
-![alt tag](https://raw.githubusercontent.com/nkottary/nishanth.github.io/master/plot.png)
 
 # Acknowledgement
 

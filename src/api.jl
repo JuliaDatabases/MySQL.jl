@@ -376,3 +376,21 @@ function mysql_insert_id(mysqlptr::Ptr{Void})
     return ccall((:mysql_insert_id, mysql_lib),
                  Culong, (Ptr{Void}, ), mysqlptr)
 end
+
+"""
+Commits the current transaction.
+
+Zero for success. Nonzero if an error occurred.
+"""
+function mysql_commit(mysqlptr::Ptr{Void})
+    return ccall((:mysql_commit, mysql_lib), Cchar, (Ptr{Void}, ), mysqlptr)
+end
+
+"""
+Rolls back the current transaction.
+
+Zero for success. Nonzero if an error occurred.
+"""
+function mysql_rollback(mysqlptr::Ptr{Void})
+    return ccall((:mysql_rollback, mysql_lib), Cchar, (Ptr{Void}, ), mysqlptr)
+end
