@@ -5,6 +5,7 @@
 # to a julia datastructure.
 
 using DataFrames
+using Compat
 
 function run_query_helper(command, msg)
     error("API not implemented: `run_query_helper`")
@@ -30,7 +31,8 @@ function grant_test_user_privilege()
 end
 
 function connect_as_test_user()
-    global hndl = mysql_connect(HOST, "test", "test", "mysqltest")
+    global hndl = mysql_connect(HOST, "test", "test", "mysqltest";
+                                opts=@compat Dict(MYSQL_OPT_RECONNECT => 1))
 end
 
 function create_table()
@@ -60,6 +62,11 @@ function insert_values()
                  ('Tim', 15000.50, '2015-7-25', '2015-10-10 12:12:25', '12:30:00', 56, 'Accounts', b'1', 3200);
               """
     run_query_helper(command, "Insert")
+end
+
+function last_insert_id_test()
+    id = mysql_insert_id(hndl)
+    println("Last insert id was $id")
 end
 
 function update_values()
@@ -92,12 +99,12 @@ function drop_test_database()
 end
 
 function init_test()
-    mysql_query(hndl, "DROP DATABASE IF EXISTS mysqltest;")
+    mysql_execute_query(hndl, "DROP DATABASE IF EXISTS mysqltest;")
     # There seems to be a bug in MySQL that prevents you
     # from saying "DROP USER IF EXISTS test@127.0.0.1;"
     # So here we create a user with a harmless privilege and drop the user.
-    mysql_query(hndl, "GRANT USAGE ON *.* TO 'test'@'127.0.0.1';")
-    mysql_query(hndl, "DROP USER 'test'@'127.0.0.1';")
+    mysql_execute_query(hndl, "GRANT USAGE ON *.* TO 'test'@'127.0.0.1';")
+    mysql_execute_query(hndl, "DROP USER 'test'@'127.0.0.1';")
 end
 
 function run_test()
@@ -115,6 +122,7 @@ function run_test()
     connect_as_test_user()
     @test create_table()
     @test insert_values()
+    last_insert_id_test()
     @test update_values()
     @test insert_nullrow()
 
@@ -151,5 +159,26 @@ function dfisequal(dfa, dfb)
         end
     end
 
+    return true
+end
+
+@compat function compare_values(u::Nullable, v::Nullable)
+    if !isnull(u) && !isnull(v)
+        return u.value == v.value
+    elseif isnull(u) && isnull(v)
+        return typeof(u) == typeof(v)
+    else
+        println("*** ALERT: Non null value being compared with null.")
+        return false
+    end
+end
+
+compare_values(u, v) = u == v
+
+function compare_rows(rowu, rowv)
+    length(rowu) == length(rowv) || return false
+    for i = 1:length(rowu)
+        compare_values(rowu[i], rowv[i]) || return false
+    end
     return true
 end

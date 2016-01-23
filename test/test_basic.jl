@@ -1,6 +1,3 @@
-# A basic test  that uses `MySQL.mysql_query` to execute  the queries in
-# test_common.jl
-
 using DataFrames
 using Compat
 
@@ -66,27 +63,6 @@ function run_query_helper(command, msg)
     end
 end
 
-@compat function compare_values(u::Nullable, v::Nullable)
-    if !isnull(u) && !isnull(v)
-        return u.value == v.value
-    elseif isnull(u) && isnull(v)
-        return typeof(u) == typeof(v)
-    else
-        println("*** ALERT: Non null value being compared with null.")
-        return false
-    end
-end
-
-compare_values(u, v) = u == v
-
-function compare_rows(rowu, rowv)
-    length(rowu) == length(rowv) || return false
-    for i = 1:length(rowu)
-        compare_values(rowu[i], rowv[i]) || return false
-    end
-    return true
-end
-
 function show_results()
     command = """SELECT * FROM Employee;"""
     dframe = mysql_execute_query(hndl, command)
@@ -94,32 +70,39 @@ function show_results()
     println("\n *** Expected Result: \n", DataFrameResults)
     @test dfisequal(dframe, DataFrameResults)
 
-    retarr = mysql_execute_query(hndl, command, MYSQL_ARRAY)
-    println("\n *** Results as Array: \n", retarr)
-    println("\n *** Expected Result: \n", ArrayResults)
-
     println("\n *** Results using Iterator: \n")
-    response = mysql_query(hndl, command)
-    mysql_display_error(hndl, response != 0,
-                        "Error occured while executing mysql_query on \"$command\"")
-
-    result = mysql_store_result(hndl)
-
     i = 1
-    for row in MySQLRowIterator(result)
+    for row in MySQLRowIterator(hndl, command)
         println(row)
         @test compare_rows(row, ArrayResults[i])
         i += 1
     end
 
-    mysql_free_result(result)
-
     println("\n *** Results as tuples: \n")
-    tupres = mysql_execute_query(hndl, command, MYSQL_TUPLES)
+    tupres = mysql_execute_query(hndl, command; opformat=MYSQL_TUPLES)
     println(tupres)
     for i in length(tupres)
         @test compare_rows(tupres[i], ArrayResults[i])
     end
+
+    validate_metadata()
+end
+
+function validate_metadata()
+    mysql_query(hndl, "SELECT * FROM Employee;")
+    result = mysql_store_result(hndl)
+    meta = mysql_metadata(result)
+    @test meta.names[1] == "ID"
+    @test meta.lens[1] == 11
+    @test meta.mtypes[1] == MYSQL_TYPE_LONG
+    @test meta.jtypes[1] == Int32
+    @test meta.is_nullables[1] == false
+
+    @test meta.names[2] == "Name"
+    @test meta.lens[2] == 255
+    @test meta.mtypes[2] == MYSQL_TYPE_VAR_STRING
+    @test meta.jtypes[2] == AbstractString
+    @test meta.is_nullables[2] == true
 end
 
 println("\n*** Running Basic Test ***\n")
