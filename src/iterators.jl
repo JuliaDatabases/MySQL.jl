@@ -10,13 +10,13 @@ function MySQLRowIterator(con::MySQLHandle, command)
     return MySQLRowIterator(result)
 end
 
-function MySQLRowIterator(stmt::MySQLStatementHandle, typs, values)
+function MySQLRowIterator(hndl::MySQLHandle, typs, values)
     bindarr = mysql_bind_array(typs, values)
-    mysql_stmt_bind_param(stmt, bindarr)
-    return MySQLRowIterator(stmt)
+    mysql_stmt_bind_param(hndl, bindarr)
+    return MySQLRowIterator(hndl)
 end
 
-MySQLRowIterator(stmt::MySQLStatementHandle) = MySQLStatementIterator(stmt)
+MySQLRowIterator(hndl::MySQLHandle) = MySQLStatementIterator(hndl)
 
 Base.start(itr::MySQLRowIterator) = true
 
@@ -29,12 +29,12 @@ end
 
 Base.done(itr::MySQLRowIterator, state) = itr.rowsleft == 0
 
-function MySQLStatementIterator(stmt::MySQLStatementHandle)
-    meta = mysql_metadata(stmt)
+function MySQLStatementIterator(hndl::MySQLHandle)
+    meta = mysql_metadata(hndl)
     bindres = mysql_bind_array(meta)
-    mysql_stmt_bind_result(stmt, bindres)
-    mysql_stmt_execute(stmt)
-    return MySQLStatementIterator(stmt, meta.jtypes, meta.is_nullables, bindres)
+    mysql_stmt_bind_result(hndl, bindres)
+    mysql_stmt_execute(hndl)
+    return MySQLStatementIterator(hndl, meta.jtypes, meta.is_nullables, bindres)
 end
 
 Base.start(itr::MySQLStatementIterator) = true
@@ -42,4 +42,4 @@ Base.start(itr::MySQLStatementIterator) = true
 Base.next(itr::MySQLStatementIterator, state) =
     (mysql_get_row_as_tuple(itr.binding, itr.jtypes, itr.is_nullables), state)
 
-Base.done(itr::MySQLStatementIterator, state) = mysql_stmt_fetch(itr.stmt) == MYSQL_NO_DATA
+Base.done(itr::MySQLStatementIterator, state) = mysql_stmt_fetch(itr.hndl) == MYSQL_NO_DATA

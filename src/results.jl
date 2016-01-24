@@ -348,29 +348,29 @@ mysql_init_dataframe(meta::Array{MYSQL_FIELD}, nrows) =
 mysql_init_dataframe(meta, nrows) =
     DataFrame(meta.jtypes, map(symbol, meta.names), @compat Int64(nrows))
 
-function mysql_result_to_dataframe(stmt::MySQLStatementHandle)
-    meta = mysql_metadata(stmt.stmtptr)
+function mysql_result_to_dataframe(hndl::MySQLHandle)
+    meta = mysql_metadata(hndl.stmtptr)
     bindres = mysql_bind_array(meta)
-    mysql_stmt_bind_result(stmt, bindres)
-    mysql_stmt_store_result(stmt)
-    nrows = mysql_stmt_num_rows(stmt)
+    mysql_stmt_bind_result(hndl, bindres)
+    mysql_stmt_store_result(hndl)
+    nrows = mysql_stmt_num_rows(hndl)
     df = mysql_init_dataframe(meta, nrows)
     for ridx = 1:nrows
-        mysql_stmt_fetch(stmt)
+        mysql_stmt_fetch(hndl)
         stmt_populate_row!(df, ridx, bindres)
     end
     return df
 end
 
-function mysql_get_result_as_tuples(stmt::MySQLStatementHandle)
-    meta = mysql_metadata(stmt)
+function mysql_get_result_as_tuples(hndl::MySQLHandle)
+    meta = mysql_metadata(hndl)
     bindres = mysql_bind_array(meta)
-    mysql_stmt_bind_result(stmt, bindres)
-    mysql_stmt_store_result(stmt)
-    nrows = mysql_stmt_num_rows(stmt)
+    mysql_stmt_bind_result(hndl, bindres)
+    mysql_stmt_store_result(hndl)
+    nrows = mysql_stmt_num_rows(hndl)
     retarr = Array(Tuple, nrows)
     for i = 1:nrows
-        mysql_stmt_fetch(stmt)
+        mysql_stmt_fetch(hndl)
         retarr[i] = mysql_get_row_as_tuple(bindres, meta.jtypes, meta.is_nullables)
     end
     return retarr
