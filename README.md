@@ -4,134 +4,116 @@ MySQL.jl
 [![Build Status](https://travis-ci.org/JuliaDB/MySQL.jl.svg?branch=master)](https://travis-ci.org/JuliaDB/MySQL.jl)
 
 Julia bindings and helper functions for [MariaDB](https://mariadb.org/)/MySQL C library.
-Query results can be received as julia arrays or as [Data Frames](https://github.com/JuliaStats/DataFrames.jl).
 
 # Installation
 
-To get the master version:
-```
+Install [MySQL](http://dev.mysql.com/doc/refman/5.7/en/installing.html).
+
+Then in the julia prompt enter:
+```julia
 Pkg.clone("https://github.com/JuliaComputing/MySQL.jl")
 ```
 
-# Example usage
+# Examples
 
-Connect to the MySQL server:
-```
+The following example connects to a database, creates a table, inserts values,
+ retrieves the results and diconnects:
+
+```julia
 using MySQL
-con = mysql_connect(HOST, USER, PASSWD, DBNAME)
-```
-
-Create/Insert/Update etc:
-```
+con = mysql_connect("192.168.23.24", "username", "password", "db_name")
 command = """CREATE TABLE Employee
              (
                  ID INT NOT NULL AUTO_INCREMENT,
                  Name VARCHAR(255),
                  Salary FLOAT,
                  JoinDate DATE,
-                 LastLogin DATETIME,
-                 LunchTime TIME,
                  PRIMARY KEY (ID)
              );"""
-response = mysql_query(con, command)
-if (response == 0)
-    println("Create table succeeded.")
-else
-    println("Create table failed.")
-end
-```
+mysql_execute_query(con, command)
 
-Obtain SELECT results as dataframe:
+# Insert some values
+mysql_execute_query(con, "INSERT INTO Employee (Name, Salary, JoinDate) values ("John", 25000.00, '2015-12-12'), ("Sam", 35000.00, '2012-18-17), ("Tom", 50000.00, '2013-12-14');")
 
-```
-command = """SELECT * FROM Employee;"""
-dframe = execute_query(con, command)
-```
-The `mysql_execute_query()` API will take care of handling errors and freeing the memory allocated to the results.
+# Get SELECT results
+command = "SELECT * FROM Employee;"
+dframe = mysql_execute_query(con, command)
 
-Obtain SELECT results as julia Array:
-
-```
-command = """SELECT * FROM Employee;"""
-retarr = mysql_execute_query(con, command, opformat=MYSQL_ARRAY)
-```
-
-Obtain SELECT results as julia Array with each row as a tuple:
-
-```
-command = """SELECT * FROM Employee;"""
-retarr = mysql_execute_query(con, command, opformat=MYSQL_TUPLES)
-```
-
-Iterate over rows (get each row as a tuple):
-
-```
-response = mysql_query(con, "SELECT * FROM some_table;")
-mysql_display_error(con, response != 0,
-                    "Error occured while executing mysql_query on \"$command\"")
-
-result = mysql_store_result(con)
-
-for row in MySQLRowIterator(result)
-    println(row)
-end
-
-mysql_free_result(result)
-```
-
-Get metadata of fields:
-
-```
-response = mysql_query(con, "SELECT * FROM some_table;")
-mysql_display_error(con, response != 0,
-                    "Error occured while executing mysql_query on \"$command\"")
-
-result = mysql_store_result(con)
-mysqlfields = mysql_get_field_metadata(result)
-for i = 1:length(mysqlfields)
-    field = mysqlfields[i]
-    println("Field name is: ", bytestring(field.name))
-    println("Field length is: ", field_length)
-    println("Field type is: ", field_type)
-end
-```
-
-Execute a multi query:
-
-```
-command = """INSERT INTO Employee (Name) VALUES ('');
-             UPDATE Employee SET LunchTime = '15:00:00' WHERE LENGTH(Name) > 5;"""
-data = mysql_execute_query(con, command)
-```
-
-`data` contains an array of dataframes (or arrays if MYSQL_ARRAY was specified as the
- 3rd argument to the above API) corresponding to the SELECT queries and number of
- affected rows corresponding to the non-SELECT queries in the multi statement.
-
-Get dataframes using prepared statements:
-
-```
-command = """SELECT * FROM Employee;"""
-
-stmt = mysql_stmt_init(con)
-
-if (stmt == C_NULL)
-    error("Error in initialization of statement.")
-end
-
-response = mysql_stmt_prepare(stmt, command)
-mysql_display_error(con, response != 0,
-                    "Error occured while preparing statement for query \"$command\"")
-
-dframe = mysql_stmt_result_to_dataframe(stmt)
-mysql_stmt_close(stmt)
-```
-
-Close the connection:
-
-```
+# Close connection
 mysql_disconnect(con)
 ```
+
+## Getting the result set
+
+By default, `mysql_execute_query` returns a DataFrame.  To obtain each row as a tuple use `mysql_execute_query(con, command; opformat=MYSQL_TUPLES)`.  The same can also be done with the `MySQLRowIterator`, example:
+
+```julia
+for row in MySQLRowIterator(con, command)
+    # do stuff with row
+end
+```
+
+# Extended example: Prepared Statements
+
+Prepared statements are used to optimize queries.  Queries that are run repeatedly can be
+ prepared once and then executed many times.  The query can take parameters, these are
+ indicated by '?'s. Using the `mysql_stmt_bind_param` the values can be bound to the query.
+ An Example:
+
+```julia
+stmt = mysql_stmt_init(con)
+mysql_stmt_prepare(stmt, "INSERT INTO Employee (Name, Salary, JoinDate) values (?, ?, ?);")
+
+values = [("John", 10000.50, "2015-8-3"),
+          ("Tom", 20000.25, "2015-8-4"),
+          ("Jim", 30000.00, "2015-6-2")]
+
+for val in values
+    mysql_execute_query(stmt, [MYSQL_TYPE_VARCHAR, MYSQL_TYPE_FLOAT, MYSQL_TYPE_DATE], val)
+end
+
+mysql_stmt_prepare(stmt, "SELECT * from Employee WHERE ID = ? AND Salary > ?")
+dframe = mysql_execute_query(stmt, [MYSQL_TYPE_LONG, MYSQL_TYPE_FLOAT], [5, 35000.00])
+mysql_stmt_close(stmt)
+
+# To iterate over the result and get each row as a tuple
+for row in MySQLRowIterator(stmt, [MYSQL_TYPE_LONG, MYSQL_TYPE_FLOAT], [5, 35000.00])
+    # do stuff with row
+end
+```
+
+# Metadata
+
+```julia
+mysql_query(con, "SELECT * FROM some_table;")
+result = mysql_store_result(con)          # result set can be used later to retrieve values.
+meta = mysql_metadata(result)
+for i in 1:meta.nfields
+    println("Field name is: ", meta.names[i])
+    println("Field length is: ", meta.lens[i])
+    println("MySQL type is: ", meta.mtypes[i])
+    println("Julia type is: ", meta.jtypes[i])
+    println("Is nullable: ", m.is_nullables[i])
+end
+```
+
+The same function `mysql_metadata` can be called for prepared statements with the statement
+ handle as the argument after preparing the query.
+
+# Multi-Query
+
+`mysql_execute_query` handles multi-query.  It returns an array of DataFrames and integers.
+ The DataFrames correspond to the SELECT queries and the integers respresent the number of
+ affected rows corresponding to non-SELECT queries in the multi statement.
+
+If `MYSQL_TUPLES` are passed as the last argument, then tuples will be returned instead
+ of DataFrames.
+
+# Error types
+
+* `MySQLInterfaceError`: This error is thrown for exceptions that occur in the MySQL julia interface, such as when calling functions with a null connection.
+* `MySQLInternalError`: This error is thrown for exceptions that occur in the underlying C library.
+* `MySQLStatementError`: This error is thrown for exceptions that occur in the underlying C library when using prepared statements.
 
 # How to solve MySQL library not found error
 
@@ -140,7 +122,7 @@ This error may occur during `using MySQL`. To resolve this-
 make sure LD_LIBRARY_PATH contains the MariaDB/MySQL .so file directory path. Usually this is something like
 `/usr/local/lib/mariadb/`.
 * OSX: Same as above. In this case the file will be something like libmysqlclient.dylib.
-* Windows: There is no `@windows_only lib_choices` currently. Please add one and send a pull request.
+* Windows: The file will be picked up automatically if MySQL is installed correctly.  If you still get the error add the location of libmysql.dll to PATH.
 
 # Tests
 
@@ -149,13 +131,6 @@ in test/runtests.jl to the host and root password on your test setup. Run the te
 ```
 Pkg.test("MySQL")
 ```
-
-# Performance
-
-A total of 67,000 insert queries were executed batch wise in batch sizes of 50, 100, 150 ... so on.
- The time taken for all the queries to complete is plotted on the y axis and the batch sizes on x axis.
-
-![alt tag](https://raw.githubusercontent.com/nkottary/nishanth.github.io/master/plot.png)
 
 # Acknowledgement
 

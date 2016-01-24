@@ -14,7 +14,7 @@ end
 """
 Given a MYSQL type get the corresponding julia type.
 """
-function mysql_get_julia_type(mysqltype::MYSQL_TYPE)
+function mysql_get_julia_type(mysqltype)
     if (mysqltype == MYSQL_TYPE_BIT)
         return Cuchar
 
@@ -109,19 +109,11 @@ mysql_interpret_field(strval::AbstractString, ::Type{DateTime}) =
 """
 Load a bytestring from `result` pointer given the field index `idx`.
 """
-function mysql_load_string_from_resultptr(result::MYSQL_ROW, idx)
+function mysql_load_string_from_resultptr(result, idx)
     deref = unsafe_load(result, idx)
-
-    if deref == C_NULL
-        return nothing
-    end
-
+    deref == C_NULL && return nothing
     strval = bytestring(deref)
-
-    if length(strval) == 0
-        return nothing
-    end
-
+    length(strval) == 0 && return nothing
     return strval
 end
 
@@ -129,96 +121,91 @@ end
 Returns an array of MYSQL_FIELD. This array contains metadata information such
  as field type and field length etc. (see types.jl)
 """
-function mysql_get_field_metadata(result::MYSQL_RES)
+function mysql_metadata(result::MYSQL_RES)
     nfields = mysql_num_fields(result)
     rawfields = mysql_fetch_fields(result)
+    return pointer_to_array(rawfields, nfields)
+end
 
-    mysqlfields = Array(MYSQL_FIELD, nfields)
-
-    for i = 1:nfields
-        mysqlfields[i] = unsafe_load(rawfields, i)
-    end
-
-    return mysqlfields
+function mysql_metadata(stmtptr::Ptr{MYSQL_STMT})
+    result = mysql_stmt_result_metadata(stmtptr)
+    result == C_NULL && return nothing
+    ret = mysql_metadata(result)
+    mysql_free_result(result)
+    return ret
 end
 
 """
 Returns an array of MYSQL_TYPE's corresponding to each field in the table.
 """
 function mysql_get_field_types(result::MYSQL_RES)
-    mysqlfields = mysql_get_field_metadata(result)
+    mysqlfields = mysql_metadata(result)
     return mysql_get_field_types(mysqlfields)
 end
 
 function mysql_get_field_types(mysqlfields::Array{MYSQL_FIELD})
     nfields = length(mysqlfields)
     mysqlfield_types = Array(MYSQL_TYPE, nfields)
-
     for i = 1:nfields
         mysqlfield_types[i] = mysqlfields[i].field_type
     end
-
     return mysqlfield_types
 end
 
 """
 Get the result row `result` as a vector given the field types in an
- array `jfield_types`.
+ array `jtypes`.
 """
-function mysql_get_row_as_vector(result::MYSQL_ROW, jfield_types::Array{Type},
-                                 isnullable)
-    retvec = Array(Any, length(jfield_types))
-    mysql_get_row_as_vector!(result, retvec, jfield_types, isnullable)
+function mysql_get_row_as_vector(result, jtypes, isnullable)
+    retvec = Array(Any, length(jtypes))
+    mysql_get_row_as_vector!(result, retvec, jtypes, isnullable)
     return retvec
 end
 
-function mysql_get_row_as_vector!(result::MYSQL_ROW, retvec::Vector{Any},
-                                  jfield_types::Array{Type}, isnullable::Array{Bool})
-    for i = 1:length(jfield_types)
+function mysql_get_row_as_vector!(result, retvec, jtypes, isnullable)
+    for i = 1:length(jtypes)
         strval = mysql_load_string_from_resultptr(result, i)
-
         if strval == nothing
-            retvec[i] = Nullable{jfield_types[i]}()
+            retvec[i] = Nullable{jtypes[i]}()
         else
-            val = mysql_interpret_field(strval, jfield_types[i])
+            val = mysql_interpret_field(strval, jtypes[i])
             retvec[i] = isnullable[i] ? Nullable(val) : val
         end
     end
 end
 
-function mysql_get_row_as_tuple(result::MYSQL_ROW, jfield_types::Array{Type}, isnullable)
-    vec = mysql_get_row_as_vector(result, jfield_types, isnullable)
+function mysql_get_row_as_tuple(result, jtypes, isnullable)
+    vec = mysql_get_row_as_vector(result, jtypes, isnullable)
     return tuple(vec...)
 end
 
 """
 Convert a mysql field type array to a julia type array.
 """
-function mysql_get_jtype_array(mysqlfield_types::Array{MYSQL_TYPE})
+function mysql_get_jtype_array(mysqlfield_types)
     nfields = length(mysqlfield_types)
-    jfield_types = Array(Type, nfields)
+    jtypes = Array(Type, nfields)
     for i = 1:nfields
-        jfield_types[i] = mysql_get_julia_type(mysqlfield_types[i])
+        jtypes[i] = mysql_get_julia_type(mysqlfield_types[i])
     end
-    return jfield_types
+    return jtypes
 end
 
 """
 Returns true if `field` is nullable (i.e, it is not declared as `NOT NULL`)
 """
-function mysql_is_nullable(field::MYSQL_FIELD)
-    field.flags & NOT_NULL_FLAG == 0
-end
+mysql_is_nullable(field) = field.flags & NOT_NULL_FLAG == 0
 
 """
 Get an array of boolean values indicating whether the column is
  declared as `NULL`(true) or `NOT NULL`(false).
 """
-function mysql_get_nullable(result::MYSQL_RES)
-    fields = mysql_get_field_metadata(result)
-    isnullable = Array(Bool, length(fields))
-    for i = 1:length(fields)
-        isnullable[i] = mysql_is_nullable(fields[i])
+mysql_get_nullable(result) = mysql_get_nullable(mysql_metadata(result))
+
+function mysql_get_nullable(meta::Array{MYSQL_FIELD})
+    isnullable = Array(Bool, length(meta))
+    for i = 1:length(meta)
+        isnullable[i] = mysql_is_nullable(meta[i])
     end
     return isnullable
 end
@@ -226,71 +213,39 @@ end
 """
 Get the result as an array with each row as a vector.
 """
-function mysql_get_result_as_array(result::MYSQL_RES)
+function mysql_get_result_as_array(result)
     nrows = mysql_num_rows(result)
-    nfields = mysql_num_fields(result)
-
+    meta = mysql_metadata(result)
     retarr = Array(Array{Any}, nrows)
-    mysqlfield_types = mysql_get_field_types(result)
-    jfield_types = mysql_get_jtype_array(mysqlfield_types)
-    isnullable = mysql_get_nullable(result)
     for i = 1:nrows
-        retarr[i] = Array(Any, nfields)
+        retarr[i] = Array(Any, meta.nfields)
         mysql_get_row_as_vector!(mysql_fetch_row(result), retarr[i],
-                                 jfield_types, isnullable)
+                                 meta.jtypes, meta.is_nullables)
     end
-
     return retarr
 end
 
-function mysql_get_result_as_tuples(result::MYSQL_RES)
+function mysql_get_result_as_tuples(result::MySQLResult)
     nrows = mysql_num_rows(result)
+    meta = mysql_metadata(result)
     retarr = Array(Tuple, nrows)
-    mysqlfield_types = mysql_get_field_types(result)
-    jfield_types = mysql_get_jtype_array(mysqlfield_types)
-    isnullable = mysql_get_nullable(result)
     for i = 1:nrows
-        retarr[i] = mysql_get_row_as_tuple(mysql_fetch_row(result), jfield_types, isnullable)
+        retarr[i] = mysql_get_row_as_tuple(mysql_fetch_row(result), meta.jtypes,
+                                           meta.is_nullables)
     end
-
     return retarr
-end
-
-function MySQLRowIterator(result)
-    nfields = mysql_num_fields(result)
-    mysqlfield_types = mysql_get_field_types(result)
-    jfield_types = mysql_get_jtype_array(mysqlfield_types)
-    nrows = mysql_num_rows(result)
-    isnullable = mysql_get_nullable(result)
-    MySQLRowIterator(result, (), jfield_types, isnullable, nrows)
-end
-
-function Base.start(itr::MySQLRowIterator)
-    true
-end
-
-function Base.next(itr::MySQLRowIterator, state)
-    row = mysql_fetch_row(itr.result)
-    row == C_NULL && error("Unable to fetch row, you must re-execute the query.")
-    itr.row = mysql_get_row_as_tuple(row, itr.jfield_types, itr.isnullable)
-    itr.rowsleft -= 1
-    return (itr.row, state)
-end
-
-function Base.done(itr::MySQLRowIterator, state)
-    itr.rowsleft == 0
 end
 
 """
 Fill the row indexed by `row` of the dataframe `df` with values from `result`.
 """
-function populate_row!(df, nfields, result::MYSQL_ROW, row, jfield_types)
+function populate_row!(df, nfields, result, row)
     for i = 1:nfields
         strval = mysql_load_string_from_resultptr(result, i)
         if strval == nothing
             df[row, i] = NA
         else
-            df[row, i] = mysql_interpret_field(strval, jfield_types[i])
+            df[row, i] = mysql_interpret_field(strval, eltype(df[i]))
         end
     end
 end
@@ -298,25 +253,12 @@ end
 """
 Returns a dataframe containing the data in `result`.
 """
-function mysql_result_to_dataframe(result::MYSQL_RES)
-    nfields = mysql_num_fields(result)
-    fields = mysql_fetch_fields(result)
+function mysql_result_to_dataframe(result)
     nrows = mysql_num_rows(result)
-
-    jfield_types = Array(DataType, nfields)
-    field_headers = Array(Symbol, nfields)
-    mysqlfield_types = Array(Cuint, nfields)
-
-    for i = 1:nfields
-        mysql_field = unsafe_load(fields, i)
-        jfield_types[i] = mysql_get_julia_type(mysql_field.field_type)
-        field_headers[i] = symbol(bytestring(mysql_field.name))
-        mysqlfield_types[i] = mysql_field.field_type
-    end
-
-    df = DataFrame(jfield_types, field_headers, @compat Int64(nrows))
+    df = mysql_init_dataframe(mysql_metadata(result), nrows)
+    nfields = length(df)
     for row = 1:nrows
-        populate_row!(df, nfields, mysql_fetch_row(result), row, jfield_types)
+        populate_row!(df, nfields, mysql_fetch_row(result), row)
     end
     return df
 end
@@ -339,7 +281,7 @@ function mysql_binary_interpret_field(buf, T::Type)
             return convert(DateTime, value)
 
         else
-            error("MySQL Time type not recognized.")
+            throw(MySQLInterfaceError("MySQL Time type not recognized."))
         end
     end
 
@@ -351,82 +293,99 @@ Populate a row in the dataframe `df` indexed by `row` given the number of
  fields `nfields`, the type of each field `mysqlfield_types` and an array
  `bindarr` to which the results are bound.
 """
-function stmt_populate_row!(df, mysqlfield_types::Array{MYSQL_TYPE}, row,
-                            bindarr)
-    for i = 1:length(mysqlfield_types)
+function stmt_populate_row!(df, row_index, bindarr)
+    for i = 1:length(bindarr)
         if bindarr[i].is_null_value != 0
-            df[row, i] = NA
+            df[row_index, i] = NA
             continue
         end
-
-        buffer = bindarr[i].buffer
-        df[row, i] = mysql_binary_interpret_field(buffer, mysqlfield_types[i])
+        df[row_index, i] = mysql_binary_interpret_field(bindarr[i].buffer,
+                                                        convert(MYSQL_TYPE, bindarr[i].buffer_type))
     end
 end
 
 """
-Given the result metadata `metadata` and the prepared statement pointer
- `stmtptr`, get the result as a dataframe.
+Get a bind array for binding to results.
 """
-function mysql_stmt_result_to_dataframe(metadata::MYSQL_RES,
-                                        stmtptr::Ptr{MYSQL_STMT})
-    nfields = mysql_num_fields(metadata)
-    fields = mysql_fetch_fields(metadata)
-    
-    mysql_stmt_store_result(stmtptr)
-    nrows = mysql_stmt_num_rows(stmtptr)
-    
-    jfield_types = Array(DataType, nfields)
-    field_headers = Array(Symbol, nfields)
-    mysqlfield_types = Array(MYSQL_TYPE, nfields)
-    
-    mysql_bindarr = Array(MYSQL_BIND, nfields)
-
-    for i = 1:nfields
-        mysql_field = unsafe_load(fields, i)
-        jfield_types[i] = mysql_get_julia_type(mysql_field.field_type)
-        field_headers[i] = symbol(bytestring(mysql_field.name))
-        mysqlfield_types[i] = mysql_field.field_type
-        field_length = mysql_field.field_length
-    
-        buffer_length::Culong = zero(Culong)
-        buffer_type = convert(Cint, mysqlfield_types[i])
+function mysql_bind_array(meta::MySQLMetadata)
+    bindarr = Array(MYSQL_BIND, meta.nfields)
+    for i in 1:meta.nfields
+        bufflen = zero(Culong)
         bindbuff = C_NULL
-        ctype = mysql_get_ctype(jfield_types[i])
+        ctype = mysql_get_ctype(meta.mtypes[i])
 
         if (ctype == AbstractString)
-            buffer_length = field_length + 1
-            bindbuff = c_malloc(field_length + 1)
+            bufflen = meta.lens[i] + 1
+            bindbuff = c_malloc(meta.lens[i] + 1)
         else
-            buffer_length = sizeof(ctype)
+            bufflen = sizeof(ctype)
             bindbuff = c_malloc(sizeof(ctype))
         end
 
-        mysql_bindarr[i] = MYSQL_BIND(bindbuff, buffer_length, buffer_type)
+        bindarr[i] = MYSQL_BIND(bindbuff, bufflen, meta.mtypes[i])
 
-        # now we have to make the is_null pointer point
-        # to is_null_value in the MYSQL_BIND struct.
+        # make `is_null pointer` point to `is_null_value` in the MYSQL_BIND struct.
         unsafe_store!(convert(Ptr{Ptr{Cchar}},
-                              pointer(mysql_bindarr, i) + 8),
-                      pointer(mysql_bindarr, i) + 103)
+                              pointer(bindarr, i) + 8),
+                      pointer(bindarr, i) + 103)
 
     end # end for
-    
-    df = DataFrame(jfield_types, field_headers, @compat Int64(nrows))
-    response = mysql_stmt_bind_result(stmtptr, pointer(mysql_bindarr))
 
-    if (response != 0)
-        error("Failed to bind results")
+    finalizer(bindarr, x -> begin; for b in x; c_free(b.buffer); end; end)
+    return bindarr
+end
+
+"""
+Get a bind array for binding to results.
+"""
+mysql_bind_array(meta::Array{MYSQL_FIELD, 1}) = mysql_bind_array(MySQLMetadata(meta))
+
+"""
+Initialize a dataframe for prepared statement results.
+"""
+mysql_init_dataframe(meta::Array{MYSQL_FIELD}, nrows) =
+    mysql_init_dataframe(MySQLMetadata(meta), nrows)
+mysql_init_dataframe(meta, nrows) =
+    DataFrame(meta.jtypes, map(symbol, meta.names), @compat Int64(nrows))
+
+function mysql_result_to_dataframe(stmt::MySQLStatementHandle)
+    meta = mysql_metadata(stmt.stmtptr)
+    bindres = mysql_bind_array(meta)
+    mysql_stmt_bind_result(stmt, bindres)
+    mysql_stmt_store_result(stmt)
+    nrows = mysql_stmt_num_rows(stmt)
+    df = mysql_init_dataframe(meta, nrows)
+    for ridx = 1:nrows
+        mysql_stmt_fetch(stmt)
+        stmt_populate_row!(df, ridx, bindres)
     end
-
-    for row = 1:nrows
-        result = mysql_stmt_fetch(stmtptr)
-        stmt_populate_row!(df, mysqlfield_types, row, mysql_bindarr)
-    end
-
-    for i = 1:nfields
-        c_free(mysql_bindarr[i].buffer)
-    end
-
     return df
+end
+
+function mysql_get_result_as_tuples(stmt::MySQLStatementHandle)
+    meta = mysql_metadata(stmt)
+    bindres = mysql_bind_array(meta)
+    mysql_stmt_bind_result(stmt, bindres)
+    mysql_stmt_store_result(stmt)
+    nrows = mysql_stmt_num_rows(stmt)
+    retarr = Array(Tuple, nrows)
+    for i = 1:nrows
+        mysql_stmt_fetch(stmt)
+        retarr[i] = mysql_get_row_as_tuple(bindres, meta.jtypes, meta.is_nullables)
+    end
+    return retarr
+end
+
+function mysql_get_row_as_tuple(bindarr::Array{MYSQL_BIND, 1}, jtypes, isnullable)
+    vec = Array(Any, length(bindarr))
+    for i = 1:length(bindarr)
+        if bindarr[i].is_null_value != 0
+            vec[i] = Nullable{jtypes[i]}()
+        else
+            val = mysql_binary_interpret_field(bindarr[i].buffer,
+                                               convert(MYSQL_TYPE, bindarr[i].buffer_type))
+            vec[i] = isnullable[i] ? Nullable(val) : val
+        end
+    end
+    return tuple(vec...)
 end

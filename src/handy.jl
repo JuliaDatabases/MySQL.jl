@@ -8,8 +8,7 @@ Set multiple options specified in the dictionary opts.  The keys represent the o
 """
 function mysql_options(hndl, opts)
     for (k, v) in opts
-        response = mysql_options(hndl, k, v)
-        mysql_display_error(hndl, response, "Failed to set mysql options.")
+        mysql_options(hndl, k, v)
     end
 end
 
@@ -26,11 +25,11 @@ function mysql_connect(host::AbstractString,
                         client_flag; opts = Dict())
     _mysqlptr = C_NULL
     _mysqlptr = mysql_init(_mysqlptr)
-    _mysqlptr == C_NULL && error("Failed to initialize MySQL database")
+    _mysqlptr == C_NULL && throw(MySQLInterfaceError("Failed to initialize MySQL database"))
     mysql_options(_mysqlptr, opts)
     mysqlptr = mysql_real_connect(_mysqlptr, host, user, passwd,
                                   db, port, unix_socket, client_flag)
-    mysqlptr == C_NULL && error(bytestring(mysql_error(_mysqlptr)))
+    mysqlptr == C_NULL && throw(MySQLInternalError(_mysqlptr))
     return MySQLHandle(mysqlptr, host, user, db)
 end
 
@@ -48,9 +47,7 @@ end
 Wrapper over mysql_close. Must be called to close the connection opened by mysql_connect.
 """
 function mysql_disconnect(hndl)
-    if (hndl.mysqlptr == C_NULL)
-        error("Disconnect called with NULL connection.")
-    end
+    hndl.mysqlptr == C_NULL && throw(MySQLInterfaceError("Method called with NULL connection."))
     mysql_close(hndl.mysqlptr)
     hndl.mysqlptr = C_NULL
     hndl.host = ""
@@ -59,18 +56,46 @@ function mysql_disconnect(hndl)
     nothing
 end
 
-# wrappers to take MySQLHandle as input as well as check for NULL pointer.
-for func = (:mysql_query, :mysql_store_result, :mysql_field_count, :mysql_affected_rows,
-            :mysql_next_result, :mysql_error, :mysql_execute_query, :mysql_options,
-            :mysql_insert_id)
+function mysql_affected_rows(res::MySQLResult)
+    res.resptr == C_NULL && throw(MySQLInterfaceError("Method called with NULL result."))
+    ret = mysql_affected_rows(res.resptr)
+    ret == typemax(Culong) && throw(MySQLInternalError(res.con))
+    return ret
+end
+
+function mysql_next_result(hndl::MySQLHandle)
+    hndl.mysqlptr == C_NULL && throw(MySQLInterfaceError("Method called with NULL connection."))
+    resp = mysql_next_result(hndl.mysqlptr)
+    resp > 0 && throw(MySQLInternalError(hndl))
+    return resp
+end
+
+for func = (:mysql_field_count, :mysql_error, :mysql_insert_id)
     eval(quote
         function ($func)(hndl::MySQLHandle, args...)
-            if hndl.mysqlptr == C_NULL
-                error($(string(func)) * " called with NULL connection.")
-            end
-            ($func)(hndl.mysqlptr, args...)
+            hndl.mysqlptr == C_NULL && throw(MySQLInterfaceError($(string(func)) * " called with NULL connection."))
+            return ($func)(hndl.mysqlptr, args...)
         end
     end)
+end
+
+# wrappers to take MySQLHandle as input as well as check for NULL pointer.
+for func = (:mysql_query, :mysql_options)
+    eval(quote
+        function ($func)(hndl::MySQLHandle, args...)
+            hndl.mysqlptr == C_NULL && throw(MySQLInterfaceError($(string(func)) * " called with NULL connection."))
+            val = ($func)(hndl.mysqlptr, args...)
+            val != 0 && throw(MySQLInternalError(hndl))
+            return val
+        end
+    end)
+end
+
+function mysql_store_result(hndl::MySQLHandle)
+    hndl.mysqlptr == C_NULL && throw(MySQLInterfaceError("Method called with NULL connection."))
+    ptr = mysql_store_result(hndl.mysqlptr)
+    ptr == C_NULL && throw(MySQLInternalError(hndl))
+    return MySQLResult(hndl, ptr)
 end
 
 """
@@ -85,41 +110,38 @@ In the case of non-multi queries returns either the number of affected
  rows for non-SELECT queries or a DataFrame for SELECT queries.
 
 By default, returns SELECT query results as DataFrames.
- Set `opformat` to `MYSQL_ARRAY` to get results as arrays.
+ Set `opformat` to `MYSQL_TUPLES` to get results as tuples.
 """
-function mysql_execute_query(mysqlptr::Ptr{Void}, command, opformat=MYSQL_DATA_FRAME)
-    response = mysql_query(mysqlptr, command)
-    mysql_display_error(mysqlptr, response)
+function mysql_execute_query(con, command; opformat=MYSQL_DATA_FRAME)
+    con.mysqlptr == C_NULL && throw(MySQLInterfaceError("Method called with null connection."))
+    mysql_query(con.mysqlptr, command) != 0 && throw(MySQLInternalError(con))
 
     data = Any[]
 
     if opformat == MYSQL_DATA_FRAME
         convfunc = mysql_result_to_dataframe
-    elseif opformat == MYSQL_ARRAY
-        convfunc = mysql_get_result_as_array
     elseif opformat == MYSQL_TUPLES
         convfunc = mysql_get_result_as_tuples
     else
-        error("Invalid output format: $opformat")
+        throw(MySQLInterfaceError("Invalid output format: $opformat"))
     end
 
     while true
-        result = mysql_store_result(mysqlptr)
+        result = mysql_store_result(con.mysqlptr)
         if result != C_NULL # if select query
-            retval = convfunc(result)
+            retval = convfunc(MySQLResult(con, result))
             push!(data, retval)
             mysql_free_result(result)
 
-        elseif mysql_field_count(mysqlptr) == 0
-            push!(data, @compat Int(mysql_affected_rows(mysqlptr)))
+        elseif mysql_field_count(con.mysqlptr) == 0
+            push!(data, @compat Int(mysql_affected_rows(con.mysqlptr)))
         else
-            mysql_display_error(mysqlptr,
-                                "Query expected to produce results but did not.")
+            throw(MySQLInterfaceError("Query expected to produce results but did not."))
         end
         
-        status = mysql_next_result(mysqlptr)
+        status = mysql_next_result(con.mysqlptr)
         if status > 0
-            mysql_display_error(mysqlptr, "Could not execute multi statements.")
+            throw(MySQLInternalError(con))
         elseif status == -1 # if no more results
             break
         end
@@ -131,76 +153,94 @@ function mysql_execute_query(mysqlptr::Ptr{Void}, command, opformat=MYSQL_DATA_F
     return data
 end
 
-"""
-A handy function to display the `mysql_error` message along with a user message `msg` through `error`
- when `condition` is true.
-"""
-function mysql_display_error(hndl, condition::Bool, msg)
-    if (condition)
-        err_string = msg * "\nMySQL ERROR: " * bytestring(mysql_error(hndl))
-        error(err_string)
+function mysql_execute_query(stmt::MySQLStatementHandle; opformat=MYSQL_DATA_FRAME)
+    mysql_stmt_execute(stmt)
+    naff = mysql_stmt_affected_rows(stmt)
+    naff != typemax(typeof(naff)) && return naff        # Not a SELECT query
+    if opformat == MYSQL_DATA_FRAME
+        return mysql_result_to_dataframe(stmt)
+    elseif opformat == MYSQL_TUPLES
+        return mysql_get_result_as_tuples(stmt)
+    else
+        throw(MySQLInterfaceError("Invalid output format: $opformat"))
     end
 end
 
-function mysql_display_error(hndl::MySQLStatementHandle, condition::Bool, msg)
-    if (condition)
-        err_string = msg * "\nMySQL ERROR: " * bytestring(mysql_stmt_error(hndl))
-        error(err_string)
-    end
-end
-
-mysql_display_error(hndl, condition::Bool) = mysql_display_error(hndl, condition, "")
-mysql_display_error(hndl, response, msg) = mysql_display_error(hndl, response != 0, msg)
-mysql_display_error(hndl, response) = mysql_display_error(hndl, response, "")
-mysql_display_error(hndl, msg::AbstractString) = mysql_display_error(hndl, true, msg)
-
-"""
-Given a prepared statement pointer `stmtptr` returns a dataframe containing the results.
-`mysql_stmt_prepare` must be called on the statement pointer before this can be used.
-"""
-function mysql_stmt_result_to_dataframe(stmtptr::Ptr{MYSQL_STMT})
-    stmt = unsafe_load(stmtptr)
-    metadata = mysql_stmt_result_metadata(stmtptr)
-    mysql_display_error(stmt.mysql, metadata == C_NULL,
-                        "Error occured while retrieving metadata")
-
-    response = mysql_stmt_execute(stmtptr)
-    mysql_display_error(stmt.mysql, response,
-                        "Error occured while executing prepared statement")
-
-    retval = mysql_stmt_result_to_dataframe(metadata, stmtptr)
-    mysql_free_result(metadata)
-    return retval
+function mysql_execute_query(stmt::MySQLStatementHandle, typs, values;
+                             opformat=MYSQL_DATA_FRAME)
+    bindarr = mysql_bind_array(typs, values)
+    mysql_stmt_bind_param(stmt, bindarr)
+    return mysql_execute_query(stmt; opformat=opformat)
 end
 
 function mysql_stmt_init(hndl::MySQLHandle)
-    if hndl.mysqlptr == C_NULL
-        error("mysql_stmt_init called with NULL connection.")
-    end
-    MySQLStatementHandle(mysql_stmt_init(hndl.mysqlptr))
+    hndl.mysqlptr == C_NULL && throw(MySQLInterfaceError("Method called with NULL connection."))
+    ptr = mysql_stmt_init(hndl.mysqlptr)
+    ptr == C_NULL && throw(MySQLInternalError(hndl))
+    return MySQLStatementHandle(ptr)
 end
 
-function mysql_stmt_close(hndl::MySQLStatementHandle)
-    if hndl.stmtptr == C_NULL
-        error("mysql_stmt_close called with Null statement handle")
-    end
-
-    response = mysql_stmt_close(hndl.stmtptr)
-    hndl.stmtptr = C_NULL
-    return response
+for func = (:mysql_stmt_num_rows, :mysql_stmt_affected_rows,
+            :mysql_stmt_result_to_dataframe, :mysql_stmt_error)
+    eval(quote
+        function ($func)(stmt::MySQLStatementHandle, args...)
+            stmt.stmtptr == C_NULL && throw(MySQLInterfaceError($(string(func)) * " called with NULL statement handle."))
+            return ($func)(stmt.stmtptr, args...)
+        end
+    end)
 end
 
-# wrappers to take MySQLStatementHandle as input as well as check for NULL pointer.
-for func = (:mysql_stmt_execute, :mysql_stmt_prepare, :mysql_stmt_error,
-            :mysql_stmt_store_result, :mysql_stmt_result_metadata,
-            :mysql_stmt_num_rows, :mysql_stmt_fetch, :mysql_stmt_bind_result,
-            :mysql_stmt_bind_param, :mysql_stmt_affected_rows, :mysql_stmt_result_to_dataframe)
+function mysql_stmt_prepare(stmt::MySQLStatementHandle, command)
+    stmt.stmtptr == C_NULL && throw(MySQLInterfaceError("Method called with NULL statement."))
+    val = mysql_stmt_prepare(stmt.stmtptr, command)
+    val != 0 && throw(MySQLStatementError(stmt))
+    return val
+end
+
+function mysql_stmt_close(stmt::MySQLStatementHandle)
+    stmt.stmtptr == C_NULL && throw(MySQLInterfaceError("Method called with Null statement handle"))
+    mysql_stmt_close(stmt.stmtptr) != 0 && throw(MySQLStatementError(stmt))
+    stmt.stmtptr = C_NULL
+    nothing
+end
+
+function mysql_stmt_execute(stmt::MySQLStatementHandle)
+    stmt.stmtptr  == C_NULL && throw(MySQLInterfaceError("Method called with Null statement handle"))
+    val = mysql_stmt_execute(stmt.stmtptr)
+    val != 0 && throw(MySQLStatementError(stmt))
+    return val
+end
+
+function mysql_stmt_fetch(stmt::MySQLStatementHandle)
+    stmt.stmtptr == C_NULL && throw(MySQLInterfaceError("Method called with NULL statement handle."))
+    val = mysql_stmt_fetch(stmt.stmtptr)
+    val == 1 && throw(MySQLStatementError(stmt))
+    return val
+end
+
+function mysql_stmt_bind_result(stmt::MySQLStatementHandle, bindarr::Array{MYSQL_BIND, 1})
+    stmt.stmtptr == C_NULL && throw(MySQLInterfaceError("Method called with NULL statement handle."))
+    val = mysql_stmt_bind_result(stmt.stmtptr, pointer(bindarr))
+    val != 0 && throw(MySQLStatementError(stmt))
+    return val
+end
+
+for func = (:mysql_stmt_store_result, :mysql_stmt_bind_param)
+    eval(quote
+        function ($func)(stmt, args...)
+            stmt.stmtptr == C_NULL && throw(MySQLInterfaceError($(string(func)) * " called with NULL statement handle."))
+            val = ($func)(stmt.stmtptr, args...)
+            val != 0 && throw(MySQLStatementError(stmt))
+            return val
+        end
+    end)
+end
+
+for func = (:mysql_num_rows, :mysql_fetch_row)
     eval(quote
         function ($func)(hndl, args...)
-            if hndl.stmtptr == C_NULL
-                error($(string(func)) * " called with NULL statement handle.")
-            end
-            ($func)(hndl.stmtptr, args...)
+            hndl.resptr == C_NULL && throw(MySQLInterfaceError($(string(func)) * " called with NULL result set."))
+            return ($func)(hndl.resptr, args...)
         end
     end)
 end
@@ -217,4 +257,39 @@ mysql_bind_init(jtype::@compat(Union{Type{Date}, Type{DateTime}}), typ, value) =
 mysql_bind_init(::Type{AbstractString}, typ, value) = MYSQL_BIND(value, typ)
 mysql_bind_init(jtype, typ, value) = MYSQL_BIND([convert(jtype, value)], typ)
 
-export mysql_bind_init, mysql_insert_id
+"""
+Get the binding array for arguments to be passed to prepared statements.
+
+`typs` is an array of `MYSQL_TYPES` and `params` is and array of corresponding values.
+
+Returns an array of `MYSQL_BIND`.
+"""
+function mysql_bind_array(typs, params)
+    length(typs) != length(params) && throw(MySQLInterfaceError("Length of `typs` and `params` must be same."))
+    bindarr = MYSQL_BIND[]
+    for (typ, val) in zip(typs, params)
+        push!(bindarr, mysql_bind_init(typ, val))
+    end
+    return bindarr
+end
+
+function MySQLResult(con, resptr)
+    res = MySQLResult(con, resptr)
+    finalizer(ret, x -> mysql_free_result(res.resptr))
+    return res
+end
+
+function mysql_metadata(result::MySQLResult)
+    result.resptr == C_NULL && throw(MySQLInterfaceError("Method called with null result set."))
+    return MySQLMetadata(mysql_metadata(result.resptr))
+end
+
+function mysql_metadata(stmt::MySQLStatementHandle)
+    stmt.stmtptr == C_NULL && throw(MySQLInterfaceError("Method called with null statement pointer."))
+    return MySQLMetadata(mysql_metadata(stmt.stmtptr))
+end
+
+export mysql_options, mysql_connect, mysql_disconnect, mysql_execute_query,
+       mysql_insert_id, mysql_store_result, mysql_metadata, mysql_query,
+
+       mysql_stmt_init, mysql_stmt_prepare, mysql_stmt_close

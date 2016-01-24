@@ -21,15 +21,13 @@ DB:   $(hndl.db)
     end
 end
 
-"""
-The Pointer to result set for C calls.
-"""
 typealias MYSQL_RES Ptr{Void}
+typealias MYSQL_ROW Ptr{Ptr{Cchar}}  # pointer to an array of strings
 
-"""
-The record that would be returned by mysql_fetch_row API.
-"""
-typealias MYSQL_ROW Ptr{Ptr{Cchar}} # pointer to an array of strings
+type MySQLResult
+    con::MySQLHandle
+    resptr::MYSQL_RES
+end
 
 typealias MYSQL_TYPE UInt32
 
@@ -123,7 +121,7 @@ typealias MYSQL_DATA Ptr{Void}
 """
 Mirror to MYSQL_ROWS struct in mysql.h
 """
-type MYSQL_ROWS
+immutable MYSQL_ROWS
     next::Ptr{MYSQL_ROWS}
     data::MYSQL_ROW
     length::Culong
@@ -180,15 +178,91 @@ end
 
 
 """
-Iterator for the mysql result (MYSQL_RES).
+Iterator for the mysql result.
 """
 type MySQLRowIterator
-    result::MYSQL_RES
-    row::Tuple
-    jfield_types::Array{Type, 1}
-    isnullable::Array{Bool, 1}
+    result::MySQLResult
+    jtypes::Array{Type, 1}
+    is_nullables::Array{Bool, 1}
     rowsleft::Int64
 end
 
-export MySQLHandle, MYSQL_RES, MYSQL_ROW, MYSQL_TYPE, MYSQL_FIELD, MySQLRowIterator,
-       MYSQL_STMT, MYSQL_TIME, MYSQL_BIND, MySQLStatementHandle
+"""
+Iterator for prepared statement results.
+"""
+type MySQLStatementIterator
+    stmt::MySQLStatementHandle
+    jtypes::Array{Type, 1}
+    is_nullables::Array{Bool, 1}
+    binding::Array{MYSQL_BIND, 1}
+end
+
+abstract MySQLError
+
+# For errors that happen in the MySQL C connector
+type MySQLInternalError <: MySQLError
+    con::Ptr{Void}
+
+    function MySQLInternalError(con::MySQLHandle)
+        new(con.mysqlptr)
+    end
+
+    function MySQLInternalError(ptr)
+        new(ptr)
+    end
+end
+
+Base.showerror(io::IO, e::MySQLInternalError) = print(io, bytestring(mysql_error(e.con)))
+
+# Internal errors that happen when using prepared statements
+type MySQLStatementError <: MySQLError
+    stmt::Ptr{MYSQL_STMT}
+
+    function MySQLStatementError(stmt::MySQLStatementHandle)
+        new(stmt.stmtptr)
+    end
+
+    function MySQLStatementError(ptr)
+        new(ptr)
+    end
+end
+
+Base.showerror(io::IO, e::MySQLStatementError) =
+    print(io, bytestring(mysql_stmt_error(e.stmt)))
+
+# For errors that happen in MySQL.jl
+type MySQLInterfaceError <: MySQLError
+    msg::AbstractString
+end
+
+Base.showerror(io::IO, e::MySQLInterfaceError) = print(io, e.msg)
+
+type MySQLMetadata
+    names::Array{AbstractString, 1}
+    mtypes::Array{MYSQL_TYPE, 1}
+    jtypes::Array{Type, 1}
+    lens::Array{Int, 1}
+    is_nullables::Array{Bool, 1}
+    nfields::Int
+
+    function MySQLMetadata(fields::Array{MYSQL_FIELD, 1})
+        nfields = length(fields)
+        names = Array(AbstractString, nfields)
+        mtypes = Array(MYSQL_TYPE, nfields)
+        jtypes = Array(Type, nfields)
+        lens = Array(Int, nfields)
+        is_nullables = Array(Bool, nfields)
+        for i in 1:nfields
+            names[i] = bytestring(fields[i].name)
+            mtypes[i] = fields[i].field_type
+            jtypes[i] = mysql_get_julia_type(fields[i].field_type)
+            lens[i] = fields[i].field_length
+            is_nullables[i] = mysql_is_nullable(fields[i])
+        end
+        new(names, mtypes, jtypes, lens, is_nullables, nfields)
+    end
+end
+
+export MySQLHandle, MySQLResult, MySQLRow, MySQLRowIterator,
+       MySQLStatementHandle, MySQLInternalError, MySQLStatementError,
+       MySQLInterfaceError, MySQLMetadata, MySQLStatementIterator
