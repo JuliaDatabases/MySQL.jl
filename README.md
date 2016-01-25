@@ -61,23 +61,21 @@ Prepared statements are used to optimize queries.  Queries that are run repeated
  An Example:
 
 ```julia
-stmt = mysql_stmt_init(con)
-mysql_stmt_prepare(stmt, "INSERT INTO Employee (Name, Salary, JoinDate) values (?, ?, ?);")
+mysql_stmt_prepare(conn, "INSERT INTO Employee (Name, Salary, JoinDate) values (?, ?, ?);")
 
 values = [("John", 10000.50, "2015-8-3"),
           ("Tom", 20000.25, "2015-8-4"),
           ("Jim", 30000.00, "2015-6-2")]
 
 for val in values
-    mysql_execute_query(stmt, [MYSQL_TYPE_VARCHAR, MYSQL_TYPE_FLOAT, MYSQL_TYPE_DATE], val)
+    mysql_execute_query(conn, [MYSQL_TYPE_VARCHAR, MYSQL_TYPE_FLOAT, MYSQL_TYPE_DATE], val)
 end
 
-mysql_stmt_prepare(stmt, "SELECT * from Employee WHERE ID = ? AND Salary > ?")
-dframe = mysql_execute_query(stmt, [MYSQL_TYPE_LONG, MYSQL_TYPE_FLOAT], [5, 35000.00])
-mysql_stmt_close(stmt)
+mysql_stmt_prepare(conn, "SELECT * from Employee WHERE ID = ? AND Salary > ?")
+dframe = mysql_execute_query(conn, [MYSQL_TYPE_LONG, MYSQL_TYPE_FLOAT], [5, 35000.00])
 
 # To iterate over the result and get each row as a tuple
-for row in MySQLRowIterator(stmt, [MYSQL_TYPE_LONG, MYSQL_TYPE_FLOAT], [5, 35000.00])
+for row in MySQLRowIterator(conn, [MYSQL_TYPE_LONG, MYSQL_TYPE_FLOAT], [5, 35000.00])
     # do stuff with row
 end
 ```

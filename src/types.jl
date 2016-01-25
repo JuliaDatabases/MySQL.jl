@@ -1,34 +1,8 @@
-"""
-The MySQL handle.
-"""
-type MySQLHandle
-    mysqlptr::Ptr{Void}
-    host::AbstractString
-    user::AbstractString
-    db::AbstractString
-end
-
-function Base.show(io::IO, hndl::MySQLHandle)
-    if hndl.mysqlptr == C_NULL
-        print(io, "Null MySQL Handle")
-    else
-        print(io, """MySQL Handle
-------------
-Host: $(hndl.host)
-User: $(hndl.user)
-DB:   $(hndl.db)
-""")
-    end
-end
-
+typealias MEM_ROOT Ptr{Void}
+typealias LIST Ptr{Void}
+typealias MYSQL_DATA Ptr{Void}
 typealias MYSQL_RES Ptr{Void}
 typealias MYSQL_ROW Ptr{Ptr{Cchar}}  # pointer to an array of strings
-
-type MySQLResult
-    con::MySQLHandle
-    resptr::MYSQL_RES
-end
-
 typealias MYSQL_TYPE UInt32
 
 """
@@ -74,8 +48,6 @@ immutable MYSQL_TIME
     timetype::Cuint
 end
 
-export MYSQL_TIME
-
 """
 Mirror to MYSQL_BIND struct in mysql_bind.h
 """
@@ -113,10 +85,6 @@ immutable MYSQL_BIND
         MYSQL_BIND(convert(Ptr{Void}, pointer(str)), sizeof(str), bufftype)
     end
 end
-
-typealias MEM_ROOT Ptr{Void}
-typealias LIST Ptr{Void}
-typealias MYSQL_DATA Ptr{Void}
 
 """
 Mirror to MYSQL_ROWS struct in mysql.h
@@ -162,20 +130,33 @@ immutable MYSQL_STMT # This is different in mariadb header file.
 end
 
 """
-The MySQL Statement Handle.
+The MySQL handle.
 """
-type MySQLStatementHandle
+type MySQLHandle
+    mysqlptr::Ptr{Void}
+    host::AbstractString
+    user::AbstractString
+    db::AbstractString
     stmtptr::Ptr{MYSQL_STMT}
 end
 
-function Base.show(io::IO, hndl::MySQLStatementHandle)
-    if hndl.stmtptr == C_NULL
-        print(io, "Null MySQL Statement Handle")
+function Base.show(io::IO, hndl::MySQLHandle)
+    if hndl.mysqlptr == C_NULL
+        print(io, "Null MySQL Handle")
     else
-        print(io, """MySQL Statement Handle""")
+        print(io, """MySQL Handle
+------------
+Host: $(hndl.host)
+User: $(hndl.user)
+DB:   $(hndl.db)
+""")
     end
 end
 
+type MySQLResult
+    con::MySQLHandle
+    resptr::MYSQL_RES
+end
 
 """
 Iterator for the mysql result.
@@ -191,7 +172,7 @@ end
 Iterator for prepared statement results.
 """
 type MySQLStatementIterator
-    stmt::MySQLStatementHandle
+    hndl::MySQLHandle
     jtypes::Array{Type, 1}
     is_nullables::Array{Bool, 1}
     binding::Array{MYSQL_BIND, 1}
@@ -218,8 +199,8 @@ Base.showerror(io::IO, e::MySQLInternalError) = print(io, bytestring(mysql_error
 type MySQLStatementError <: MySQLError
     stmt::Ptr{MYSQL_STMT}
 
-    function MySQLStatementError(stmt::MySQLStatementHandle)
-        new(stmt.stmtptr)
+    function MySQLStatementError(hndl::MySQLHandle)
+        new(hndl.stmtptr)
     end
 
     function MySQLStatementError(ptr)
@@ -263,6 +244,6 @@ type MySQLMetadata
     end
 end
 
-export MySQLHandle, MySQLResult, MySQLRow, MySQLRowIterator,
-       MySQLStatementHandle, MySQLInternalError, MySQLStatementError,
+export MySQLHandle, MySQLResult, MySQLRowIterator,
+       MySQLInternalError, MySQLStatementError,
        MySQLInterfaceError, MySQLMetadata, MySQLStatementIterator
