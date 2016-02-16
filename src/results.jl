@@ -117,10 +117,6 @@ function mysql_load_string_from_resultptr(result, idx)
     return strval
 end
 
-"""
-Returns an array of MYSQL_FIELD. This array contains metadata information such
- as field type and field length etc. (see types.jl)
-"""
 function mysql_metadata(result::MYSQL_RES)
     nfields = mysql_num_fields(result)
     rawfields = mysql_fetch_fields(result)

@@ -17,8 +17,8 @@ function run_test()
     DROP DATABASE test_db"""
 
     # Run twice: Related to an earlier bug where 2nd run was failing.
-    mysql_execute_query(hndl, query)
-    data = mysql_execute_query(hndl, query)
+    mysql_execute(hndl, query)
+    data = mysql_execute(hndl, query)
 
     @show data
 
