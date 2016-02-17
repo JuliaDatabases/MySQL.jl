@@ -30,14 +30,14 @@ command = """CREATE TABLE Employee
                  JoinDate DATE,
                  PRIMARY KEY (ID)
              );"""
-mysql_execute_query(con, command)
+mysql_execute(con, command)
 
 # Insert some values
-mysql_execute_query(con, "INSERT INTO Employee (Name, Salary, JoinDate) values ("John", 25000.00, '2015-12-12'), ("Sam", 35000.00, '2012-18-17), ("Tom", 50000.00, '2013-12-14');")
+mysql_execute(con, "INSERT INTO Employee (Name, Salary, JoinDate) values ("John", 25000.00, '2015-12-12'), ("Sam", 35000.00, '2012-18-17), ("Tom", 50000.00, '2013-12-14');")
 
 # Get SELECT results
 command = "SELECT * FROM Employee;"
-dframe = mysql_execute_query(con, command)
+dframe = mysql_execute(con, command)
 
 # Close connection
 mysql_disconnect(con)
@@ -45,7 +45,7 @@ mysql_disconnect(con)
 
 ## Getting the result set
 
-By default, `mysql_execute_query` returns a DataFrame.  To obtain each row as a tuple use `mysql_execute_query(con, command; opformat=MYSQL_TUPLES)`.  The same can also be done with the `MySQLRowIterator`, example:
+By default, `mysql_execute` returns a DataFrame.  To obtain each row as a tuple use `mysql_execute(con, command; opformat=MYSQL_TUPLES)`.  The same can also be done with the `MySQLRowIterator`, example:
 
 ```julia
 for row in MySQLRowIterator(con, command)
@@ -68,11 +68,11 @@ values = [("John", 10000.50, "2015-8-3"),
           ("Jim", 30000.00, "2015-6-2")]
 
 for val in values
-    mysql_execute_query(conn, [MYSQL_TYPE_VARCHAR, MYSQL_TYPE_FLOAT, MYSQL_TYPE_DATE], val)
+    mysql_execute(conn, [MYSQL_TYPE_VARCHAR, MYSQL_TYPE_FLOAT, MYSQL_TYPE_DATE], val)
 end
 
 mysql_stmt_prepare(conn, "SELECT * from Employee WHERE ID = ? AND Salary > ?")
-dframe = mysql_execute_query(conn, [MYSQL_TYPE_LONG, MYSQL_TYPE_FLOAT], [5, 35000.00])
+dframe = mysql_execute(conn, [MYSQL_TYPE_LONG, MYSQL_TYPE_FLOAT], [5, 35000.00])
 
 # To iterate over the result and get each row as a tuple
 for row in MySQLRowIterator(conn, [MYSQL_TYPE_LONG, MYSQL_TYPE_FLOAT], [5, 35000.00])
@@ -100,7 +100,7 @@ The same function `mysql_metadata` can be called for prepared statements with th
 
 # Multi-Query
 
-`mysql_execute_query` handles multi-query.  It returns an array of DataFrames and integers.
+`mysql_execute` handles multi-query.  It returns an array of DataFrames and integers.
  The DataFrames correspond to the SELECT queries and the integers respresent the number of
  affected rows corresponding to non-SELECT queries in the multi statement.
 
