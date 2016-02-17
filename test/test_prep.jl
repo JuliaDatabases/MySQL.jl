@@ -44,7 +44,7 @@ const DataFrameResultsPrep = DataFrame(
 
 function run_query_helper(command, msg)
     mysql_stmt_prepare(hndl, command)
-    mysql_execute_query(hndl)
+    mysql_execute(hndl)
     println("Success: " * msg)
     return true
 end
@@ -52,7 +52,7 @@ end
 function update_values()
     command = """UPDATE Employee SET Salary = ? WHERE ID > ?;"""
     mysql_stmt_prepare(hndl, command)
-    affrows = mysql_execute_query(hndl, [MYSQL_TYPE_FLOAT, MYSQL_TYPE_LONG], [25000, 2])
+    affrows = mysql_execute(hndl, [MYSQL_TYPE_FLOAT, MYSQL_TYPE_LONG], [25000, 2])
     println("Affected rows after update_values(): $affrows")
     return true
 end
@@ -72,7 +72,7 @@ function insert_values()
 
     affrows = 0
     for value in values
-        affrows += mysql_execute_query(hndl, typs, value)
+        affrows += mysql_execute(hndl, typs, value)
     end
 
     println("Affected rows after insert_values(): $affrows")
@@ -82,7 +82,7 @@ end
 function show_results()
     command = "SELECT * FROM Employee WHERE ID > ?;"
     mysql_stmt_prepare(hndl, command)
-    dframe = mysql_execute_query(hndl, [MYSQL_TYPE_LONG], [0])
+    dframe = mysql_execute(hndl, [MYSQL_TYPE_LONG], [0])
     println("\n *** Results as dataframe: \n", dframe)
     println("\n *** Expected result: \n", DataFrameResultsPrep)
     @test dfisequal(dframe, DataFrameResultsPrep)
@@ -98,7 +98,7 @@ function show_results()
 
     mysql_stmt_prepare(hndl, command)
     println("\n *** Results as tuples: \n")
-    tupres = mysql_execute_query(hndl, [MYSQL_TYPE_LONG], [0]; opformat=MYSQL_TUPLES)
+    tupres = mysql_execute(hndl, [MYSQL_TYPE_LONG], [0]; opformat=MYSQL_TUPLES)
     println(tupres)
     for i in length(tupres)
         @test compare_rows(tupres[i], ArrayResultsPrep[i])
