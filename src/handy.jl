@@ -299,7 +299,12 @@ function mysql_bind_array(typs, params)
     length(typs) != length(params) && throw(MySQLInterfaceError("Length of `typs` and `params` must be same."))
     bindarr = MYSQL_BIND[]
     for (typ, val) in zip(typs, params)
-        push!(bindarr, mysql_bind_init(typ, val))
+        #Is the value one of three different versions of Null?
+        if (isdefined(:DataArrays)&&(typeof(val)==DataArrays.NAtype))||(isdefined(:NullableArrays)&&(typeof(val)<:Nullable)&&(val.isnull))||(val==nothing) 
+            push!(bindarr, mysql_bind_init(MYSQL_TYPE_NULL, "NULL"))
+        else
+            push!(bindarr, mysql_bind_init(typ, val)) #Otherwise
+        end 
     end
     return bindarr
 end
