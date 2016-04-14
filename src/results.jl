@@ -323,7 +323,7 @@ function mysql_bind_array(meta::MySQLMetadata)
         # make `is_null pointer` point to `is_null_value` in the MYSQL_BIND struct.
         unsafe_store!(convert(Ptr{Ptr{Cchar}},
                               pointer(bindarr, i) + 8),
-                      pointer(bindarr, i) + 103)
+                      pointer(bindarr, i) + 8*8 + sizeof(Clong)*3 + 4*3 + 3)
 
     end # end for
 

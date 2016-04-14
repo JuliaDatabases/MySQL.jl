@@ -60,8 +60,8 @@ immutable MYSQL_BIND
     store_param_func ::Ptr{Void}
     fetch_result ::Ptr{Void}
     skip_result ::Ptr{Void}
-    buffer_length::Culong
-    offset::Culong
+    buffer_length::Culong 
+    offset::Culong 
     length_value::Culong
     param_number :: Cuint
     pack_length :: Cuint
@@ -108,8 +108,6 @@ immutable MYSQL_STMT # This is different in mariadb header file.
     result::MYSQL_DATA
     data_cursor::MYSQL_ROWS
 
-    affected_rows::Culong
-    insert_id::Culong
     stmt_id::Culong
     flags::Culong
     prefetch_rows::Culong
