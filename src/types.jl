@@ -108,6 +108,8 @@ immutable MYSQL_STMT # This is different in mariadb header file.
     result::MYSQL_DATA
     data_cursor::MYSQL_ROWS
 
+    affected_rows::Culonglong
+    insert_id::Culonglong
     stmt_id::Culong
     flags::Culong
     prefetch_rows::Culong
