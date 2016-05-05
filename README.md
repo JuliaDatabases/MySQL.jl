@@ -91,7 +91,7 @@ for i in 1:meta.nfields
     println("Field length is: ", meta.lens[i])
     println("MySQL type is: ", meta.mtypes[i])
     println("Julia type is: ", meta.jtypes[i])
-    println("Is nullable: ", m.is_nullables[i])
+    println("Is nullable: ", meta.is_nullables[i])
 end
 ```
 
