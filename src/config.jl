@@ -11,11 +11,11 @@ let
     global mysql_lib
     succeeded = false
     if !isdefined(:mysql_lib)
-        @linux_only lib_choices = ["libmysql.so", "libmysqlclient.so",
-                                   "libmysqlclient_r.so", "libmariadb.so",
-                                   "libmysqlclient_r.so.16"]
-        @osx_only lib_choices = ["libmysqlclient.dylib"]
-        @windows_only lib_choices = ["libmysql.dll", "libmariadb.dll"]
+        @static is_linux() ? (lib_choices = ["libmysql.so", "libmysqlclient.so",
+                                             "libmysqlclient_r.so", "libmariadb.so",
+                                             "libmysqlclient_r.so.16"]) : nothing
+        @static is_apple() ? (lib_choices = ["libmysqlclient.dylib"]) : nothing
+        @static is_windows() ? (lib_choices = ["libmysql.dll", "libmariadb.dll"]) : nothing
         local lib
         for lib in lib_choices
             try
