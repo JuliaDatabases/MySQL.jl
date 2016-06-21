@@ -17,7 +17,7 @@ let
         @static is_apple() ? (lib_choices = ["libmysqlclient.dylib"]) : nothing
         @static is_windows() ? (lib_choices = ["libmysql.dll", "libmariadb.dll"]) : nothing
         local lib
-		for lib in lib_choices
+        for lib in lib_choices
             try
                 Libdl.dlopen(lib)
                 succeeded = true
