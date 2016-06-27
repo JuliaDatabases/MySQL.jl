@@ -112,15 +112,21 @@ Load a bytestring from `result` pointer given the field index `idx`.
 function mysql_load_string_from_resultptr(result, idx)
     deref = unsafe_load(result, idx)
     deref == C_NULL && return nothing
-    strval = bytestring(deref)
+    strval = _bytestring(deref)
     length(strval) == 0 && return nothing
     return strval
+end
+
+if VERSION < v"0.5-"
+    _pointer_to_array = pointer_to_array
+else
+    _pointer_to_array(p, d; own=false) = unsafe_wrap(Array, p, d, own)
 end
 
 function mysql_metadata(result::MYSQL_RES)
     nfields = mysql_num_fields(result)
     rawfields = mysql_fetch_fields(result)
-    return pointer_to_array(rawfields, nfields)
+    return _pointer_to_array(rawfields, nfields)
 end
 
 function mysql_metadata(stmtptr::Ptr{MYSQL_STMT})
@@ -263,7 +269,7 @@ mysql_binary_interpret_field(buf, mysqltype) =
     mysql_binary_interpret_field(buf, mysql_get_ctype(mysqltype))
 
 mysql_binary_interpret_field(buf, ::Type{AbstractString}) =
-    bytestring(convert(Ptr{Cchar}, buf))
+    _bytestring(convert(Ptr{Cchar}, buf))
 
 function mysql_binary_interpret_field(buf, T::Type)
     value = unsafe_load(convert(Ptr{T}, buf), 1)
@@ -342,7 +348,7 @@ Initialize a dataframe for prepared statement results.
 mysql_init_dataframe(meta::Array{MYSQL_FIELD}, nrows) =
     mysql_init_dataframe(MySQLMetadata(meta), nrows)
 mysql_init_dataframe(meta, nrows) =
-    DataFrame(meta.jtypes, map(symbol, meta.names), @compat Int64(nrows))
+    DataFrame(meta.jtypes, map(Symbol, meta.names), @compat Int64(nrows))
 
 function mysql_result_to_dataframe(hndl::MySQLHandle)
     meta = mysql_metadata(hndl.stmtptr)
