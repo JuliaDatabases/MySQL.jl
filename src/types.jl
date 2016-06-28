@@ -193,7 +193,13 @@ type MySQLInternalError <: MySQLError
     end
 end
 
-Base.showerror(io::IO, e::MySQLInternalError) = print(io, bytestring(mysql_error(e.con)))
+if VERSION < v"0.5-"
+    _bytestring = bytestring
+else
+    _bytestring = unsafe_string
+end
+
+Base.showerror(io::IO, e::MySQLInternalError) = print(io, _bytestring(mysql_error(e.con)))
 
 # Internal errors that happen when using prepared statements
 type MySQLStatementError <: MySQLError
@@ -209,7 +215,7 @@ type MySQLStatementError <: MySQLError
 end
 
 Base.showerror(io::IO, e::MySQLStatementError) =
-    print(io, bytestring(mysql_stmt_error(e.stmt)))
+    print(io, _bytestring(mysql_stmt_error(e.stmt)))
 
 # For errors that happen in MySQL.jl
 type MySQLInterfaceError <: MySQLError
@@ -234,7 +240,7 @@ type MySQLMetadata
         lens = Array(Int, nfields)
         is_nullables = Array(Bool, nfields)
         for i in 1:nfields
-            names[i] = bytestring(fields[i].name)
+            names[i] = _bytestring(fields[i].name)
             mtypes[i] = fields[i].field_type
             jtypes[i] = mysql_get_julia_type(fields[i].field_type)
             lens[i] = fields[i].field_length
