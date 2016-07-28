@@ -1,4 +1,9 @@
 language: julia
+services:
+  - mysql
+os:
+  - osx
+  - linux
 julia:
   - release
   - nightly
