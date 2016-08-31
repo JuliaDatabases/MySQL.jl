@@ -11,7 +11,7 @@ Install [MySQL](http://dev.mysql.com/doc/refman/5.7/en/installing.html).
 
 Then in the julia prompt enter:
 ```julia
-Pkg.clone("https://github.com/JuliaComputing/MySQL.jl")
+Pkg.add("MySQL")
 ```
 
 # Examples
