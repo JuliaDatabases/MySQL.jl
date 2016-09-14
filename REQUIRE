@@ -2,3 +2,6 @@ julia 0.4
 DataFrames
 Compat 0.7.20
 Dates
+@osx Homebrew
+@windows WinRPM
+BinDeps
