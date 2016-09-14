@@ -12,7 +12,7 @@ function run_query_helper(command, msg)
 end
 
 function connect_as_root()
-    global hndl = mysql_connect(HOST, "root", ROOTPASS, "")
+    global hndl = mysql_connect(HOST, USER, PASS, "")
 end
 
 function create_test_database()
