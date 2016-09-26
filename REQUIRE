@@ -3,3 +3,6 @@ DataFrames
 Compat 0.7.20
 Dates
 ConfParser
+@osx Homebrew
+BinDeps
+@windows WinRPM

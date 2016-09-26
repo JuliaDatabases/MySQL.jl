@@ -100,11 +100,14 @@ end
 
 function init_test()
     mysql_execute(hndl, "DROP DATABASE IF EXISTS mysqltest;")
-    # There seems to be a bug in MySQL that prevents you
-    # from saying "DROP USER IF EXISTS test@127.0.0.1;"
-    # So here we create a user with a harmless privilege and drop the user.
-    mysql_execute(hndl, "GRANT USAGE ON *.* TO 'test'@'127.0.0.1';")
-    mysql_execute(hndl, "DROP USER 'test'@'127.0.0.1';")
+    try
+        # There seems to be a bug in MySQL that prevents you
+        # from saying "DROP USER IF EXISTS test@127.0.0.1;"
+        # So here we create a user with a harmless privilege and drop the user.
+        mysql_execute(hndl, "GRANT USAGE ON *.* TO 'test'@'127.0.0.1';")
+        mysql_execute(hndl, "DROP USER 'test'@'127.0.0.1';")
+    catch
+    end
 end
 
 function run_test()
