@@ -17,7 +17,7 @@ if is_apple()
         error("Homebrew package not installed, please run Pkg.add(\"Homebrew\")")
     end
     using Homebrew
-    provides(Homebrew.HB, "mariadb", libmysqlclient, os = :Darwin)
+    provides(Homebrew.HB, "mysql", libmysqlclient, os = :Darwin)
 end
 
 if is_windows()
