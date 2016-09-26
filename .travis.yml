@@ -5,7 +5,8 @@ os:
 services:
   - mysql
 julia:
-  - release
+  - 0.4
+  - 0.5
   - nightly
 before_script:
   - echo $PWD
