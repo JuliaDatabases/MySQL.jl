@@ -35,11 +35,11 @@ function mysql_connect(host::AbstractString,
 end
 
 """
-    mysql_connect(host::AbstractString, user::AbstractString, passwd::AbstractString, db::AbstractString = "", port::Int64 = 3306, socket::AbstractString = "/var/run/mysqld/mysqld.sock"; opts = Dict())
+    mysql_connect(host::AbstractString, user::AbstractString, passwd::AbstractString, db::AbstractString = ""; port::Int64 = 3306, socket::AbstractString = "/var/run/mysqld/mysqld.sock", opts = Dict())
 
 Connect to a MySQL database.
 """
-function mysql_connect(host, user, passwd, db="", port=3306, socket="/var/run/mysqld/mysqld.sock"; opts = Dict())
+function mysql_connect(host, user, passwd, db=""; port=3306, socket="/var/run/mysqld/mysqld.sock", opts = Dict())
     return mysql_connect(host, user, passwd, db, convert(Cuint, port),
                          socket, CLIENT_MULTI_STATEMENTS, opts=opts)
 end
