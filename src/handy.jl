@@ -20,7 +20,7 @@ function mysql_connect(host::AbstractString,
                         passwd::AbstractString,
                         db::AbstractString,
                         port::Cuint,
-                        unix_socket::Ptr{Cchar},
+                        unix_socket::AbstractString,
                         client_flag; opts = Dict())
     _mysqlptr = C_NULL
     _mysqlptr = mysql_init(_mysqlptr)
@@ -35,13 +35,13 @@ function mysql_connect(host::AbstractString,
 end
 
 """
-    mysql_connect(host::AbstractString, user::AbstractString, passwd::AbstractString, db::AbstractString = "", port::Int64 = 3306; opts = Dict())
+    mysql_connect(host::AbstractString, user::AbstractString, passwd::AbstractString, db::AbstractString = "", port::Int64 = 3306, socket::AbstractString = "/var/run/mysqld/mysqld.sock"; opts = Dict())
 
 Connect to a MySQL database.
 """
-function mysql_connect(host, user, passwd, db="", port=3306; opts = Dict())
+function mysql_connect(host, user, passwd, db="", port=3306, socket="/var/run/mysqld/mysqld.sock"; opts = Dict())
     return mysql_connect(host, user, passwd, db, convert(Cuint, port),
-                         convert(Ptr{Cchar}, C_NULL), CLIENT_MULTI_STATEMENTS, opts=opts)
+                         socket, CLIENT_MULTI_STATEMENTS, opts=opts)
 end
 
 """
