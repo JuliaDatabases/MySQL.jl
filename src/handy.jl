@@ -35,12 +35,12 @@ function mysql_connect(host::AbstractString,
 end
 
 """
-    mysql_connect(host::AbstractString, user::AbstractString, passwd::AbstractString, db::AbstractString = ""; opts = Dict())
+    mysql_connect(host::AbstractString, user::AbstractString, passwd::AbstractString, db::AbstractString = "", port::Int64 = 3306; opts = Dict())
 
 Connect to a MySQL database.
 """
-function mysql_connect(host, user, passwd, db=""; opts = Dict())
-    return mysql_connect(host, user, passwd, db, convert(Cuint, 0),
+function mysql_connect(host, user, passwd, db="", port=3306; opts = Dict())
+    return mysql_connect(host, user, passwd, db, convert(Cuint, port),
                          convert(Ptr{Cchar}, C_NULL), CLIENT_MULTI_STATEMENTS, opts=opts)
 end
 
