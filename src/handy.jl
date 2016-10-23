@@ -308,13 +308,6 @@ function mysql_bind_array(typs, params)
     return bindarr
 end
 
-function MySQLResult(hndl, resptr)
-    res = MySQLResult(hndl)
-    res.resptr = resptr
-    finalizer(res, x -> mysql_free_result(x.resptr))
-    return res
-end
-
 """
     mysql_metadata(hndl::MySQLResult) -> MySQLMetadata
 
