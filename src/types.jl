@@ -156,6 +156,7 @@ end
 type MySQLResult
     con::MySQLHandle
     resptr::MYSQL_RES
+    MySQLResult(con) = new(con, C_NULL)
 end
 
 """
