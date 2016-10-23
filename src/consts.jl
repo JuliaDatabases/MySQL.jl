@@ -151,3 +151,11 @@ const MYSQL_TIMESTAMP_TIME     = 2
 
 @compat const NOT_NULL_FLAG = UInt32(1)
 const MYSQL_NO_DATA = 100
+
+const MYSQL_DEFAULT_PORT = 3306
+
+if is_windows()
+	MYSQL_DEFAULT_SOCKET = "MySQL"
+else
+	MYSQL_DEFAULT_SOCKET = "/tmp/mysql.sock"
+end

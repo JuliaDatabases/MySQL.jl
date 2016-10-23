@@ -19,7 +19,7 @@ function mysql_real_connect(mysqlptr::Ptr{Void},
                               passwd::AbstractString,
                               db::AbstractString,
                               port::Cuint,
-                              unix_socket::Ptr{Cchar},
+                              unix_socket::AbstractString,
                               @compat client_flag::UInt32)
 
     return ccall((:mysql_real_connect, mysql_lib),
