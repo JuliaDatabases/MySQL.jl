@@ -159,7 +159,6 @@ function mysql_execute(hndl, command; opformat=MYSQL_DATA_FRAME)
         if result != C_NULL # if select query
             retval = convfunc(MySQLResult(hndl, result))
             push!(data, retval)
-            mysql_free_result(result)
 
         elseif mysql_field_count(hndl.mysqlptr) == 0
             push!(data, @compat Int(mysql_affected_rows(hndl.mysqlptr)))
@@ -307,12 +306,6 @@ function mysql_bind_array(typs, params)
         end 
     end
     return bindarr
-end
-
-function MySQLResult(hndl, resptr)
-    res = MySQLResult(hndl, resptr)
-    finalizer(ret, x -> mysql_free_result(res.resptr))
-    return res
 end
 
 """

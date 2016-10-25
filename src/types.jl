@@ -156,6 +156,12 @@ end
 type MySQLResult
     con::MySQLHandle
     resptr::MYSQL_RES
+    function MySQLResult(hndl, resptr)
+        res = new(hndl, C_NULL)
+        res.resptr = resptr
+        finalizer(res, x -> mysql_free_result(x.resptr))
+        return res
+    end
 end
 
 """
