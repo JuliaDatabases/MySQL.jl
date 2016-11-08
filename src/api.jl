@@ -150,14 +150,8 @@ function mysql_stmt_init(mysqlptr::Ptr{Void})
                  mysqlptr)
 end
 
-if VERSION < v"0.5-"
-    _utf8 = utf8
-else
-    _utf8 = String
-end
-
 function mysql_stmt_prepare(stmtptr::Ptr{MYSQL_STMT}, sql::AbstractString)
-    s = _utf8(sql)
+    s = String(sql)
     return ccall((:mysql_stmt_prepare, mysql_lib),
                  Cint,
                  (Ptr{Void}, Ptr{Cchar}, Culong),

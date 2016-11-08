@@ -5,8 +5,6 @@
 # 
 # TODO: Need to update lib_choices for Mac OS X and Windows.
 
-using Compat
-
 let
     global mysql_lib
     succeeded = false
