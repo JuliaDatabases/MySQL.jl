@@ -106,16 +106,10 @@ function mysql_load_string_from_resultptr(result, idx)
     return strval
 end
 
-if VERSION < v"0.5-"
-    _pointer_to_array = pointer_to_array
-else
-    _pointer_to_array(p, d; own=false) = unsafe_wrap(Array, p, d, own)
-end
-
 function mysql_metadata(result::MYSQL_RES)
     nfields = mysql_num_fields(result)
     rawfields = mysql_fetch_fields(result)
-    return _pointer_to_array(rawfields, nfields)
+    return unsafe_wrap(Array, rawfields, nfields)
 end
 
 function mysql_metadata(stmtptr::Ptr{MYSQL_STMT})
