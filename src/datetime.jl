@@ -1,11 +1,5 @@
 # Constructors for the julia Date, Time and DateTime types.
 
-if VERSION < v"0.4-"
-    using Dates
-else
-    using Base.Dates
-end
-
 import Base.==
 
 const MYSQL_DATE_FORMAT = Dates.DateFormat("yyyy-mm-dd")

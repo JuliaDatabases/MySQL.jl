@@ -1,7 +1,5 @@
 # Handy wrappers to functions defined in api.jl.
 
-using Compat
-
 """
     mysql_options(hndl::MySQLHandle, opts)
 

@@ -1,5 +1,3 @@
-using Compat
-
 # The field_type in the MYSQL_FIELD object that directly maps to native MYSQL types
 @compat const MYSQL_TYPE_DECIMAL     = UInt32(0)
 @compat const MYSQL_TYPE_TINY        = UInt32(1)

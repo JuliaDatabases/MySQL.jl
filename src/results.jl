@@ -1,16 +1,5 @@
 # Convert C pointers returned from MySQL C calls to Julia Datastructures.
 
-using DataFrames
-using Compat
-
-if VERSION < v"0.4-"
-    using Dates
-else
-    using Base.Dates
-    c_malloc = Libc.malloc
-    c_free = Libc.free
-end
-
 """
 Given a MYSQL type get the corresponding julia type.
 """
@@ -112,7 +101,7 @@ Load a bytestring from `result` pointer given the field index `idx`.
 function mysql_load_string_from_resultptr(result, idx)
     deref = unsafe_load(result, idx)
     deref == C_NULL && return nothing
-    strval = _bytestring(deref)
+    strval = unsafe_string(deref)
     length(strval) == 0 && return nothing
     return strval
 end
@@ -269,7 +258,7 @@ mysql_binary_interpret_field(buf, mysqltype) =
     mysql_binary_interpret_field(buf, mysql_get_ctype(mysqltype))
 
 mysql_binary_interpret_field(buf, ::Type{AbstractString}) =
-    _bytestring(convert(Ptr{Cchar}, buf))
+    unsafe_string(convert(Ptr{Cchar}, buf))
 
 function mysql_binary_interpret_field(buf, T::Type)
     value = unsafe_load(convert(Ptr{T}, buf), 1)
@@ -318,10 +307,10 @@ function mysql_bind_array(meta::MySQLMetadata)
 
         if (ctype == AbstractString)
             bufflen = meta.lens[i] + 1
-            bindbuff = c_malloc(meta.lens[i] + 1)
+            bindbuff = Libc.malloc(meta.lens[i] + 1)
         else
             bufflen = sizeof(ctype)
-            bindbuff = c_malloc(sizeof(ctype))
+            bindbuff = Libc.malloc(sizeof(ctype))
         end
 
         bindarr[i] = MYSQL_BIND(bindbuff, bufflen, meta.mtypes[i])
@@ -333,7 +322,7 @@ function mysql_bind_array(meta::MySQLMetadata)
 
     end # end for
 
-    finalizer(bindarr, x -> begin; for b in x; c_free(b.buffer); end; end)
+    finalizer(bindarr, x -> begin; for b in x; Libc.free(b.buffer); end; end)
     return bindarr
 end
 

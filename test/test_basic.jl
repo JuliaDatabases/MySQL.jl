@@ -1,12 +1,6 @@
 using DataFrames
 using Compat
 
-if VERSION < v"0.4-"
-    using Dates
-else
-    using Base.Dates
-end
-
 include("test_common.jl")
 
 @compat const ArrayResults = Array{Any}[

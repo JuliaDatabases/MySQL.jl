@@ -1,6 +1,10 @@
-VERSION >= v"0.4" && __precompile__()
+__precompile__()
 
 module MySQL
+    using Compat
+    using Compat.String
+    using DataFrames
+
     include("config.jl")
     include("consts.jl")
     include("types.jl")
