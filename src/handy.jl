@@ -326,6 +326,20 @@ function mysql_metadata(hndl::MySQLHandle)
     return MySQLMetadata(mysql_metadata(hndl.stmtptr))
 end
 
+"""
+    mysql_escape(hndl::MySQLHandle, str::AbstractString) -> String
+
+Escapes a string using `mysql_real_escape_string()`, returns the escaped string.
+"""
+function mysql_escape(hndl::MySQLHandle, str::AbstractString)
+    output = Vector{UInt8}(length(str)*2 + 1)
+    output_len = mysql_real_escape_string(hndl.mysqlptr, output, str, UInt64(length(str)))
+    if output_len == typemax(Cuint)
+        throw(MySQLInternalError(hndl))
+    end
+    return String(output[1:output_len])
+end
+
 export mysql_options, mysql_connect, mysql_disconnect, mysql_execute,
        mysql_insert_id, mysql_store_result, mysql_metadata, mysql_query,
-       mysql_stmt_prepare
+       mysql_stmt_prepare, mysql_escape

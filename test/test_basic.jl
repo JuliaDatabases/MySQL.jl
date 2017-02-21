@@ -80,6 +80,9 @@ function show_results()
     end
 
     validate_metadata()
+
+    # Test quoting works as expected
+    @test mysql_escape(hndl, "quoting 'test'") == "quoting \\'test\\'"
 end
 
 function validate_metadata()
