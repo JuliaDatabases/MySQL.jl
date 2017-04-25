@@ -1,8 +1,10 @@
 # Test for multi statements.
 
+module test_multiquery
+
 include("test_common.jl")
 
-function run_test()
+function run_test_multiquery()
     println("*** Running multi query test ***\n")
     connect_as_root()
 
@@ -25,4 +27,6 @@ function run_test()
     mysql_disconnect(hndl)
 end
 
-run_test()
+run_test_multiquery()
+
+end

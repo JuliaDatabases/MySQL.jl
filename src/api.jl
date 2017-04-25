@@ -14,13 +14,13 @@ Used to connect to database server. Returns a MYSQL handle on success and
 C_NULL on failure.
 """
 function mysql_real_connect(mysqlptr::Ptr{Void},
-                              host::AbstractString,
-                              user::AbstractString,
-                              passwd::AbstractString,
-                              db::AbstractString,
+                              host::String,
+                              user::String,
+                              passwd::String,
+                              db::String,
                               port::Cuint,
-                              unix_socket::AbstractString,
-                              @compat client_flag::UInt32)
+                              unix_socket::String,
+                              client_flag::UInt32)
 
     return ccall((:mysql_real_connect, mysql_lib),
                  Ptr{Void},
@@ -55,7 +55,7 @@ function mysql_options(mysqlptr::Ptr{Void},
                  option)
 end
 
-mysql_options(mysqlptr, option_type, option::AbstractString) =
+mysql_options(mysqlptr, option_type, option::String) =
     mysql_options(mysqlptr, option_type, convert(Ptr{Void}, pointer(option)))
 
 function mysql_options(mysqlptr, option_type, option)
@@ -126,7 +126,7 @@ Creates the sql string where the special chars are escaped
 """
 function mysql_real_escape_string(mysqlptr::Ptr{Void},
                                   to::Vector{Cuchar},
-                                  from::AbstractString,
+                                  from::String,
                                   length::Culong)
     return ccall((:mysql_real_escape_string, mysql_lib),
                  Cuint,
@@ -150,7 +150,7 @@ function mysql_stmt_init(mysqlptr::Ptr{Void})
                  mysqlptr)
 end
 
-function mysql_stmt_prepare(stmtptr::Ptr{MYSQL_STMT}, sql::AbstractString)
+function mysql_stmt_prepare(stmtptr::Ptr{MYSQL_STMT}, sql::String)
     s = String(sql)
     return ccall((:mysql_stmt_prepare, mysql_lib),
                  Cint,
@@ -222,7 +222,7 @@ function mysql_stmt_bind_result(stmtptr::Ptr{MYSQL_STMT}, bind::Ptr{MYSQL_BIND})
                  bind)
 end
 
-function mysql_query(mysqlptr::Ptr{Void}, sql::AbstractString)
+function mysql_query(mysqlptr::Ptr{Void}, sql::String)
     return ccall((:mysql_query, mysql_lib),
                  Cchar,
                  (Ptr{Void}, Ptr{Cuchar}),
@@ -339,7 +339,7 @@ function mysql_stmt_bind_param(stmt::Ptr{MYSQL_STMT}, bind::Ptr{MYSQL_BIND})
                  stmt, bind)
 end
 
-mysql_stmt_bind_param(stmt, bind::Array{MYSQL_BIND, 1}) =
+mysql_stmt_bind_param(stmt, bind::Vector{MYSQL_BIND}) =
     mysql_stmt_bind_param(stmt, pointer(bind))
 
 """

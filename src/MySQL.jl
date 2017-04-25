@@ -2,7 +2,6 @@ __precompile__()
 
 module MySQL
     using Compat
-    using Compat.String
     using DataFrames
 
     include("config.jl")

@@ -1,9 +1,9 @@
-typealias MEM_ROOT Ptr{Void}
-typealias LIST Ptr{Void}
-typealias MYSQL_DATA Ptr{Void}
-typealias MYSQL_RES Ptr{Void}
-typealias MYSQL_ROW Ptr{Ptr{Cchar}}  # pointer to an array of strings
-typealias MYSQL_TYPE UInt32
+const MEM_ROOT = Ptr{Void}
+const LIST = Ptr{Void}
+const MYSQL_DATA = Ptr{Void}
+const MYSQL_RES = Ptr{Void}
+const MYSQL_ROW = Ptr{Ptr{Cchar}}  # pointer to an array of strings
+const MYSQL_TYPE = UInt32
 
 """
 The field object that contains the metadata of the table. 
@@ -81,7 +81,7 @@ immutable MYSQL_BIND
         MYSQL_BIND(convert(Ptr{Void}, pointer(arr)), sizeof(arr), bufftype)
     end
 
-    function MYSQL_BIND(str::AbstractString, bufftype)
+    function MYSQL_BIND(str::String, bufftype)
         MYSQL_BIND(convert(Ptr{Void}, pointer(str)), sizeof(str), bufftype)
     end
 end
@@ -134,9 +134,9 @@ The MySQL handle.
 """
 type MySQLHandle
     mysqlptr::Ptr{Void}
-    host::AbstractString
-    user::AbstractString
-    db::AbstractString
+    host::String
+    user::String
+    db::String
     stmtptr::Ptr{MYSQL_STMT}
 end
 
@@ -169,8 +169,8 @@ Iterator for the mysql result.
 """
 type MySQLRowIterator
     result::MySQLResult
-    jtypes::Array{Type, 1}
-    is_nullables::Array{Bool, 1}
+    jtypes::Vector{Type}
+    is_nullables::Vector{Bool}
     rowsleft::Int64
 end
 
@@ -179,12 +179,12 @@ Iterator for prepared statement results.
 """
 type MySQLStatementIterator
     hndl::MySQLHandle
-    jtypes::Array{Type, 1}
-    is_nullables::Array{Bool, 1}
-    binding::Array{MYSQL_BIND, 1}
+    jtypes::Vector{Type}
+    is_nullables::Vector{Bool}
+    binding::Vector{MYSQL_BIND}
 end
 
-abstract MySQLError
+@compat abstract type MySQLError end
 
 # For errors that happen in the MySQL C connector
 type MySQLInternalError <: MySQLError
@@ -219,26 +219,26 @@ Base.showerror(io::IO, e::MySQLStatementError) =
 
 # For errors that happen in MySQL.jl
 type MySQLInterfaceError <: MySQLError
-    msg::AbstractString
+    msg::String
 end
 
 Base.showerror(io::IO, e::MySQLInterfaceError) = print(io, e.msg)
 
 type MySQLMetadata
-    names::Array{AbstractString, 1}
-    mtypes::Array{MYSQL_TYPE, 1}
-    jtypes::Array{Type, 1}
-    lens::Array{Int, 1}
-    is_nullables::Array{Bool, 1}
+    names::Vector{String}
+    mtypes::Vector{MYSQL_TYPE}
+    jtypes::Vector{Type}
+    lens::Vector{Int}
+    is_nullables::Vector{Bool}
     nfields::Int
 
-    function MySQLMetadata(fields::Array{MYSQL_FIELD, 1})
+    function MySQLMetadata(fields::Vector{MYSQL_FIELD})
         nfields = length(fields)
-        names = Array(AbstractString, nfields)
-        mtypes = Array(MYSQL_TYPE, nfields)
-        jtypes = Array(Type, nfields)
-        lens = Array(Int, nfields)
-        is_nullables = Array(Bool, nfields)
+        names = Array{String}(nfields)
+        mtypes = Array{MYSQL_TYPE}(nfields)
+        jtypes = Array{Type}(nfields)
+        lens = Array{Int}(nfields)
+        is_nullables = Array{Bool}(nfields)
         for i in 1:nfields
             names[i] = unsafe_string(fields[i].name)
             mtypes[i] = fields[i].field_type
