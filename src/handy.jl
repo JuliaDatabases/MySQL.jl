@@ -13,12 +13,12 @@ function mysql_options(hndl, opts)
     nothing
 end
 
-function mysql_connect(host::AbstractString,
-                        user::AbstractString,
-                        passwd::AbstractString,
-                        db::AbstractString,
+function mysql_connect(host::String,
+                        user::String,
+                        passwd::String,
+                        db::String,
                         port::Cuint,
-                        unix_socket::AbstractString,
+                        unix_socket::String,
                         client_flag; opts = Dict())
     _mysqlptr = C_NULL
     _mysqlptr = mysql_init(_mysqlptr)
@@ -33,7 +33,7 @@ function mysql_connect(host::AbstractString,
 end
 
 """
-    mysql_connect(host::AbstractString, user::AbstractString, passwd::AbstractString, db::AbstractString = ""; port::Int64 = MYSQL_DEFAULT_PORT, socket::AbstractString = MYSQL_DEFAULT_SOCKET, opts = Dict())
+    mysql_connect(host::String, user::String, passwd::String, db::String = ""; port::Int64 = MYSQL_DEFAULT_PORT, socket::String = MYSQL_DEFAULT_SOCKET, opts = Dict())
 
 Connect to a MySQL database.
 """
@@ -104,7 +104,7 @@ for func = (:mysql_query, :mysql_options)
 end
 
 """
-    mysql_query(hndl::MySQLHandle, sql::AbstractString)
+    mysql_query(hndl::MySQLHandle, sql::String)
 
 Executes a SQL statement.  This function does not return query results or number of affected rows.  Please use `mysql_execute` for such purposes.
 """
@@ -123,7 +123,7 @@ function mysql_store_result(hndl::MySQLHandle)
 end
 
 """
-    mysql_execute(hndl::MySQLHandle, command::AbstractString; opformat=MYSQL_DATA_FRAME)
+    mysql_execute(hndl::MySQLHandle, command::String; opformat=MYSQL_DATA_FRAME)
 
 A function for executing queries and getting results.
 
@@ -159,7 +159,7 @@ function mysql_execute(hndl, command; opformat=MYSQL_DATA_FRAME)
             push!(data, retval)
 
         elseif mysql_field_count(hndl.mysqlptr) == 0
-            push!(data, @compat Int(mysql_affected_rows(hndl.mysqlptr)))
+            push!(data, Int(mysql_affected_rows(hndl.mysqlptr)))
         else
             throw(MySQLInterfaceError("Query expected to produce results but did not."))
         end
@@ -221,7 +221,7 @@ for func = (:mysql_stmt_num_rows, :mysql_stmt_affected_rows,
 end
 
 """
-    mysql_stmt_prepare(hndl::MySQLHandle, command::AbstractString)
+    mysql_stmt_prepare(hndl::MySQLHandle, command::String)
 
 Creates a prepared statement with the `command` SQL string.
 """
@@ -246,7 +246,7 @@ function mysql_stmt_fetch(hndl::MySQLHandle)
     return val
 end
 
-function mysql_stmt_bind_result(hndl::MySQLHandle, bindarr::Array{MYSQL_BIND, 1})
+function mysql_stmt_bind_result(hndl::MySQLHandle, bindarr::Vector{MYSQL_BIND})
     hndl.stmtptr == C_NULL && throw(MySQLInterfaceError("Method called with NULL statement handle."))
     val = mysql_stmt_bind_result(hndl.stmtptr, pointer(bindarr))
     val != 0 && throw(MySQLStatementError(hndl))
@@ -279,10 +279,10 @@ Get a `MYSQL_BIND` instance given the mysql type `typ` and a `value`.
 mysql_bind_init(typ::MYSQL_TYPE, value) =
     mysql_bind_init(mysql_get_julia_type(typ), typ, value)
 
-mysql_bind_init(jtype::@compat(Union{Type{Date}, Type{DateTime}}), typ, value) =
+mysql_bind_init(jtype::Union{Type{Date}, Type{DateTime}}, typ, value) =
     MYSQL_BIND([convert(MYSQL_TIME, convert(jtype, value))], typ)
 
-mysql_bind_init(::Type{AbstractString}, typ, value) = MYSQL_BIND(value, typ)
+mysql_bind_init(::Type{String}, typ, value) = MYSQL_BIND(value, typ)
 mysql_bind_init(jtype, typ, value) = MYSQL_BIND([convert(jtype, value)], typ)
 
 """
@@ -327,11 +327,11 @@ function mysql_metadata(hndl::MySQLHandle)
 end
 
 """
-    mysql_escape(hndl::MySQLHandle, str::AbstractString) -> String
+    mysql_escape(hndl::MySQLHandle, str::String) -> String
 
 Escapes a string using `mysql_real_escape_string()`, returns the escaped string.
 """
-function mysql_escape(hndl::MySQLHandle, str::AbstractString)
+function mysql_escape(hndl::MySQLHandle, str::String)
     output = Vector{UInt8}(length(str)*2 + 1)
     output_len = mysql_real_escape_string(hndl.mysqlptr, output, str, UInt64(length(str)))
     if output_len == typemax(Cuint)

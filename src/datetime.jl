@@ -5,11 +5,11 @@ import Base.==
 const MYSQL_DATE_FORMAT = Dates.DateFormat("yyyy-mm-dd")
 const MYSQL_DATETIME_FORMAT = Dates.DateFormat("yyyy-mm-dd HH:MM:SS")
 
-function Base.convert(::Type{Date}, datestr::AbstractString)
+function Base.convert(::Type{Date}, datestr::String)
     Date(datestr, MYSQL_DATE_FORMAT)
 end
 
-function Base.convert(::Type{DateTime}, dtimestr::AbstractString)
+function Base.convert(::Type{DateTime}, dtimestr::String)
     if !contains(dtimestr, " ")
         dtimestr = "1970-01-01 " * dtimestr
     end
