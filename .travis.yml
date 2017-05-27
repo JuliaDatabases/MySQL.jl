@@ -1,6 +1,6 @@
 language: julia
 julia:
-  - release
+  - 0.5
   - nightly
 before_script:
   - export OLD_PATH=$LD_LIBRARY_PATH
