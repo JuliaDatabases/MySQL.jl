@@ -116,16 +116,14 @@ If `MYSQL_TUPLES` are passed as the last argument, then tuples will be returned 
 # How to solve MySQL library not found error
 
 This error may occur during `using MySQL`. To resolve this-
-* Ubuntu: Just add the MariaDB/MySQL .so file to lib_choices array in src/config.jl. If it is already there
-make sure LD_LIBRARY_PATH contains the MariaDB/MySQL .so file directory path. Usually this is something like
-`/usr/local/lib/mariadb/`.
-* OSX: Same as above. In this case the file will be something like libmysqlclient.dylib.
-* Windows: The file will be picked up automatically if MySQL is installed correctly.  If you still get the error add the location of libmysql.dll to PATH.
+* **Ubuntu**: Just add the MariaDB/MySQL `.so` file to the `lib_choices` array in `src/config.jl` (the system file is at `~/.julia/v0.7/MySQL/src/config.jl`). If it is already there make sure `LD_LIBRARY_PATH` contains the MariaDB/MySQL `.so` file directory path. Usually this is something like `/usr/local/lib/mariadb/`.
+* **OSX**: Same as above. In this case the file will be something like `libmysqlclient.dylib`.  Homebrew users should look in `/usr/local/Cellar/mysql`.
+* **Windows**: The file will be picked up automatically if MySQL is installed correctly.  If you still get the error add the location of `libmysql.dll` to PATH.
 
 # Tests
 
-To run the tests you must have MySQL server running on the host. Set the constants HOST and ROOTPASS 
-in test/runtests.jl to the host and root password on your test setup. Run the tests using:
+To run the tests you must have MySQL server running on the host. Set the constants HOST and ROOTPASS
+in `test/runtests.jl` to the host and root password on your test setup. Run the tests using:
 ```
 Pkg.test("MySQL")
 ```
