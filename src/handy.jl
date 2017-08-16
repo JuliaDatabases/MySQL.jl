@@ -188,9 +188,9 @@ function mysql_execute(hndl::MySQLHandle; opformat=MYSQL_DATA_FRAME)
     naff = mysql_stmt_affected_rows(hndl)
     naff != typemax(typeof(naff)) && return naff        # Not a SELECT query
     if opformat == MYSQL_DATA_FRAME
-        return mysql_result_to_dataframe(hndl)
+        return [mysql_result_to_dataframe(hndl)]
     elseif opformat == MYSQL_TUPLES
-        return mysql_get_result_as_tuples(hndl)
+        return [mysql_get_result_as_tuples(hndl)]
     else
         throw(MySQLInterfaceError("Invalid output format: $opformat"))
     end

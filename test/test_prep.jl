@@ -84,7 +84,7 @@ end
 function show_results()
     command = "SELECT * FROM Employee WHERE ID > ?;"
     mysql_stmt_prepare(hndl, command)
-    dframe = mysql_execute(hndl, [MYSQL_TYPE_LONG], [0])
+    dframe = mysql_execute(hndl, [MYSQL_TYPE_LONG], [0])[1]
     println("\n *** Results as dataframe: \n", dframe)
     println("\n *** Expected result: \n", DataFrameResultsPrep)
     @test dfisequal(dframe, DataFrameResultsPrep)
@@ -100,7 +100,7 @@ function show_results()
 
     mysql_stmt_prepare(hndl, command)
     println("\n *** Results as tuples: \n")
-    tupres = mysql_execute(hndl, [MYSQL_TYPE_LONG], [0]; opformat=MYSQL_TUPLES)
+    tupres = mysql_execute(hndl, [MYSQL_TYPE_LONG], [0]; opformat=MYSQL_TUPLES)[1]
     println(tupres)
     for i in length(tupres)
         @test compare_rows(tupres[i], ArrayResultsPrep[i])
