@@ -172,9 +172,6 @@ function mysql_execute(hndl, command; opformat=MYSQL_DATA_FRAME)
         end
     end
 
-    if length(data) == 1
-        return data[1]
-    end
     return data
 end
 
