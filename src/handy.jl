@@ -146,8 +146,10 @@ function mysql_execute(hndl, command; opformat=MYSQL_DATA_FRAME)
 
     if opformat == MYSQL_DATA_FRAME
         convfunc = mysql_result_to_dataframe
+        narfunc = n -> DataFrame(num_affected_rows=[n])
     elseif opformat == MYSQL_TUPLES
         convfunc = mysql_get_result_as_tuples
+        narfunc = n -> (n, )
     else
         throw(MySQLInterfaceError("Invalid output format: $opformat"))
     end
@@ -159,7 +161,8 @@ function mysql_execute(hndl, command; opformat=MYSQL_DATA_FRAME)
             push!(data, retval)
 
         elseif mysql_field_count(hndl.mysqlptr) == 0
-            push!(data, Int(mysql_affected_rows(hndl.mysqlptr)))
+            n = Int(mysql_affected_rows(hndl.mysqlptr))
+            push!(data, narfunc(n))
         else
             throw(MySQLInterfaceError("Query expected to produce results but did not."))
         end
@@ -172,9 +175,6 @@ function mysql_execute(hndl, command; opformat=MYSQL_DATA_FRAME)
         end
     end
 
-    if length(data) == 1
-        return data[1]
-    end
     return data
 end
 
@@ -188,9 +188,9 @@ function mysql_execute(hndl::MySQLHandle; opformat=MYSQL_DATA_FRAME)
     naff = mysql_stmt_affected_rows(hndl)
     naff != typemax(typeof(naff)) && return naff        # Not a SELECT query
     if opformat == MYSQL_DATA_FRAME
-        return mysql_result_to_dataframe(hndl)
+        return [mysql_result_to_dataframe(hndl)]
     elseif opformat == MYSQL_TUPLES
-        return mysql_get_result_as_tuples(hndl)
+        return [mysql_get_result_as_tuples(hndl)]
     else
         throw(MySQLInterfaceError("Invalid output format: $opformat"))
     end

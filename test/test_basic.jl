@@ -58,7 +58,7 @@ end
 
 function show_results()
     command = """SELECT * FROM Employee;"""
-    dframe = mysql_execute(hndl, command)
+    dframe = mysql_execute(hndl, command)[1]
     println("\n *** Results as Dataframe: \n", dframe)
     println("\n *** Expected Result: \n", DataFrameResults)
     @test dfisequal(dframe, DataFrameResults)
@@ -72,7 +72,7 @@ function show_results()
     end
 
     println("\n *** Results as tuples: \n")
-    tupres = mysql_execute(hndl, command; opformat=MYSQL_TUPLES)
+    tupres = mysql_execute(hndl, command; opformat=MYSQL_TUPLES)[1]
     println(tupres)
     for i in length(tupres)
         @test compare_rows(tupres[i], ArrayResults[i])
