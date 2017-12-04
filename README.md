@@ -17,7 +17,7 @@ Pkg.add("MySQL")
 # Examples
 
 The following example connects to a database, creates a table, inserts values,
- retrieves the results and diconnects:
+ retrieves the results and disconnects:
 
 ```julia
 using MySQL
@@ -33,7 +33,7 @@ command = """CREATE TABLE Employee
 mysql_execute(con, command)
 
 # Insert some values
-mysql_execute(con, "INSERT INTO Employee (Name, Salary, JoinDate) values ('John', 25000.00, '2015-12-12'), ('Sam', 35000.00, '2012-18-17), ('Tom', 50000.00, '2013-12-14');")
+mysql_execute(con, "INSERT INTO Employee (Name, Salary, JoinDate) values ('John', 25000.00, '2015-12-12'), ('Sam', 35000.00, '2012-8-17'), ('Tom', 50000.00, '2013-12-14');")
 
 # Get SELECT results
 command = "SELECT * FROM Employee;"
