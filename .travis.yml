@@ -1,7 +1,7 @@
 language: julia
 julia:
   - 0.5
-  - nightly
+  - 0.6
 before_script:
   - export OLD_PATH=$LD_LIBRARY_PATH
   - export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:`mariadb_config --libs | cut -d ' ' -f1 | sed 's/-L//'`
