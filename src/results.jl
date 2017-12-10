@@ -151,10 +151,10 @@ function mysql_get_row_as_vector!(result, retvec, jtypes, isnullable)
     for i = 1:length(jtypes)
         strval = mysql_load_string_from_resultptr(result, i)
         if strval == nothing
-            retvec[i] = Nullable{jtypes[i]}()
+            retvec[i] = missing
         else
             val = mysql_interpret_field(strval, jtypes[i])
-            retvec[i] = isnullable[i] ? Nullable(val) : val
+            retvec[i] = val
         end
     end
 end
@@ -228,9 +228,9 @@ function populate_row!(df, nfields, result, row)
     for i = 1:nfields
         strval = mysql_load_string_from_resultptr(result, i)
         if strval == nothing
-            df[row, i] = NA
+            df[row, i] = missing
         else
-            df[row, i] = mysql_interpret_field(strval, eltype(df[i]))
+            df[row, i] = mysql_interpret_field(strval, Missings.T(eltype(df[i])))
         end
     end
 end
@@ -281,7 +281,7 @@ Populate a row in the dataframe `df` indexed by `row` given the number of
 function stmt_populate_row!(df, row_index, bindarr)
     for i = 1:length(bindarr)
         if bindarr[i].is_null_value != 0
-            df[row_index, i] = NA
+            df[row_index, i] = missing
             continue
         end
         df[row_index, i] = mysql_binary_interpret_field(bindarr[i].buffer,
@@ -326,12 +326,18 @@ Get a bind array for binding to results.
 mysql_bind_array(meta::Vector{MYSQL_FIELD}) = mysql_bind_array(MySQLMetadata(meta))
 
 """
+Get vector of nullable julia types
+"""
+mysql_nullable_types(meta) = 
+    Type[nullable ? Union{typ, Missing} : typ for (typ, nullable) in zip(meta.jtypes, meta.is_nullables)]
+
+"""
 Initialize a dataframe for prepared statement results.
 """
 mysql_init_dataframe(meta::Array{MYSQL_FIELD}, nrows) =
     mysql_init_dataframe(MySQLMetadata(meta), nrows)
 mysql_init_dataframe(meta, nrows) =
-    DataFrame(meta.jtypes, map(Symbol, meta.names), Int64(nrows))
+    DataFrame(mysql_nullable_types(meta), map(Symbol, meta.names), Int64(nrows))
 
 function mysql_result_to_dataframe(hndl::MySQLHandle)
     meta = mysql_metadata(hndl.stmtptr)
@@ -365,11 +371,11 @@ function mysql_get_row_as_tuple(bindarr::Vector{MYSQL_BIND}, jtypes, isnullable)
     vec = Array{Any}(length(bindarr))
     for i = 1:length(bindarr)
         if bindarr[i].is_null_value != 0
-            vec[i] = Nullable{jtypes[i]}()
+            vec[i] = missing
         else
             val = mysql_binary_interpret_field(bindarr[i].buffer,
                                                convert(MYSQL_TYPE, bindarr[i].buffer_type))
-            vec[i] = isnullable[i] ? Nullable(val) : val
+            vec[i] = val
         end
     end
     return tuple(vec...)

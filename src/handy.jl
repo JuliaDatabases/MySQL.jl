@@ -297,7 +297,7 @@ function mysql_bind_array(typs, params)
     bindarr = MYSQL_BIND[]
     for (typ, val) in zip(typs, params)
         #Is the value one of three different versions of Null?
-        if (isdefined(:DataArrays)&&(typeof(val)==DataArrays.NAtype))||(isdefined(:NullableArrays)&&(typeof(val)<:Nullable)&&(val.isnull))||(val==nothing) 
+        if (typeof(val) == Missing) || (val==nothing) 
             push!(bindarr, mysql_bind_init(MYSQL_TYPE_NULL, "NULL"))
         else
             push!(bindarr, mysql_bind_init(typ, val)) #Otherwise
