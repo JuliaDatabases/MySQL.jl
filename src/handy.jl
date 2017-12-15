@@ -166,7 +166,7 @@ function mysql_execute(hndl, command; opformat=MYSQL_DATA_FRAME)
         else
             throw(MySQLInterfaceError("Query expected to produce results but did not."))
         end
-        
+
         status = mysql_next_result(hndl.mysqlptr)
         if status > 0
             throw(MySQLInternalError(hndl))
@@ -296,12 +296,12 @@ function mysql_bind_array(typs, params)
     length(typs) != length(params) && throw(MySQLInterfaceError("Length of `typs` and `params` must be same."))
     bindarr = MYSQL_BIND[]
     for (typ, val) in zip(typs, params)
-        #Is the value one of three different versions of Null?
-        if (isdefined(:DataArrays)&&(typeof(val)==DataArrays.NAtype))||(isdefined(:NullableArrays)&&(typeof(val)<:Nullable)&&(val.isnull))||(val==nothing) 
+        #Is the value one of four different versions of Null?
+        if (isdefined(:Missings)&&(typeof(val)==Missings.Missing))||(isdefined(:DataArrays)&&(typeof(val)==DataArrays.NAtype))||(isdefined(:NullableArrays)&&(typeof(val)<:Nullable)&&(val.isnull))||(val==nothing)
             push!(bindarr, mysql_bind_init(MYSQL_TYPE_NULL, "NULL"))
         else
             push!(bindarr, mysql_bind_init(typ, val)) #Otherwise
-        end 
+        end
     end
     return bindarr
 end

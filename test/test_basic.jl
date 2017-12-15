@@ -28,21 +28,21 @@ const ArrayResults = Array{Any}[
      Nullable{Int8}(), Nullable{String}(), Nullable{UInt8}(), Nullable{Int16}()]]
 
 const DataFrameResults = DataFrame(
-    ID=[1, 2, 3, 4, 5], 
-    Name=@data(["John", "Tom", "Jim", "Tim", NA]),
-    Salary=@data([10000.5, 20000.3, 25000.0, 25000.0, NA]),
-    JoinDate=@data([convert(Date, "2015-8-3"), convert(Date, "2015-8-4"),
-              convert(Date, "2015-6-2"), convert(Date, "2015-7-25"), NA]),
-    LastLogin=@data([convert(DateTime, "2015-9-5 12:31:30"),
+    ID=[1, 2, 3, 4, 5],
+    Name=["John", "Tom", "Jim", "Tim", missing],
+    Salary=[10000.5, 20000.3, 25000.0, 25000.0, missing],
+    JoinDate=[convert(Date, "2015-8-3"), convert(Date, "2015-8-4"),
+              convert(Date, "2015-6-2"), convert(Date, "2015-7-25"), missing],
+    LastLogin=[convert(DateTime, "2015-9-5 12:31:30"),
                convert(DateTime, "2015-10-12 13:12:14"),
                convert(DateTime, "2015-9-5 10:5:10"),
-               convert(DateTime, "2015-10-10 12:12:25"), NA]),
-    LunchTime=@data([convert(DateTime, "12:0:0"), convert(DateTime, "13:0:0"),
-               convert(DateTime, "12:30:0"), convert(DateTime, "12:30:0"), NA]),
-    OfficeNo=@data([1, 12, 45, 56, NA]),
-    JobType=@data(["HR", "HR", "Management", "Accounts", NA]),
-    Senior=@data([0x01, 0x01, NA, 0x01, NA]),
-    empno=@data([1301, 1422, 1567, 3200, NA]))
+               convert(DateTime, "2015-10-10 12:12:25"), missing],
+    LunchTime=[convert(DateTime, "12:0:0"), convert(DateTime, "13:0:0"),
+               convert(DateTime, "12:30:0"), convert(DateTime, "12:30:0"), missing],
+    OfficeNo=[1, 12, 45, 56, missing],
+    JobType=["HR", "HR", "Management", "Accounts", missing],
+    Senior=[0x01, 0x01, missing, 0x01, missing],
+    empno=[1301, 1422, 1567, 3200, missing])
 
 function run_query_helper(command, msg)
     response = mysql_query(hndl, command)

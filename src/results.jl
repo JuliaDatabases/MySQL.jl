@@ -75,7 +75,7 @@ function mysql_get_ctype(jtype::DataType)
     return jtype
 end
 
-mysql_get_ctype(mysqltype::MYSQL_TYPE) = 
+mysql_get_ctype(mysqltype::MYSQL_TYPE) =
     mysql_get_ctype(mysql_get_julia_type(mysqltype))
 
 """
@@ -228,7 +228,7 @@ function populate_row!(df, nfields, result, row)
     for i = 1:nfields
         strval = mysql_load_string_from_resultptr(result, i)
         if strval == nothing
-            df[row, i] = NA
+            df[row, i] = missing
         else
             df[row, i] = mysql_interpret_field(strval, eltype(df[i]))
         end
@@ -281,7 +281,7 @@ Populate a row in the dataframe `df` indexed by `row` given the number of
 function stmt_populate_row!(df, row_index, bindarr)
     for i = 1:length(bindarr)
         if bindarr[i].is_null_value != 0
-            df[row_index, i] = NA
+            df[row_index, i] = missing
             continue
         end
         df[row_index, i] = mysql_binary_interpret_field(bindarr[i].buffer,

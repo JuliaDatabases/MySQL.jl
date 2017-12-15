@@ -3,21 +3,21 @@ module test_prep
 include("test_common.jl")
 
 const DataFrameResultsPrep = DataFrame(
-    ID=[1, 2, 3, 4, 5], 
-    Name=@data(["John", "Tom", "Jim", "Tim", NA]),
-    Salary=@data([10000.5, 20000.5, 25000.0, 25000.0, NA]),
-    JoinDate=@data([convert(Date, "2015-8-3"), convert(Date, "2015-8-4"),
-              convert(Date, "2015-6-2"), convert(Date, "2015-7-25"), NA]),
-    LastLogin=@data([convert(DateTime, "2015-9-5 12:31:30"),
+    ID=[1, 2, 3, 4, 5],
+    Name=["John", "Tom", "Jim", "Tim", missing],
+    Salary=[10000.5, 20000.5, 25000.0, 25000.0, missing],
+    JoinDate=[convert(Date, "2015-8-3"), convert(Date, "2015-8-4"),
+              convert(Date, "2015-6-2"), convert(Date, "2015-7-25"), missing],
+    LastLogin=[convert(DateTime, "2015-9-5 12:31:30"),
                convert(DateTime, "2015-10-12 13:12:14"),
                convert(DateTime, "2015-9-5 10:5:10"),
-               convert(DateTime, "2015-10-10 12:12:25"), NA]),
-    LunchTime=@data([convert(DateTime, "12:0:0"), convert(DateTime, "13:0:0"),
-               convert(DateTime, "12:30:0"), convert(DateTime, "12:30:0"), NA]),
-    OfficeNo=@data([1, 12, 45, 56, NA]),
-    JobType=@data([NA, NA, NA, NA, NA]),
-    Senior=@data([NA, NA, NA, NA, NA]),
-    empno=@data([1301, 1422, 1567, 3200, NA]))
+               convert(DateTime, "2015-10-10 12:12:25"), missing],
+    LunchTime=[convert(DateTime, "12:0:0"), convert(DateTime, "13:0:0"),
+               convert(DateTime, "12:30:0"), convert(DateTime, "12:30:0"), missing],
+    OfficeNo=[1, 12, 45, 56, missing],
+    JobType=[missing, missing, missing, missing, missing],
+    Senior=[missing, missing, missing, missing, missing],
+    empno=[1301, 1422, 1567, 3200, missing])
 
 const ArrayResultsPrep = Array{Any}[
     Any[1, Nullable("John"), Nullable(10000.5f0), Nullable(convert(Date, "2015-08-03")),
