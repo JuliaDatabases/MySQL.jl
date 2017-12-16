@@ -179,7 +179,13 @@ end
     end
 end
 
-compare_values(u, v) = u == v
+function compare_values(u, v)
+    if ismissing(u)&&ismissing(v)
+        return true
+    else
+        return u == v
+    end
+end
 
 function compare_rows(rowu, rowv)
     length(rowu) == length(rowv) || return false

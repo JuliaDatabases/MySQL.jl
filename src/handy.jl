@@ -333,7 +333,7 @@ Escapes a string using `mysql_real_escape_string()`, returns the escaped string.
 """
 function mysql_escape(hndl::MySQLHandle, str::String)
     output = Vector{UInt8}(length(str)*2 + 1)
-    output_len = mysql_real_escape_string(hndl.mysqlptr, output, str, UInt64(length(str)))
+    output_len = mysql_real_escape_string(hndl.mysqlptr, output, str, Culong(length(str)))
     if output_len == typemax(Cuint)
         throw(MySQLInternalError(hndl))
     end

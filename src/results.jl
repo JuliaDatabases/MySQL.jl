@@ -154,10 +154,10 @@ function mysql_get_row_as_vector!(result, retvec, jtypes, isnullable)
     for i = 1:length(jtypes)
         strval = mysql_load_string_from_resultptr(result, i)
         if strval == nothing
-            retvec[i] = Nullable{jtypes[i]}()
+            retvec[i] = missing
         else
             val = mysql_interpret_field(strval, jtypes[i])
-            retvec[i] = isnullable[i] ? Nullable(val) : val
+            retvec[i] = val
         end
     end
 end
@@ -370,11 +370,11 @@ function mysql_get_row_as_tuple(bindarr::Vector{MYSQL_BIND}, jtypes, isnullable)
     vec = Array{Any}(length(bindarr))
     for i = 1:length(bindarr)
         if bindarr[i].is_null_value != 0
-            vec[i] = Nullable{jtypes[i]}()
+            vec[i] = jtypes[i]()
         else
             val = mysql_binary_interpret_field(bindarr[i].buffer,
                                                convert(MYSQL_TYPE, bindarr[i].buffer_type))
-            vec[i] = isnullable[i] ? Nullable(val) : val
+            vec[i] = val
         end
     end
     return tuple(vec...)

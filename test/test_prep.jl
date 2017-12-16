@@ -20,29 +20,29 @@ const DataFrameResultsPrep = DataFrame(
     empno=[1301, 1422, 1567, 3200, missing])
 
 const ArrayResultsPrep = Array{Any}[
-    Any[1, Nullable("John"), Nullable(10000.5f0), Nullable(convert(Date, "2015-08-03")),
-     Nullable(convert(DateTime, "2015-09-05 12:31:30")),
-     Nullable(convert(DateTime, "1970-01-01 12:00:00")),
-     Nullable(Int8(1)), Nullable{String}(), Nullable{UInt8}(), Nullable(Int16(1301))],
+    Any[1, "John", 10000.5f0, convert(Date, "2015-08-03"),
+     convert(DateTime, "2015-09-05 12:31:30"),
+     convert(DateTime, "1970-01-01 12:00:00"),
+     Int8(1), missing, missing, Int16(1301)],
 
-    Any[2, Nullable("Tom"), Nullable(20000.25f0), Nullable(convert(Date, "2015-08-04")),
-     Nullable(convert(DateTime, "2015-10-12 13:12:14")),
-     Nullable(convert(DateTime, "1970-01-01 13:00:00")),
-     Nullable(Int8(12)), Nullable{String}(), Nullable{UInt8}(), Nullable(Int16(1422))],
+    Any[2, "Tom", 20000.25f0, convert(Date, "2015-08-04"),
+     convert(DateTime, "2015-10-12 13:12:14"),
+     convert(DateTime, "1970-01-01 13:00:00"),
+     Int8(12), missing, missing, Int16(1422)],
 
-    Any[3, Nullable("Jim"), Nullable(25000.0f0), Nullable(convert(Date, "2015-06-02")),
-     Nullable(convert(DateTime, "2015-09-05 10:05:10")),
-     Nullable(convert(DateTime, "1970-01-01 12:30:00")),
-     Nullable(Int8(45)), Nullable{String}(), Nullable{UInt8}(), Nullable(Int16(1567))],
+    Any[3, "Jim", 25000.0f0, convert(Date, "2015-06-02"),
+     convert(DateTime, "2015-09-05 10:05:10"),
+     convert(DateTime, "1970-01-01 12:30:00"),
+     Int8(45), missing, missing, Int16(1567)],
 
-    Any[4, Nullable("Tim"), Nullable(25000.0f0), Nullable(convert(Date, "2015-07-25")),
-     Nullable(convert(DateTime, "2015-10-10 12:12:25")),
-     Nullable(convert(DateTime, "1970-01-01 12:30:00")),
-     Nullable(Int8(56)), Nullable{String}(), Nullable{UInt8}(), Nullable(Int16(3200))],
+    Any[4, "Tim", 25000.0f0, convert(Date, "2015-07-25"),
+     convert(DateTime, "2015-10-10 12:12:25"),
+     convert(DateTime, "1970-01-01 12:30:00"),
+     Int8(56), missing, missing, Int16(3200)],
 
-    Any[5, Nullable{String}(), Nullable{Float32}(), Nullable{Date}(),
-     Nullable{DateTime}(), Nullable{DateTime}(),
-     Nullable{Int8}(), Nullable{String}(), Nullable{UInt8}(), Nullable{Int16}()]]
+    Any[5, missing, missing, missing,
+     missing, missing,
+     missing, missing, missing, missing]]
 
 function run_query_helper(command, msg)
     mysql_stmt_prepare(hndl, command)
@@ -116,13 +116,13 @@ function stmt_validate_metadata(hndl)
     @test meta.names[1] == "ID"
     @test meta.lens[1] == 11
     @test meta.mtypes[1] == MYSQL_TYPE_LONG
-    @test meta.jtypes[1] == Int32
+    @test meta.jtypes[1] == Union{Missings.Missing, Int32}
     @test meta.is_nullables[1] == false
 
     @test meta.names[2] == "Name"
     # @test meta.lens[2] == 255
     @test meta.mtypes[2] == MYSQL_TYPE_VAR_STRING
-    @test meta.jtypes[2] == String
+    @test meta.jtypes[2] == Union{Missings.Missing, String}
     @test meta.is_nullables[2] == true
 end
 
