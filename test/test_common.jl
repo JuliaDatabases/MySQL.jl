@@ -155,9 +155,9 @@ function dfisequal(dfa, dfb)
 
     for i = 1:col
         for j = 1:row
-            if isna(dfa[col][row]) && isna(dfb[col][row])
+            if ismissing(dfa[col][row]) && ismissing(dfb[col][row])
                 continue
-            elseif isna(dfa[col][row]) || isna(dfb[col][row])
+            elseif ismissing(dfa[col][row]) || ismissing(dfb[col][row])
                 return false
             elseif dfa[col][row] != dfb[col][row]
                 return false

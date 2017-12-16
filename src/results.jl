@@ -5,29 +5,29 @@ Given a MYSQL type get the corresponding julia type.
 """
 function mysql_get_julia_type(mysqltype)
     if (mysqltype == MYSQL_TYPE_BIT)
-        return Cuchar
+        return Union{Missings.Missing, Cuchar}
 
     elseif (mysqltype == MYSQL_TYPE_TINY ||
             mysqltype == MYSQL_TYPE_ENUM)
-        return Cchar
+        return Union{Missings.Missing, Cchar}
 
     elseif (mysqltype == MYSQL_TYPE_SHORT)
-        return Cshort
+        return Union{Missings.Missing, Cshort}
 
     elseif (mysqltype == MYSQL_TYPE_LONG ||
             mysqltype == MYSQL_TYPE_INT24)
-        return Cint
+        return Union{Missings.Missing, Cint}
 
     elseif (mysqltype == MYSQL_TYPE_LONGLONG)
-        return Int64
+        return Union{Missings.Missing, Int64}
 
     elseif (mysqltype == MYSQL_TYPE_FLOAT)
-        return Cfloat
+        return Union{Missings.Missing, Cfloat}
 
     elseif (mysqltype == MYSQL_TYPE_DECIMAL ||
             mysqltype == MYSQL_TYPE_NEWDECIMAL ||
             mysqltype == MYSQL_TYPE_DOUBLE)
-        return Cdouble
+        return Union{Missings.Missing, Cdouble}
 
     elseif (mysqltype == MYSQL_TYPE_NULL ||
             mysqltype == MYSQL_TYPE_SET ||
@@ -36,30 +36,30 @@ function mysql_get_julia_type(mysqltype)
             mysqltype == MYSQL_TYPE_LONG_BLOB ||
             mysqltype == MYSQL_TYPE_BLOB ||
             mysqltype == MYSQL_TYPE_GEOMETRY)
-        return String
+        return Union{Missings.Missing, String}
 
     elseif (mysqltype == MYSQL_TYPE_YEAR)
-        return Clong
+        return Union{Missings.Missing, Clong}
 
     elseif (mysqltype == MYSQL_TYPE_TIMESTAMP)
-        return DateTime
+        return Union{Missings.Missing, DateTime}
 
     elseif (mysqltype == MYSQL_TYPE_DATE)
-        return Date
+        return Union{Missings.Missing, Date}
 
     elseif (mysqltype == MYSQL_TYPE_TIME)
-        return DateTime
+        return Union{Missings.Missing, DateTime}
 
     elseif (mysqltype == MYSQL_TYPE_DATETIME)
-        return DateTime
+        return Union{Missings.Missing, DateTime}
 
     elseif (mysqltype == MYSQL_TYPE_VARCHAR ||
             mysqltype == MYSQL_TYPE_VAR_STRING ||
             mysqltype == MYSQL_TYPE_STRING)
-        return String
+        return Union{Missings.Missing, String}
 
     else
-        return String
+        return Union{Missings.Missing, String}
 
     end
 end
@@ -81,6 +81,9 @@ mysql_get_ctype(mysqltype::MYSQL_TYPE) =
 """
 Interpret a string as a julia datatype.
 """
+
+mysql_interpret_field{T}(strval::String, ::Type{Union{Missings.Missing, T}}) = mysql_interpret_field(strval, T)
+
 mysql_interpret_field(strval::String, ::Type{Cuchar}) = UInt8(strval[1])
 
 mysql_interpret_field{T<:Number}(strval::String, ::Type{T}) =
@@ -330,8 +333,10 @@ Initialize a dataframe for prepared statement results.
 """
 mysql_init_dataframe(meta::Array{MYSQL_FIELD}, nrows) =
     mysql_init_dataframe(MySQLMetadata(meta), nrows)
-mysql_init_dataframe(meta, nrows) =
-    DataFrame(meta.jtypes, map(Symbol, meta.names), Int64(nrows))
+
+function mysql_init_dataframe(meta, nrows)
+    df = DataFrame(meta.jtypes, map(Symbol, meta.names), Int64(nrows))
+end
 
 function mysql_result_to_dataframe(hndl::MySQLHandle)
     meta = mysql_metadata(hndl.stmtptr)
