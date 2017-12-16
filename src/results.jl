@@ -67,6 +67,9 @@ end
 """
 Get the C type that would be needed when using prepared statement.
 """
+
+mysql_get_ctype{T}(jltype::Type{Union{Missings.Missing, T}}) = mysql_get_ctype(T)
+
 function mysql_get_ctype(jtype::DataType)
     if (jtype == Date || jtype == DateTime)
         return MYSQL_TIME

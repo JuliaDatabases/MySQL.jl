@@ -279,8 +279,10 @@ Get a `MYSQL_BIND` instance given the mysql type `typ` and a `value`.
 mysql_bind_init(typ::MYSQL_TYPE, value) =
     mysql_bind_init(mysql_get_julia_type(typ), typ, value)
 
-mysql_bind_init(jtype::Union{Type{Date}, Type{DateTime}}, typ, value) =
-    MYSQL_BIND([convert(MYSQL_TIME, convert(jtype, value))], typ)
+mysql_bind_init(jtype::Type{Union{Date, Missings.Missing}}, typ, value) =
+    MYSQL_BIND([convert(MYSQL_TIME, convert(Date, value))], typ)
+mysql_bind_init(jtype::Type{Union{DateTime, Missings.Missing}}, typ, value) =
+    MYSQL_BIND([convert(MYSQL_TIME, convert(DateTime, value))], typ)
 
 mysql_bind_init(::Type{String}, typ, value) = MYSQL_BIND(value, typ)
 mysql_bind_init(jtype, typ, value) = MYSQL_BIND([convert(jtype, value)], typ)
