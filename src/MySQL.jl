@@ -3,7 +3,6 @@ module MySQL
     using Compat
     using DataFrames
     using Missings
-    using DataStreams
     using Compat.Dates
 
     include("config.jl")
