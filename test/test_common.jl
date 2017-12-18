@@ -155,9 +155,9 @@ function dfisequal(dfa, dfb)
 
     for i = 1:col
         for j = 1:row
-            if isna(dfa[col][row]) && isna(dfb[col][row])
+            if ismissing(dfa[col][row]) && ismissing(dfb[col][row])
                 continue
-            elseif isna(dfa[col][row]) || isna(dfb[col][row])
+            elseif ismissing(dfa[col][row]) || ismissing(dfb[col][row])
                 return false
             elseif dfa[col][row] != dfb[col][row]
                 return false
@@ -168,23 +168,10 @@ function dfisequal(dfa, dfb)
     return true
 end
 
-@compat function compare_values(u::Nullable, v::Nullable)
-    if !isnull(u) && !isnull(v)
-        return u.value == v.value
-    elseif isnull(u) && isnull(v)
-        return typeof(u) == typeof(v)
-    else
-        println("*** ALERT: Non null value being compared with null.")
-        return false
-    end
-end
-
-compare_values(u, v) = u == v
-
 function compare_rows(rowu, rowv)
     length(rowu) == length(rowv) || return false
     for i = 1:length(rowu)
-        compare_values(rowu[i], rowv[i]) || return false
+        isequal(rowu[i], rowv[i]) || return false
     end
     return true
 end
