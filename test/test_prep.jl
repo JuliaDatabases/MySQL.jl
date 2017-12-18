@@ -5,39 +5,39 @@ include("test_common.jl")
 const DataFrameResultsPrep = DataFrame(
     ID=[1, 2, 3, 4, 5],
     Name=["John", "Tom", "Jim", "Tim", missing],
-    Salary=[10000.5, 20000.5, 25000.0, 25000.0, missing],
-    JoinDate=[convert(Date, "2015-8-3"), convert(Date, "2015-8-4"),
-              convert(Date, "2015-6-2"), convert(Date, "2015-7-25"), missing],
-    LastLogin=[convert(DateTime, "2015-9-5 12:31:30"),
-               convert(DateTime, "2015-10-12 13:12:14"),
-               convert(DateTime, "2015-9-5 10:5:10"),
-               convert(DateTime, "2015-10-10 12:12:25"), missing],
-    LunchTime=[convert(DateTime, "12:0:0"), convert(DateTime, "13:0:0"),
-               convert(DateTime, "12:30:0"), convert(DateTime, "12:30:0"), missing],
+    Salary=[10000.5, 20000.25, 25000.0, 25000.0, missing],
+    JoinDate=[mysql_date("2015-8-3"), mysql_date("2015-8-4"),
+              mysql_date("2015-6-2"), mysql_date("2015-7-25"), missing],
+    LastLogin=[mysql_datetime("2015-9-5 12:31:30"),
+               mysql_datetime("2015-10-12 13:12:14"),
+               mysql_datetime("2015-9-5 10:5:10"),
+               mysql_datetime("2015-10-10 12:12:25"), missing],
+    LunchTime=[mysql_datetime("12:0:0"), mysql_datetime("13:0:0"),
+               mysql_datetime("12:30:0"), mysql_datetime("12:30:0"), missing],
     OfficeNo=[1, 12, 45, 56, missing],
     JobType=[missing, missing, missing, missing, missing],
     Senior=[missing, missing, missing, missing, missing],
     empno=[1301, 1422, 1567, 3200, missing])
 
 const ArrayResultsPrep = Array{Any}[
-    Any[1, "John", 10000.5f0, convert(Date, "2015-08-03"),
-     convert(DateTime, "2015-09-05 12:31:30"),
-     convert(DateTime, "1970-01-01 12:00:00"),
+    Any[1, "John", 10000.5f0, mysql_date("2015-08-03"),
+     mysql_datetime("2015-09-05 12:31:30"),
+     mysql_datetime("1970-01-01 12:00:00"),
      Int8(1), missing, missing, Int16(1301)],
 
-    Any[2, "Tom", 20000.25f0, convert(Date, "2015-08-04"),
-     convert(DateTime, "2015-10-12 13:12:14"),
-     convert(DateTime, "1970-01-01 13:00:00"),
+    Any[2, "Tom", 20000.25f0, mysql_date("2015-08-04"),
+     mysql_datetime("2015-10-12 13:12:14"),
+     mysql_datetime("1970-01-01 13:00:00"),
      Int8(12), missing, missing, Int16(1422)],
 
-    Any[3, "Jim", 25000.0f0, convert(Date, "2015-06-02"),
-     convert(DateTime, "2015-09-05 10:05:10"),
-     convert(DateTime, "1970-01-01 12:30:00"),
+    Any[3, "Jim", 25000.0f0, mysql_date("2015-06-02"),
+     mysql_datetime("2015-09-05 10:05:10"),
+     mysql_datetime("1970-01-01 12:30:00"),
      Int8(45), missing, missing, Int16(1567)],
 
-    Any[4, "Tim", 25000.0f0, convert(Date, "2015-07-25"),
-     convert(DateTime, "2015-10-10 12:12:25"),
-     convert(DateTime, "1970-01-01 12:30:00"),
+    Any[4, "Tim", 25000.0f0, mysql_date("2015-07-25"),
+     mysql_datetime("2015-10-10 12:12:25"),
+     mysql_datetime("1970-01-01 12:30:00"),
      Int8(56), missing, missing, Int16(3200)],
 
     Any[5, missing, missing, missing,
@@ -88,7 +88,7 @@ function show_results()
     dframe = mysql_execute(hndl, [MYSQL_TYPE_LONG], [0])[1]
     println("\n *** Results as dataframe: \n", dframe)
     println("\n *** Expected result: \n", DataFrameResultsPrep)
-    @test dfisequal(dframe, DataFrameResultsPrep)
+    @test isequal(dframe, DataFrameResultsPrep)
 
     mysql_stmt_prepare(hndl, command)
     println("\n *** Results using Iterator: \n")
@@ -117,13 +117,13 @@ function stmt_validate_metadata(hndl)
     @test meta.names[1] == "ID"
     @test meta.lens[1] == 11
     @test meta.mtypes[1] == MYSQL_TYPE_LONG
-    @test meta.jtypes[1] == Union{Missings.Missing, Int32}
+    @test meta.jtypes[1] == Int32
     @test meta.is_nullables[1] == false
 
     @test meta.names[2] == "Name"
     # @test meta.lens[2] == 255
     @test meta.mtypes[2] == MYSQL_TYPE_VAR_STRING
-    @test meta.jtypes[2] == Union{Missings.Missing, String}
+    @test meta.jtypes[2] == Union{Missing, String}
     @test meta.is_nullables[2] == true
 end
 

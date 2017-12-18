@@ -5,29 +5,29 @@ Given a MYSQL type get the corresponding julia type.
 """
 function mysql_get_julia_type(mysqltype)
     if (mysqltype == MYSQL_TYPE_BIT)
-        return Union{Missings.Missing, Cuchar}
+        return Cuchar
 
     elseif (mysqltype == MYSQL_TYPE_TINY ||
             mysqltype == MYSQL_TYPE_ENUM)
-        return Union{Missings.Missing, Cchar}
+        return Cchar
 
     elseif (mysqltype == MYSQL_TYPE_SHORT)
-        return Union{Missings.Missing, Cshort}
+        return Cshort
 
     elseif (mysqltype == MYSQL_TYPE_LONG ||
             mysqltype == MYSQL_TYPE_INT24)
-        return Union{Missings.Missing, Cint}
+        return Cint
 
     elseif (mysqltype == MYSQL_TYPE_LONGLONG)
-        return Union{Missings.Missing, Int64}
+        return Int64
 
     elseif (mysqltype == MYSQL_TYPE_FLOAT)
-        return Union{Missings.Missing, Cfloat}
+        return Cfloat
 
     elseif (mysqltype == MYSQL_TYPE_DECIMAL ||
             mysqltype == MYSQL_TYPE_NEWDECIMAL ||
             mysqltype == MYSQL_TYPE_DOUBLE)
-        return Union{Missings.Missing, Cdouble}
+        return Cdouble
 
     elseif (mysqltype == MYSQL_TYPE_NULL ||
             mysqltype == MYSQL_TYPE_SET ||
@@ -36,30 +36,30 @@ function mysql_get_julia_type(mysqltype)
             mysqltype == MYSQL_TYPE_LONG_BLOB ||
             mysqltype == MYSQL_TYPE_BLOB ||
             mysqltype == MYSQL_TYPE_GEOMETRY)
-        return Union{Missings.Missing, String}
+        return String
 
     elseif (mysqltype == MYSQL_TYPE_YEAR)
-        return Union{Missings.Missing, Clong}
+        return Clong
 
     elseif (mysqltype == MYSQL_TYPE_TIMESTAMP)
-        return Union{Missings.Missing, DateTime}
+        return DateTime
 
     elseif (mysqltype == MYSQL_TYPE_DATE)
-        return Union{Missings.Missing, Date}
+        return Date
 
     elseif (mysqltype == MYSQL_TYPE_TIME)
-        return Union{Missings.Missing, DateTime}
+        return DateTime
 
     elseif (mysqltype == MYSQL_TYPE_DATETIME)
-        return Union{Missings.Missing, DateTime}
+        return DateTime
 
     elseif (mysqltype == MYSQL_TYPE_VARCHAR ||
             mysqltype == MYSQL_TYPE_VAR_STRING ||
             mysqltype == MYSQL_TYPE_STRING)
-        return Union{Missings.Missing, String}
+        return String
 
     else
-        return Union{Missings.Missing, String}
+        return String
 
     end
 end
@@ -71,7 +71,7 @@ function mysql_get_ctype end
 mysql_get_ctype(::Type{<:Dates.TimeType}) = MYSQL_TIME
 mysql_get_ctype(x) = x
 
-mysql_get_ctype{T}(jltype::Type{Union{Missings.Missing, T}}) = mysql_get_ctype(T)
+mysql_get_ctype(jltype::Type{Union{Missing, T}}) where {T} = mysql_get_ctype(T)
 
 mysql_get_ctype(mysqltype::MYSQL_TYPE) =
     mysql_get_ctype(mysql_get_julia_type(mysqltype))
@@ -81,7 +81,7 @@ Interpret a string as a julia datatype.
 """
 function mysql_interpret_field end
 
-mysql_interpret_field{T}(strval::String, ::Type{Union{Missings.Missing, T}}) = mysql_interpret_field(strval, T)
+mysql_interpret_field(strval::String, ::Type{Union{Missing, T}}) where {T} = mysql_interpret_field(strval, T)
 
 mysql_interpret_field(strval::String, ::Type{Cuchar}) = UInt8(strval[1])
 
@@ -91,11 +91,8 @@ mysql_interpret_field(strval::String, ::Type{T}) where {T<:Number} =
 mysql_interpret_field(strval::String, ::Type{<:AbstractString}) =
     strval
 
-mysql_interpret_field(strval::String, ::Type{Date}) =
-    Dates.Date(datestr, MYSQL_DATE_FORMAT)
-
-functionmysql_interpret_field(strval::String, ::Type{DateTime}) =
-    Dates.DateTime(contains(strval, " ") ? strval : "1970-01-01 " * strval, MYSQL_DATETIME_FORMAT)
+mysql_interpret_field(strval::String, ::Type{Date}) = mysql_date(strval)
+mysql_interpret_field(strval::String, ::Type{DateTime}) = mysql_datetime(strval)
 
 """
 Load a bytestring from `result` pointer given the field index `idx`.
@@ -160,14 +157,7 @@ end
 """
 Convert a mysql field type array to a julia type array.
 """
-function mysql_get_jtype_array(mysqlfield_types)
-    nfields = length(mysqlfield_types)
-    jtypes = Array{Type}(nfields)
-    for i = 1:nfields
-        jtypes[i] = mysql_get_julia_type(mysqlfield_types[i])
-    end
-    return jtypes
-end
+mysql_get_jtype_array(mysqlfield_types) = map(x->mysql_get_julia_type(x), mysqlfield_types)
 
 """
 Returns true if `field` is nullable (i.e, it is not declared as `NOT NULL`)
@@ -178,15 +168,7 @@ mysql_is_nullable(field) = field.flags & NOT_NULL_FLAG == 0
 Get an array of boolean values indicating whether the column is
  declared as `NULL`(true) or `NOT NULL`(false).
 """
-mysql_get_nullable(result) = mysql_get_nullable(mysql_metadata(result))
-
-function mysql_get_nullable(meta::Array{MYSQL_FIELD})
-    isnullable = Array{Bool}(length(meta))
-    for i = 1:length(meta)
-        isnullable[i] = mysql_is_nullable(meta[i])
-    end
-    return isnullable
-end
+mysql_get_nullable(result) = map(x->mysql_is_nullable(x), mysql_metadata(result))
 
 """
 Get the result as an array with each row as a vector.
@@ -194,24 +176,13 @@ Get the result as an array with each row as a vector.
 function mysql_get_result_as_array(result)
     nrows = mysql_num_rows(result)
     meta = mysql_metadata(result)
-    retarr = Array{Array{Any}}(nrows)
-    for i = 1:nrows
-        retarr[i] = Array{Any}(meta.nfields)
-        mysql_get_row_as_vector!(mysql_fetch_row(result), retarr[i],
-                                 meta.jtypes, meta.is_nullables)
-    end
-    return retarr
+    return [mysql_get_row_as_vector(mysql_fetch_row(result), meta.jtypes, meta.is_nullables) for i = 1:nrows]
 end
 
 function mysql_get_result_as_tuples(result::MySQLResult)
     nrows = mysql_num_rows(result)
     meta = mysql_metadata(result)
-    retarr = Array{Tuple}(nrows)
-    for i = 1:nrows
-        retarr[i] = mysql_get_row_as_tuple(mysql_fetch_row(result), meta.jtypes,
-                                           meta.is_nullables)
-    end
-    return retarr
+    return [mysql_get_row_as_tuple(mysql_fetch_row(result), meta.jtypes, meta.is_nullables) for i = 1:nrows]
 end
 
 """
@@ -275,10 +246,10 @@ function stmt_populate_row!(df, row_index, bindarr)
     for i = 1:length(bindarr)
         if bindarr[i].is_null_value != 0
             df[row_index, i] = missing
-            continue
-        end
-        df[row_index, i] = mysql_binary_interpret_field(bindarr[i].buffer,
+        else
+            df[row_index, i] = mysql_binary_interpret_field(bindarr[i].buffer,
                                                         convert(MYSQL_TYPE, bindarr[i].buffer_type))
+        end
     end
 end
 
@@ -286,7 +257,7 @@ end
 Get a bind array for binding to results.
 """
 function mysql_bind_array(meta::MySQLMetadata)
-    bindarr = Array{MYSQL_BIND}(meta.nfields)
+    bindarr = Vector{MYSQL_BIND}(uninitialized, meta.nfields)
     for i in 1:meta.nfields
         bufflen = zero(Culong)
         bindbuff = C_NULL
@@ -360,7 +331,7 @@ function mysql_get_row_as_tuple(bindarr::Vector{MYSQL_BIND}, jtypes, isnullable)
     vec = Array{Any}(length(bindarr))
     for i = 1:length(bindarr)
         if bindarr[i].is_null_value != 0
-            vec[i] = Missings.missing
+            vec[i] = missing
         else
             val = mysql_binary_interpret_field(bindarr[i].buffer,
                                                convert(MYSQL_TYPE, bindarr[i].buffer_type))

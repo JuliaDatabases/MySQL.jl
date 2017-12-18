@@ -5,18 +5,19 @@
 # to a julia datastructure.
 
 using DataFrames
+using Missings
 using Compat
 using MySQL
 using Base.Test
 
-import ..HOST, ..USER, ..PASS
+import ..HOST, ..USER, ..PASS, ..PORT
 
 # function run_query_helper(command, msg)
 #     error("API not implemented: `run_query_helper`")
 # end
 
 function connect_as_root()
-    global hndl = mysql_connect(HOST, USER, PASS, "")
+    global hndl = mysql_connect(HOST, USER, PASS, ""; port=parse(Int, PORT))
 end
 
 function create_test_database()
@@ -37,7 +38,7 @@ function grant_test_user_privilege()
 end
 
 function connect_as_test_user()
-    global hndl = mysql_connect(HOST, "test", "test", "mysqltest";
+    global hndl = mysql_connect(HOST, "test", "test", "mysqltest"; port=parse(Int, PORT),
                                 opts=Dict(MYSQL_OPT_RECONNECT => 1))
 end
 
@@ -141,31 +142,6 @@ function run_test()
     @test drop_test_user()
     @test drop_test_database()
     mysql_disconnect(hndl)
-end
-
-"""
-A function to check if two dataframes are equal
-"""
-function dfisequal(dfa, dfb)
-    if size(dfa) != size(dfb)
-        return false
-    end
-
-    row, col = size(dfa)
-
-    for i = 1:col
-        for j = 1:row
-            if ismissing(dfa[col][row]) && ismissing(dfb[col][row])
-                continue
-            elseif ismissing(dfa[col][row]) || ismissing(dfb[col][row])
-                return false
-            elseif dfa[col][row] != dfb[col][row]
-                return false
-            end
-        end
-    end
-
-    return true
 end
 
 function compare_rows(rowu, rowv)

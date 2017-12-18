@@ -159,7 +159,7 @@ mutable struct MySQLResult
     function MySQLResult(hndl, resptr)
         res = new(hndl, C_NULL)
         res.resptr = resptr
-        finalizer(x -> mysql_free_result(x.resptr), res)
+        finalizer(res, x -> mysql_free_result(x.resptr))
         return res
     end
 end
@@ -167,10 +167,10 @@ end
 """
 Iterator for the mysql result.
 """
-mutable struct MySQLRowIterator{T}
+mutable struct MySQLRowIterator
     result::MySQLResult
-    # jtypes::Vector{Type}
-    # is_nullables::Vector{Bool}
+    jtypes::Vector{Type}
+    is_nullables::Vector{Bool}
     rowsleft::Int64
 end
 
@@ -242,9 +242,11 @@ mutable struct MySQLMetadata
         for i in 1:nfields
             names[i] = unsafe_string(fields[i].name)
             mtypes[i] = fields[i].field_type
-            jtypes[i] = mysql_get_julia_type(fields[i].field_type)
+            is_nullable = mysql_is_nullable(fields[i])
+            is_nullables[i] = is_nullable
+            T = mysql_get_julia_type(fields[i].field_type)
+            jtypes[i] = is_nullable ? Union{Missing, T} : T
             lens[i] = fields[i].field_length
-            is_nullables[i] = mysql_is_nullable(fields[i])
         end
         new(names, mtypes, jtypes, lens, is_nullables, nfields)
     end

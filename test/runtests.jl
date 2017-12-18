@@ -6,6 +6,7 @@ conf = ConfParse("server.ini")
 parse_conf!(conf)
 
 const HOST = retrieve(conf, "default", "host") |> parse
+const PORT = retrieve(conf, "default", "port") |> parse
 const USER = retrieve(conf, "default", "user") |> parse
 const PASS = retrieve(conf, "default", "pass") |> parse
 
