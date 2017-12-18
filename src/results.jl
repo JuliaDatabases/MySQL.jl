@@ -67,13 +67,9 @@ end
 """
 Get the C type that would be needed when using prepared statement.
 """
-function mysql_get_ctype(jtype::DataType)
-    if (jtype == Date || jtype == DateTime)
-        return MYSQL_TIME
-    end
-
-    return jtype
-end
+function mysql_get_ctype end
+mysql_get_ctype(::Type{<:Dates.TimeType}) = MYSQL_TIME
+mysql_get_ctype(x) = x
 
 mysql_get_ctype(mysqltype::MYSQL_TYPE) = 
     mysql_get_ctype(mysql_get_julia_type(mysqltype))
@@ -81,19 +77,20 @@ mysql_get_ctype(mysqltype::MYSQL_TYPE) =
 """
 Interpret a string as a julia datatype.
 """
+function mysql_interpret_field end
 mysql_interpret_field(strval::String, ::Type{Cuchar}) = UInt8(strval[1])
 
-mysql_interpret_field{T<:Number}(strval::String, ::Type{T}) =
+mysql_interpret_field(strval::String, ::Type{T}) where {T<:Number} =
     parse(T, strval)
 
-mysql_interpret_field{T<:String}(strval::String, ::Type{T}) =
+mysql_interpret_field(strval::String, ::Type{<:AbstractString}) =
     strval
 
 mysql_interpret_field(strval::String, ::Type{Date}) =
-    convert(Date, strval)
+    Dates.Date(datestr, MYSQL_DATE_FORMAT)
 
-mysql_interpret_field(strval::String, ::Type{DateTime}) =
-    convert(DateTime, strval)
+functionmysql_interpret_field(strval::String, ::Type{DateTime}) =
+    Dates.DateTime(contains(strval, " ") ? strval : "1970-01-01 " * strval, MYSQL_DATETIME_FORMAT)
 
 """
 Load a bytestring from `result` pointer given the field index `idx`.
@@ -125,16 +122,7 @@ Returns an array of MYSQL_TYPE's corresponding to each field in the table.
 """
 function mysql_get_field_types(result::MYSQL_RES)
     mysqlfields = mysql_metadata(result)
-    return mysql_get_field_types(mysqlfields)
-end
-
-function mysql_get_field_types(mysqlfields::Array{MYSQL_FIELD})
-    nfields = length(mysqlfields)
-    mysqlfield_types = Array{MYSQL_TYPE}(nfields)
-    for i = 1:nfields
-        mysqlfield_types[i] = mysqlfields[i].field_type
-    end
-    return mysqlfield_types
+    return map(x->x.field_type, mysqlfields)
 end
 
 """

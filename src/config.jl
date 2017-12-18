@@ -5,15 +5,21 @@
 #
 # TODO: Need to update lib_choices for Mac OS X and Windows.
 
+@static if !isdefined(Base, Symbol("@isdefined"))
+macro isdefined(x)
+    esc(:(isdefined($x)))
+end
+end
+
 let
     global mysql_lib
     succeeded = false
-    if !isdefined(:mysql_lib)
-        @static is_linux() ? (lib_choices = ["libmysql.so", "libmysqlclient.so",
+    if !@isdefined(:mysql_lib)
+        @static Compat.Sys.islinux() ? (lib_choices = ["libmysql.so", "libmysqlclient.so",
                                              "libmysqlclient_r.so", "libmariadb.so",
                                              "libmysqlclient_r.so.16"]) : nothing
-        @static is_apple() ? (lib_choices = ["libmysqlclient.dylib", "libperconaserverclient.dylib"]) : nothing
-        @static is_windows() ? (lib_choices = ["libmysql.dll", "libmariadb.dll"]) : nothing
+        @static Compat.Sys.isapple() ? (lib_choices = ["libmysqlclient.dylib", "libperconaserverclient.dylib"]) : nothing
+        @static Compat.Sys.iswindows() ? (lib_choices = ["libmysql.dll", "libmariadb.dll"]) : nothing
         local lib
         for lib in lib_choices
             try
@@ -22,7 +28,7 @@ let
                 break
             end
         end
-        succeeded || error("MYSQL library not found")
+        succeeded || error("MySQL library not found")
         @eval const mysql_lib = $lib
     end
 end

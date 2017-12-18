@@ -152,7 +152,7 @@ const MYSQL_NO_DATA = 100
 
 const MYSQL_DEFAULT_PORT = 3306
 
-if is_windows()
+if Compat.Sys.iswindows()
 	MYSQL_DEFAULT_SOCKET = "MySQL"
 else
 	MYSQL_DEFAULT_SOCKET = "/tmp/mysql.sock"

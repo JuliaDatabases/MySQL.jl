@@ -9,7 +9,7 @@ const MYSQL_TYPE = UInt32
 The field object that contains the metadata of the table. 
 Returned by mysql_fetch_fields API.
 """
-immutable MYSQL_FIELD
+struct MYSQL_FIELD
     name :: Ptr{Cchar}             ##  Name of column
     org_name :: Ptr{Cchar}         ##  Original column name, if an alias
     table :: Ptr{Cchar}            ##  Table of column if column was a field
@@ -36,7 +36,7 @@ end
 """
 Type mirroring MYSQL_TIME C struct.
 """
-immutable MYSQL_TIME
+struct MYSQL_TIME
     year::Cuint
     month::Cuint
     day::Cuint
@@ -51,7 +51,7 @@ end
 """
 Mirror to MYSQL_BIND struct in mysql_bind.h
 """
-immutable MYSQL_BIND
+struct MYSQL_BIND
     length::Ptr{Culong}
     is_null::Ptr{Cchar}
     buffer::Ptr{Void}
@@ -89,7 +89,7 @@ end
 """
 Mirror to MYSQL_ROWS struct in mysql.h
 """
-immutable MYSQL_ROWS
+struct MYSQL_ROWS
     next::Ptr{MYSQL_ROWS}
     data::MYSQL_ROW
     length::Culong
@@ -98,7 +98,7 @@ end
 """
 Mirror to MYSQL_STMT struct in mysql.h
 """
-immutable MYSQL_STMT # This is different in mariadb header file.
+struct MYSQL_STMT # This is different in mariadb header file.
     mem_root::MEM_ROOT
     list::LIST
     mysql::Ptr{Void}
@@ -132,7 +132,7 @@ end
 """
 The MySQL handle.
 """
-type MySQLHandle
+mutable struct MySQLHandle
     mysqlptr::Ptr{Void}
     host::String
     user::String
@@ -153,13 +153,13 @@ DB:   $(hndl.db)
     end
 end
 
-type MySQLResult
+mutable struct MySQLResult
     con::MySQLHandle
     resptr::MYSQL_RES
     function MySQLResult(hndl, resptr)
         res = new(hndl, C_NULL)
         res.resptr = resptr
-        finalizer(res, x -> mysql_free_result(x.resptr))
+        finalizer(x -> mysql_free_result(x.resptr), res)
         return res
     end
 end
@@ -167,27 +167,27 @@ end
 """
 Iterator for the mysql result.
 """
-type MySQLRowIterator
+mutable struct MySQLRowIterator{T}
     result::MySQLResult
-    jtypes::Vector{Type}
-    is_nullables::Vector{Bool}
+    # jtypes::Vector{Type}
+    # is_nullables::Vector{Bool}
     rowsleft::Int64
 end
 
 """
 Iterator for prepared statement results.
 """
-type MySQLStatementIterator
+mutable struct MySQLStatementIterator
     hndl::MySQLHandle
     jtypes::Vector{Type}
     is_nullables::Vector{Bool}
     binding::Vector{MYSQL_BIND}
 end
 
-@compat abstract type MySQLError end
+abstract type MySQLError end
 
 # For errors that happen in the MySQL C connector
-type MySQLInternalError <: MySQLError
+mutable struct MySQLInternalError <: MySQLError
     con::Ptr{Void}
 
     function MySQLInternalError(con::MySQLHandle)
@@ -202,7 +202,7 @@ end
 Base.showerror(io::IO, e::MySQLInternalError) = print(io, unsafe_string(mysql_error(e.con)))
 
 # Internal errors that happen when using prepared statements
-type MySQLStatementError <: MySQLError
+mutable struct MySQLStatementError <: MySQLError
     stmt::Ptr{MYSQL_STMT}
 
     function MySQLStatementError(hndl::MySQLHandle)
@@ -218,13 +218,13 @@ Base.showerror(io::IO, e::MySQLStatementError) =
     print(io, unsafe_string(mysql_stmt_error(e.stmt)))
 
 # For errors that happen in MySQL.jl
-type MySQLInterfaceError <: MySQLError
+mutable struct MySQLInterfaceError <: MySQLError
     msg::String
 end
 
 Base.showerror(io::IO, e::MySQLInterfaceError) = print(io, e.msg)
 
-type MySQLMetadata
+mutable struct MySQLMetadata
     names::Vector{String}
     mtypes::Vector{MYSQL_TYPE}
     jtypes::Vector{Type}
