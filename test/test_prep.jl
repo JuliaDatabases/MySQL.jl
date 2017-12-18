@@ -73,7 +73,6 @@ function insert_values()
             MYSQL_TYPE_SHORT]
 
     affrows = 0
-    println("before")
     for value in values
         println(value)
         affrows += mysql_execute(hndl, typs, value)

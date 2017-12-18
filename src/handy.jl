@@ -284,7 +284,7 @@ mysql_bind_init(jtype::Type{Union{Date, Missings.Missing}}, typ, value) =
 mysql_bind_init(jtype::Type{Union{DateTime, Missings.Missing}}, typ, value) =
     MYSQL_BIND([convert(MYSQL_TIME, convert(DateTime, value))], typ)
 
-mysql_bind_init(::Type{String}, typ, value) = MYSQL_BIND(value, typ)
+mysql_bind_init(::Type{Union{String, Missings.Missing}}, typ, value) = MYSQL_BIND(value, typ)
 mysql_bind_init(jtype, typ, value) = MYSQL_BIND([convert(jtype, value)], typ)
 
 """
@@ -297,9 +297,9 @@ Returns an array of `MYSQL_BIND`.
 function mysql_bind_array(typs, params)
     length(typs) != length(params) && throw(MySQLInterfaceError("Length of `typs` and `params` must be same."))
     bindarr = MYSQL_BIND[]
-    for (typ, val) in zip(typs, params)
-        #Is the value one of four different versions of Null?
-        if (isdefined(:Missings)&&(typeof(val)==Missings.Missing))||(isdefined(:DataArrays)&&(typeof(val)==DataArrays.NAtype))||(isdefined(:NullableArrays)&&(typeof(val)<:Nullable)&&(val.isnull))||(val==nothing)
+    for (typ, val) in zip(typs, params)  
+        #Is the value missing or equal to `nothing`?
+        if (isdefined(:Missings)&&(typeof(val)==Missings.Missing))||(val==nothing)
             push!(bindarr, mysql_bind_init(MYSQL_TYPE_NULL, "NULL"))
         else
             push!(bindarr, mysql_bind_init(typ, val)) #Otherwise
@@ -341,6 +341,14 @@ function mysql_escape(hndl::MySQLHandle, str::String)
     end
     return String(output[1:output_len])
 end
+
+"""
+    mysql_subtype(typ::DataType) -> DataType
+
+Convenience function for working with missing values.  If `typ` is of the form `Union{Missings.Missing, T}` it returns `T`, otherwise it returns `typ`.  Not exported.
+"""
+mysql_subtype{T}(typ::Type{Union{Missings.Missing, T}})=T
+mysql_subtype(typ::DataType)=typ
 
 export mysql_options, mysql_connect, mysql_disconnect, mysql_execute,
        mysql_insert_id, mysql_store_result, mysql_metadata, mysql_query,

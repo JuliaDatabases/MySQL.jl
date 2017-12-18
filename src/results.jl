@@ -373,7 +373,7 @@ function mysql_get_row_as_tuple(bindarr::Vector{MYSQL_BIND}, jtypes, isnullable)
     vec = Array{Any}(length(bindarr))
     for i = 1:length(bindarr)
         if bindarr[i].is_null_value != 0
-            vec[i] = jtypes[i]()
+            vec[i] = Missings.missing
         else
             val = mysql_binary_interpret_field(bindarr[i].buffer,
                                                convert(MYSQL_TYPE, bindarr[i].buffer_type))

@@ -168,29 +168,10 @@ function dfisequal(dfa, dfb)
     return true
 end
 
-@compat function compare_values(u::Nullable, v::Nullable)
-    if !isnull(u) && !isnull(v)
-        return u.value == v.value
-    elseif isnull(u) && isnull(v)
-        return typeof(u) == typeof(v)
-    else
-        println("*** ALERT: Non null value being compared with null.")
-        return false
-    end
-end
-
-function compare_values(u, v)
-    if ismissing(u)&&ismissing(v)
-        return true
-    else
-        return u == v
-    end
-end
-
 function compare_rows(rowu, rowv)
     length(rowu) == length(rowv) || return false
     for i = 1:length(rowu)
-        compare_values(rowu[i], rowv[i]) || return false
+        isequal(rowu[i], rowv[i]) || return false
     end
     return true
 end
