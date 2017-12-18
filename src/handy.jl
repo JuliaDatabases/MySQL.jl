@@ -166,7 +166,7 @@ function mysql_execute(hndl, command; opformat=MYSQL_DATA_FRAME)
         else
             throw(MySQLInterfaceError("Query expected to produce results but did not."))
         end
-        
+
         status = mysql_next_result(hndl.mysqlptr)
         if status > 0
             throw(MySQLInternalError(hndl))
@@ -279,10 +279,12 @@ Get a `MYSQL_BIND` instance given the mysql type `typ` and a `value`.
 mysql_bind_init(typ::MYSQL_TYPE, value) =
     mysql_bind_init(mysql_get_julia_type(typ), typ, value)
 
-mysql_bind_init(jtype::Union{Type{Date}, Type{DateTime}}, typ, value) =
-    MYSQL_BIND([convert(MYSQL_TIME, convert(jtype, value))], typ)
+mysql_bind_init(jtype::Type{Union{Date, Missings.Missing}}, typ, value) =
+    MYSQL_BIND([convert(MYSQL_TIME, convert(Date, value))], typ)
+mysql_bind_init(jtype::Type{Union{DateTime, Missings.Missing}}, typ, value) =
+    MYSQL_BIND([convert(MYSQL_TIME, convert(DateTime, value))], typ)
 
-mysql_bind_init(::Type{String}, typ, value) = MYSQL_BIND(value, typ)
+mysql_bind_init(::Type{Union{String, Missings.Missing}}, typ, value) = MYSQL_BIND(value, typ)
 mysql_bind_init(jtype, typ, value) = MYSQL_BIND([convert(jtype, value)], typ)
 
 """
@@ -295,13 +297,13 @@ Returns an array of `MYSQL_BIND`.
 function mysql_bind_array(typs, params)
     length(typs) != length(params) && throw(MySQLInterfaceError("Length of `typs` and `params` must be same."))
     bindarr = MYSQL_BIND[]
-    for (typ, val) in zip(typs, params)
-        #Is the value one of three different versions of Null?
-        if (isdefined(:DataArrays)&&(typeof(val)==DataArrays.NAtype))||(isdefined(:NullableArrays)&&(typeof(val)<:Nullable)&&(val.isnull))||(val==nothing) 
+    for (typ, val) in zip(typs, params)  
+        #Is the value missing or equal to `nothing`?
+        if (isdefined(:Missings)&&(typeof(val)==Missings.Missing))||(val==nothing)
             push!(bindarr, mysql_bind_init(MYSQL_TYPE_NULL, "NULL"))
         else
             push!(bindarr, mysql_bind_init(typ, val)) #Otherwise
-        end 
+        end
     end
     return bindarr
 end
@@ -333,12 +335,20 @@ Escapes a string using `mysql_real_escape_string()`, returns the escaped string.
 """
 function mysql_escape(hndl::MySQLHandle, str::String)
     output = Vector{UInt8}(length(str)*2 + 1)
-    output_len = mysql_real_escape_string(hndl.mysqlptr, output, str, UInt64(length(str)))
+    output_len = mysql_real_escape_string(hndl.mysqlptr, output, str, Culong(length(str)))
     if output_len == typemax(Cuint)
         throw(MySQLInternalError(hndl))
     end
     return String(output[1:output_len])
 end
+
+"""
+    mysql_subtype(typ::DataType) -> DataType
+
+Convenience function for working with missing values.  If `typ` is of the form `Union{Missings.Missing, T}` it returns `T`, otherwise it returns `typ`.  Not exported.
+"""
+mysql_subtype{T}(typ::Type{Union{Missings.Missing, T}})=T
+mysql_subtype(typ::DataType)=typ
 
 export mysql_options, mysql_connect, mysql_disconnect, mysql_execute,
        mysql_insert_id, mysql_store_result, mysql_metadata, mysql_query,
