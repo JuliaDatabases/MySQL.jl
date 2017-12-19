@@ -1,8 +1,9 @@
-__precompile__()
-
+__precompile__(true)
 module MySQL
     using Compat
     using DataFrames
+    using Missings
+    using Compat.Dates
 
     include("config.jl")
     include("consts.jl")

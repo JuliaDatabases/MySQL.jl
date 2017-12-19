@@ -75,12 +75,12 @@ function mysql_next_result(hndl::MySQLHandle)
 end
 
 for func = (:mysql_field_count, :mysql_error, :mysql_insert_id)
-    eval(quote
+    @eval begin
         function ($func)(hndl::MySQLHandle, args...)
             hndl.mysqlptr == C_NULL && throw(MySQLInterfaceError($(string(func)) * " called with NULL connection."))
             return ($func)(hndl.mysqlptr, args...)
         end
-    end)
+    end
 end
 
 """
@@ -93,14 +93,14 @@ mysql_insert_id
 
 # wrappers to take MySQLHandle as input as well as check for NULL pointer.
 for func = (:mysql_query, :mysql_options)
-    eval(quote
+    @eval begin
         function ($func)(hndl::MySQLHandle, args...)
             hndl.mysqlptr == C_NULL && throw(MySQLInterfaceError($(string(func)) * " called with NULL connection."))
             val = ($func)(hndl.mysqlptr, args...)
             val != 0 && throw(MySQLInternalError(hndl))
             return val
         end
-    end)
+    end
 end
 
 """
@@ -166,7 +166,7 @@ function mysql_execute(hndl, command; opformat=MYSQL_DATA_FRAME)
         else
             throw(MySQLInterfaceError("Query expected to produce results but did not."))
         end
-        
+
         status = mysql_next_result(hndl.mysqlptr)
         if status > 0
             throw(MySQLInternalError(hndl))
@@ -212,12 +212,12 @@ end
 
 for func = (:mysql_stmt_num_rows, :mysql_stmt_affected_rows,
             :mysql_stmt_result_to_dataframe, :mysql_stmt_error)
-    eval(quote
+    @eval begin
         function ($func)(hndl::MySQLHandle, args...)
             hndl.stmtptr == C_NULL && throw(MySQLInterfaceError($(string(func)) * " called with NULL statement handle."))
             return ($func)(hndl.stmtptr, args...)
         end
-    end)
+    end
 end
 
 """
@@ -254,23 +254,23 @@ function mysql_stmt_bind_result(hndl::MySQLHandle, bindarr::Vector{MYSQL_BIND})
 end
 
 for func = (:mysql_stmt_store_result, :mysql_stmt_bind_param)
-    eval(quote
+    @eval begin
         function ($func)(hndl, args...)
             hndl.stmtptr == C_NULL && throw(MySQLInterfaceError($(string(func)) * " called with NULL statement handle."))
             val = ($func)(hndl.stmtptr, args...)
             val != 0 && throw(MySQLStatementError(hndl))
             return val
         end
-    end)
+    end
 end
 
 for func = (:mysql_num_rows, :mysql_fetch_row)
-    eval(quote
+    @eval begin
         function ($func)(hndl, args...)
             hndl.resptr == C_NULL && throw(MySQLInterfaceError($(string(func)) * " called with NULL result set."))
             return ($func)(hndl.resptr, args...)
         end
-    end)
+    end
 end
 
 """
@@ -279,8 +279,14 @@ Get a `MYSQL_BIND` instance given the mysql type `typ` and a `value`.
 mysql_bind_init(typ::MYSQL_TYPE, value) =
     mysql_bind_init(mysql_get_julia_type(typ), typ, value)
 
-mysql_bind_init(jtype::Union{Type{Date}, Type{DateTime}}, typ, value) =
-    MYSQL_BIND([convert(MYSQL_TIME, convert(jtype, value))], typ)
+mysql_bind_init(jtype::Type{Date}, typ, value::Date) =
+    MYSQL_BIND([convert(MYSQL_TIME, value)], typ)
+mysql_bind_init(jtype::Type{Date}, typ, value::String) =
+    MYSQL_BIND([convert(MYSQL_TIME, mysql_date(value))], typ)
+mysql_bind_init(jtype::Type{DateTime}, typ, value::DateTime) =
+    MYSQL_BIND([convert(MYSQL_TIME, value)], typ)
+mysql_bind_init(jtype::Type{DateTime}, typ, value::String) =
+    MYSQL_BIND([convert(MYSQL_TIME, mysql_datetime(value))], typ)
 
 mysql_bind_init(::Type{String}, typ, value) = MYSQL_BIND(value, typ)
 mysql_bind_init(jtype, typ, value) = MYSQL_BIND([convert(jtype, value)], typ)
@@ -295,13 +301,13 @@ Returns an array of `MYSQL_BIND`.
 function mysql_bind_array(typs, params)
     length(typs) != length(params) && throw(MySQLInterfaceError("Length of `typs` and `params` must be same."))
     bindarr = MYSQL_BIND[]
-    for (typ, val) in zip(typs, params)
-        #Is the value one of three different versions of Null?
-        if (isdefined(:DataArrays)&&(typeof(val)==DataArrays.NAtype))||(isdefined(:NullableArrays)&&(typeof(val)<:Nullable)&&(val.isnull))||(val==nothing) 
+    for (typ, val) in zip(typs, params)  
+        #Is the value missing or equal to `nothing`?
+        if ismissing(val) || val === nothing
             push!(bindarr, mysql_bind_init(MYSQL_TYPE_NULL, "NULL"))
         else
             push!(bindarr, mysql_bind_init(typ, val)) #Otherwise
-        end 
+        end
     end
     return bindarr
 end
@@ -332,13 +338,21 @@ end
 Escapes a string using `mysql_real_escape_string()`, returns the escaped string.
 """
 function mysql_escape(hndl::MySQLHandle, str::String)
-    output = Vector{UInt8}(length(str)*2 + 1)
-    output_len = mysql_real_escape_string(hndl.mysqlptr, output, str, UInt64(length(str)))
+    output = Vector{UInt8}(uninitialized, length(str) * 2 + 1)
+    output_len = mysql_real_escape_string(hndl.mysqlptr, output, str, Culong(length(str)))
     if output_len == typemax(Cuint)
         throw(MySQLInternalError(hndl))
     end
     return String(output[1:output_len])
 end
+
+"""
+    mysql_subtype(typ::DataType) -> DataType
+
+Convenience function for working with missing values.  If `typ` is of the form `Union{Missing, T}` it returns `T`, otherwise it returns `typ`.  Not exported.
+"""
+mysql_subtype{T}(typ::Type{Union{Missing, T}})=T
+mysql_subtype(typ::DataType)=typ
 
 export mysql_options, mysql_connect, mysql_disconnect, mysql_execute,
        mysql_insert_id, mysql_store_result, mysql_metadata, mysql_query,

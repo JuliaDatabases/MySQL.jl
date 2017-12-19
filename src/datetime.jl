@@ -5,16 +5,9 @@ import Base.==
 const MYSQL_DATE_FORMAT = Dates.DateFormat("yyyy-mm-dd")
 const MYSQL_DATETIME_FORMAT = Dates.DateFormat("yyyy-mm-dd HH:MM:SS")
 
-function Base.convert(::Type{Date}, datestr::String)
-    Date(datestr, MYSQL_DATE_FORMAT)
-end
-
-function Base.convert(::Type{DateTime}, dtimestr::String)
-    if !contains(dtimestr, " ")
-        dtimestr = "1970-01-01 " * dtimestr
-    end
-    DateTime(dtimestr, MYSQL_DATETIME_FORMAT)
-end
+mysql_date(str) = Dates.Date(str, MYSQL_DATE_FORMAT)
+mysql_datetime(str) = Dates.DateTime(contains(str, " ") ? str : "1970-01-01 " * str, MYSQL_DATETIME_FORMAT)
+export mysql_date, mysql_datetime
 
 function Base.convert(::Type{DateTime}, mtime::MYSQL_TIME)
     if mtime.year == 0 || mtime.month == 0 || mtime.day == 0

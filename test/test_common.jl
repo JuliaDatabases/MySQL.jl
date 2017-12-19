@@ -5,18 +5,19 @@
 # to a julia datastructure.
 
 using DataFrames
+using Missings
 using Compat
 using MySQL
 using Base.Test
 
-import ..HOST, ..USER, ..PASS
+import ..HOST, ..USER, ..PASS, ..PORT
 
 # function run_query_helper(command, msg)
 #     error("API not implemented: `run_query_helper`")
 # end
 
 function connect_as_root()
-    global hndl = mysql_connect(HOST, USER, PASS, "")
+    global hndl = mysql_connect(HOST, USER, PASS, ""; port=parse(Int, PORT))
 end
 
 function create_test_database()
@@ -37,7 +38,7 @@ function grant_test_user_privilege()
 end
 
 function connect_as_test_user()
-    global hndl = mysql_connect(HOST, "test", "test", "mysqltest";
+    global hndl = mysql_connect(HOST, "test", "test", "mysqltest"; port=parse(Int, PORT),
                                 opts=Dict(MYSQL_OPT_RECONNECT => 1))
 end
 
@@ -143,48 +144,10 @@ function run_test()
     mysql_disconnect(hndl)
 end
 
-"""
-A function to check if two dataframes are equal
-"""
-function dfisequal(dfa, dfb)
-    if size(dfa) != size(dfb)
-        return false
-    end
-
-    row, col = size(dfa)
-
-    for i = 1:col
-        for j = 1:row
-            if isna(dfa[col][row]) && isna(dfb[col][row])
-                continue
-            elseif isna(dfa[col][row]) || isna(dfb[col][row])
-                return false
-            elseif dfa[col][row] != dfb[col][row]
-                return false
-            end
-        end
-    end
-
-    return true
-end
-
-@compat function compare_values(u::Nullable, v::Nullable)
-    if !isnull(u) && !isnull(v)
-        return u.value == v.value
-    elseif isnull(u) && isnull(v)
-        return typeof(u) == typeof(v)
-    else
-        println("*** ALERT: Non null value being compared with null.")
-        return false
-    end
-end
-
-compare_values(u, v) = u == v
-
 function compare_rows(rowu, rowv)
     length(rowu) == length(rowv) || return false
     for i = 1:length(rowu)
-        compare_values(rowu[i], rowv[i]) || return false
+        isequal(rowu[i], rowv[i]) || return false
     end
     return true
 end

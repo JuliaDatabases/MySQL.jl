@@ -67,33 +67,32 @@ end
 """
 Get the C type that would be needed when using prepared statement.
 """
-function mysql_get_ctype(jtype::DataType)
-    if (jtype == Date || jtype == DateTime)
-        return MYSQL_TIME
-    end
+function mysql_get_ctype end
+mysql_get_ctype(::Type{<:Dates.TimeType}) = MYSQL_TIME
+mysql_get_ctype(x) = x
 
-    return jtype
-end
+mysql_get_ctype(jltype::Type{Union{Missing, T}}) where {T} = mysql_get_ctype(T)
 
-mysql_get_ctype(mysqltype::MYSQL_TYPE) = 
+mysql_get_ctype(mysqltype::MYSQL_TYPE) =
     mysql_get_ctype(mysql_get_julia_type(mysqltype))
 
 """
 Interpret a string as a julia datatype.
 """
+function mysql_interpret_field end
+
+mysql_interpret_field(strval::String, ::Type{Union{Missing, T}}) where {T} = mysql_interpret_field(strval, T)
+
 mysql_interpret_field(strval::String, ::Type{Cuchar}) = UInt8(strval[1])
 
-mysql_interpret_field{T<:Number}(strval::String, ::Type{T}) =
+mysql_interpret_field(strval::String, ::Type{T}) where {T<:Number} =
     parse(T, strval)
 
-mysql_interpret_field{T<:String}(strval::String, ::Type{T}) =
+mysql_interpret_field(strval::String, ::Type{<:AbstractString}) =
     strval
 
-mysql_interpret_field(strval::String, ::Type{Date}) =
-    convert(Date, strval)
-
-mysql_interpret_field(strval::String, ::Type{DateTime}) =
-    convert(DateTime, strval)
+mysql_interpret_field(strval::String, ::Type{Date}) = mysql_date(strval)
+mysql_interpret_field(strval::String, ::Type{DateTime}) = mysql_datetime(strval)
 
 """
 Load a bytestring from `result` pointer given the field index `idx`.
@@ -125,16 +124,7 @@ Returns an array of MYSQL_TYPE's corresponding to each field in the table.
 """
 function mysql_get_field_types(result::MYSQL_RES)
     mysqlfields = mysql_metadata(result)
-    return mysql_get_field_types(mysqlfields)
-end
-
-function mysql_get_field_types(mysqlfields::Array{MYSQL_FIELD})
-    nfields = length(mysqlfields)
-    mysqlfield_types = Array{MYSQL_TYPE}(nfields)
-    for i = 1:nfields
-        mysqlfield_types[i] = mysqlfields[i].field_type
-    end
-    return mysqlfield_types
+    return map(x->x.field_type, mysqlfields)
 end
 
 """
@@ -151,10 +141,10 @@ function mysql_get_row_as_vector!(result, retvec, jtypes, isnullable)
     for i = 1:length(jtypes)
         strval = mysql_load_string_from_resultptr(result, i)
         if strval == nothing
-            retvec[i] = Nullable{jtypes[i]}()
+            retvec[i] = missing
         else
             val = mysql_interpret_field(strval, jtypes[i])
-            retvec[i] = isnullable[i] ? Nullable(val) : val
+            retvec[i] = val
         end
     end
 end
@@ -167,14 +157,7 @@ end
 """
 Convert a mysql field type array to a julia type array.
 """
-function mysql_get_jtype_array(mysqlfield_types)
-    nfields = length(mysqlfield_types)
-    jtypes = Array{Type}(nfields)
-    for i = 1:nfields
-        jtypes[i] = mysql_get_julia_type(mysqlfield_types[i])
-    end
-    return jtypes
-end
+mysql_get_jtype_array(mysqlfield_types) = map(x->mysql_get_julia_type(x), mysqlfield_types)
 
 """
 Returns true if `field` is nullable (i.e, it is not declared as `NOT NULL`)
@@ -185,15 +168,7 @@ mysql_is_nullable(field) = field.flags & NOT_NULL_FLAG == 0
 Get an array of boolean values indicating whether the column is
  declared as `NULL`(true) or `NOT NULL`(false).
 """
-mysql_get_nullable(result) = mysql_get_nullable(mysql_metadata(result))
-
-function mysql_get_nullable(meta::Array{MYSQL_FIELD})
-    isnullable = Array{Bool}(length(meta))
-    for i = 1:length(meta)
-        isnullable[i] = mysql_is_nullable(meta[i])
-    end
-    return isnullable
-end
+mysql_get_nullable(result) = map(x->mysql_is_nullable(x), mysql_metadata(result))
 
 """
 Get the result as an array with each row as a vector.
@@ -201,24 +176,13 @@ Get the result as an array with each row as a vector.
 function mysql_get_result_as_array(result)
     nrows = mysql_num_rows(result)
     meta = mysql_metadata(result)
-    retarr = Array{Array{Any}}(nrows)
-    for i = 1:nrows
-        retarr[i] = Array{Any}(meta.nfields)
-        mysql_get_row_as_vector!(mysql_fetch_row(result), retarr[i],
-                                 meta.jtypes, meta.is_nullables)
-    end
-    return retarr
+    return [mysql_get_row_as_vector(mysql_fetch_row(result), meta.jtypes, meta.is_nullables) for i = 1:nrows]
 end
 
 function mysql_get_result_as_tuples(result::MySQLResult)
     nrows = mysql_num_rows(result)
     meta = mysql_metadata(result)
-    retarr = Array{Tuple}(nrows)
-    for i = 1:nrows
-        retarr[i] = mysql_get_row_as_tuple(mysql_fetch_row(result), meta.jtypes,
-                                           meta.is_nullables)
-    end
-    return retarr
+    return [mysql_get_row_as_tuple(mysql_fetch_row(result), meta.jtypes, meta.is_nullables) for i = 1:nrows]
 end
 
 """
@@ -228,7 +192,7 @@ function populate_row!(df, nfields, result, row)
     for i = 1:nfields
         strval = mysql_load_string_from_resultptr(result, i)
         if strval == nothing
-            df[row, i] = NA
+            df[row, i] = missing
         else
             df[row, i] = mysql_interpret_field(strval, eltype(df[i]))
         end
@@ -281,11 +245,11 @@ Populate a row in the dataframe `df` indexed by `row` given the number of
 function stmt_populate_row!(df, row_index, bindarr)
     for i = 1:length(bindarr)
         if bindarr[i].is_null_value != 0
-            df[row_index, i] = NA
-            continue
-        end
-        df[row_index, i] = mysql_binary_interpret_field(bindarr[i].buffer,
+            df[row_index, i] = missing
+        else
+            df[row_index, i] = mysql_binary_interpret_field(bindarr[i].buffer,
                                                         convert(MYSQL_TYPE, bindarr[i].buffer_type))
+        end
     end
 end
 
@@ -293,7 +257,7 @@ end
 Get a bind array for binding to results.
 """
 function mysql_bind_array(meta::MySQLMetadata)
-    bindarr = Array{MYSQL_BIND}(meta.nfields)
+    bindarr = Vector{MYSQL_BIND}(uninitialized, meta.nfields)
     for i in 1:meta.nfields
         bufflen = zero(Culong)
         bindbuff = C_NULL
@@ -330,8 +294,10 @@ Initialize a dataframe for prepared statement results.
 """
 mysql_init_dataframe(meta::Array{MYSQL_FIELD}, nrows) =
     mysql_init_dataframe(MySQLMetadata(meta), nrows)
-mysql_init_dataframe(meta, nrows) =
-    DataFrame(meta.jtypes, map(Symbol, meta.names), Int64(nrows))
+
+function mysql_init_dataframe(meta, nrows)
+    df = DataFrame(meta.jtypes, map(Symbol, meta.names), Int64(nrows))
+end
 
 function mysql_result_to_dataframe(hndl::MySQLHandle)
     meta = mysql_metadata(hndl.stmtptr)
@@ -365,11 +331,11 @@ function mysql_get_row_as_tuple(bindarr::Vector{MYSQL_BIND}, jtypes, isnullable)
     vec = Array{Any}(length(bindarr))
     for i = 1:length(bindarr)
         if bindarr[i].is_null_value != 0
-            vec[i] = Nullable{jtypes[i]}()
+            vec[i] = missing
         else
             val = mysql_binary_interpret_field(bindarr[i].buffer,
                                                convert(MYSQL_TYPE, bindarr[i].buffer_type))
-            vec[i] = isnullable[i] ? Nullable(val) : val
+            vec[i] = val
         end
     end
     return tuple(vec...)
