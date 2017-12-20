@@ -22,6 +22,8 @@ after_success:
 before_script:
   - export OLD_PATH=$LD_LIBRARY_PATH
   - export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:`mysql_config --libs | cut -d ' ' -f1 | sed 's/-L//'`
+  - sudo ln -s /usr/local/mysql/lib/libmysqlclient.* /usr/local/lib/libmysqlclient.*
+
 after_script:
   - export LD_LIBRARY_PATH=$OLD_PATH
   - unset OLD_PATH
