@@ -1,257 +1,128 @@
-const MEM_ROOT = Ptr{Void}
-const LIST = Ptr{Void}
-const MYSQL_DATA = Ptr{Void}
-const MYSQL_RES = Ptr{Void}
-const MYSQL_ROW = Ptr{Ptr{Cchar}}  # pointer to an array of strings
-const MYSQL_TYPE = UInt32
 
-"""
-The field object that contains the metadata of the table. 
-Returned by mysql_fetch_fields API.
-"""
-struct MYSQL_FIELD
-    name :: Ptr{Cchar}             ##  Name of column
-    org_name :: Ptr{Cchar}         ##  Original column name, if an alias
-    table :: Ptr{Cchar}            ##  Table of column if column was a field
-    org_table :: Ptr{Cchar}        ##  Org table name, if table was an alias
-    db :: Ptr{Cchar}               ##  Database for table
-    catalog :: Ptr{Cchar}          ##  Catalog for table
-    def :: Ptr{Cchar}              ##  Default value (set by mysql_list_fields)
-    field_length :: Clong          ##  Width of column (create length)
-    max_length :: Clong            ##  Max width for selected set
-    name_length :: Cuint
-    org_name_length :: Cuint
-    table_length :: Cuint
-    org_table_length :: Cuint
-    db_length :: Cuint
-    catalog_length :: Cuint
-    def_length :: Cuint
-    flags :: Cuint                 ##  Div flags
-    decimals :: Cuint              ##  Number of decimals in field
-    charsetnr :: Cuint             ##  Character set
-    field_type :: Cuint            ##  Type of field. See mysql_com.h for types
-    extension :: Ptr{Void}
-end
-
-"""
-Type mirroring MYSQL_TIME C struct.
-"""
-struct MYSQL_TIME
-    year::Cuint
-    month::Cuint
-    day::Cuint
-    hour::Cuint
-    minute::Cuint
-    second::Cuint
-    second_part::Culong
-    neg::Cchar
-    timetype::Cuint
-end
-
-"""
-Mirror to MYSQL_BIND struct in mysql_bind.h
-"""
-struct MYSQL_BIND
-    length::Ptr{Culong}
-    is_null::Ptr{Cchar}
-    buffer::Ptr{Void}
-    error::Ptr{Cchar}
-    row_ptr::Ptr{Cuchar}
-    store_param_func ::Ptr{Void}
-    fetch_result ::Ptr{Void}
-    skip_result ::Ptr{Void}
-    buffer_length::Culong 
-    offset::Culong 
-    length_value::Culong
-    param_number :: Cuint
-    pack_length :: Cuint
-    buffer_type :: Cint
-    error_value :: Cchar
-    is_unsigned :: Cchar
-    long_data_used :: Cchar
-    is_null_value :: Cchar
-    extension :: Ptr{Void}
-
-    function MYSQL_BIND(buff::Ptr{Void}, bufflen, bufftype)
-        new(0, 0, buff, C_NULL, C_NULL, 0, 0, 0, convert(Culong, bufflen),
-            0, 0, 0, 0, bufftype, 0, 0, 0, 0, C_NULL)
-    end
-
-    function MYSQL_BIND(arr::Array, bufftype)
-        MYSQL_BIND(convert(Ptr{Void}, pointer(arr)), sizeof(arr), bufftype)
-    end
-
-    function MYSQL_BIND(str::String, bufftype)
-        MYSQL_BIND(convert(Ptr{Void}, pointer(str)), sizeof(str), bufftype)
-    end
-end
-
-"""
-Mirror to MYSQL_ROWS struct in mysql.h
-"""
-struct MYSQL_ROWS
-    next::Ptr{MYSQL_ROWS}
-    data::MYSQL_ROW
-    length::Culong
-end
-
-"""
-Mirror to MYSQL_STMT struct in mysql.h
-"""
-struct MYSQL_STMT # This is different in mariadb header file.
-    mem_root::MEM_ROOT
-    list::LIST
-    mysql::Ptr{Void}
-    params::MYSQL_BIND
-    bind::MYSQL_BIND
-    fields::MYSQL_FIELD
-    result::MYSQL_DATA
-    data_cursor::MYSQL_ROWS
-
-    affected_rows::Culonglong
-    insert_id::Culonglong
-    stmt_id::Culong
-    flags::Culong
-    prefetch_rows::Culong
-
-    server_status::Cuint
-    last_errno::Cuint
-    param_count::Cuint
-    field_count::Cuint
-    state::Cuint
-    last_error::Ptr{Cchar}
-    sqlstate::Ptr{Cchar}
-    send_types_to_server::Cint
-    bind_param_done::Cint
-    bind_result_done::Cuchar
-    unbuffered_fetch_cancelled::Cint
-    update_max_length::Cint
-    extension::Ptr{Cuchar}
-end
-
-"""
-The MySQL handle.
-"""
-mutable struct MySQLHandle
-    mysqlptr::Ptr{Void}
+mutable struct Connection
+    ptr::Ptr{Void}
     host::String
+    port::String
     user::String
     db::String
-    stmtptr::Ptr{MYSQL_STMT}
 end
+const MySQLHandle = Connection
+export MySQLHandle
 
-function Base.show(io::IO, hndl::MySQLHandle)
-    if hndl.mysqlptr == C_NULL
-        print(io, "Null MySQL Handle")
+function Base.show(io::IO, hndl::Connection)
+    if hndl.ptr == C_NULL
+        print(io, "Null MySQL Connection")
     else
-        print(io, """MySQL Handle
+        print(io, """MySQL Connection
 ------------
 Host: $(hndl.host)
+Port: $(hndl.port)
 User: $(hndl.user)
 DB:   $(hndl.db)
 """)
     end
 end
 
-mutable struct MySQLResult
-    con::MySQLHandle
-    resptr::MYSQL_RES
-    function MySQLResult(hndl, resptr)
-        res = new(hndl, C_NULL)
-        res.resptr = resptr
-        finalizer(res, x -> mysql_free_result(x.resptr))
+struct MySQLInternalError <: MySQLError
+    ptr::Ptr{Void}
+    MySQLInternalError(con::Connection) = new(con.ptr)
+    MySQLInternalError(ptr) = new(ptr)
+end
+Base.showerror(io::IO, e::MySQLInternalError) = print(io, unsafe_string(API.mysql_error(e.ptr)))
+
+mutable struct Result
+    ptr
+    function Result(ptr)
+        res = new(ptr)
+        if ptr != C_NULL
+            @compat finalizer(API.mysql_free_result, res)
+        end
         return res
     end
 end
 
-"""
-Iterator for the mysql result.
-"""
-mutable struct MySQLRowIterator
-    result::MySQLResult
-    jtypes::Vector{Type}
-    is_nullables::Vector{Bool}
-    rowsleft::Int64
+function metadata(result::API.MYSQL_RES)
+    nfields = API.mysql_num_fields(result)
+    rawfields = API.mysql_fetch_fields(result)
+    return unsafe_wrap(Array, rawfields, nfields)
+end
+
+mutable struct Query{hasresult, names, T}
+    result::Result
+    ptr::Ptr{Ptr{Int8}}
+    ncols::Int
+    nrows::Int
+end
+
+function julia_type(field_type, nullable)
+    T = API.julia_type(field_type)
+    return nullable ? Union{Missing, T} : T
+end
+
+function MySQLRowIterator(args...)
+    throw(ArgumentError("`MySQLRowIterator` is deprecated, use `Data.rows(MySQL.Query(conn, sql))` to get a NamedTuple row iterator for a query resultset"))
 end
 
 """
-Iterator for prepared statement results.
+    MySQL.Query(conn, sql, sink=Data.Table; append::Bool=false) => MySQL.Query
+
+execute an sql statement and return a `MySQL.Query` object. Result rows can be iterated as NamedTuples via `Data.rows(query)` where `query` is the `MySQL.Query` object. Results can also be streamed to any valid `Data.Sink` via `Data.stream!(query, sink)`.
 """
-mutable struct MySQLStatementIterator
-    hndl::MySQLHandle
-    jtypes::Vector{Type}
-    is_nullables::Vector{Bool}
-    binding::Vector{MYSQL_BIND}
+function Query(conn::Connection, sql::String; kwargs...)
+    conn.ptr == C_NULL && throw(MySQLInterfaceError("Method called with null connection."))
+    MySQL.API.mysql_query(conn.ptr, sql) != 0 && throw(MySQLInternalError(conn))
+    result = MySQL.Result(MySQL.API.mysql_store_result(conn.ptr))
+    if result.ptr != C_NULL
+        nrows = MySQL.API.mysql_num_rows(result.ptr)
+        fields = MySQL.metadata(result.ptr)
+        names = Tuple(ccall(:jl_symbol_n, Ref{Symbol}, (Ptr{UInt8}, Int), x.name, x.name_length) for x in fields)
+        T = Tuple{(julia_type(x.field_type, API.nullable(x)) for x in fields)...}
+        hasresult = true
+        ncols = length(fields)
+        ptr = MySQL.API.mysql_fetch_row(result.ptr)
+    elseif API.mysql_field_count(conn.ptr) == 0
+        result = Result(Int(API.mysql_affected_rows(conn.ptr)))
+        nrows = ncols = 1
+        names = (:num_rows_affected,)
+        T = Tuple{Int}
+        hasresult = false
+        ptr = C_NULL
+    else
+        throw(MySQLInterfaceError("Query expected to produce results but did not."))
+    end
+    return Query{hasresult, names, T}(result, ptr, ncols, nrows)
 end
 
-abstract type MySQLError end
-
-# For errors that happen in the MySQL C connector
-mutable struct MySQLInternalError <: MySQLError
-    con::Ptr{Void}
-
-    function MySQLInternalError(con::MySQLHandle)
-        new(con.mysqlptr)
-    end
-
-    function MySQLInternalError(ptr)
-        new(ptr)
-    end
+function Data.schema(rt::Query{hasresult, names, T}) where {hasresult, names, T}
+    return Data.Schema(Type[A for A in T.parameters],
+                        collect(map(string, names)), rt.nrows)
 end
+Data.isdone(source::Query, row, col) = row > source.nrows
+Data.streamtype(::Type{Query}, ::Type{Data.Field}) = true
 
-Base.showerror(io::IO, e::MySQLInternalError) = print(io, unsafe_string(mysql_error(e.con)))
+cast(str, ::Type{Union{Missing, T}}) where {T} = cast(str, T)
+cast(str, ::Type{API.Bit}) = API.Bit(isempty(str) ? 0 : UInt64(str[1]))
+cast(str, ::Type{T}) where {T<:Number} = parse(T, str)
+cast(str, ::Type{Vector{UInt8}}) = Vector{UInt8}(str)
+cast(str, ::Type{<:AbstractString}) = str
+cast(str, ::Type{Time}) = mysql_time(str)
+cast(str, ::Type{Date}) = mysql_date(str)
+cast(str, ::Type{DateTime}) = mysql_datetime(str)
 
-# Internal errors that happen when using prepared statements
-mutable struct MySQLStatementError <: MySQLError
-    stmt::Ptr{MYSQL_STMT}
-
-    function MySQLStatementError(hndl::MySQLHandle)
-        new(hndl.stmtptr)
-    end
-
-    function MySQLStatementError(ptr)
-        new(ptr)
-    end
-end
-
-Base.showerror(io::IO, e::MySQLStatementError) =
-    print(io, unsafe_string(mysql_stmt_error(e.stmt)))
-
-# For errors that happen in MySQL.jl
-mutable struct MySQLInterfaceError <: MySQLError
-    msg::String
-end
-
-Base.showerror(io::IO, e::MySQLInterfaceError) = print(io, e.msg)
-
-mutable struct MySQLMetadata
-    names::Vector{String}
-    mtypes::Vector{MYSQL_TYPE}
-    jtypes::Vector{Type}
-    lens::Vector{Int}
-    is_nullables::Vector{Bool}
-    nfields::Int
-
-    function MySQLMetadata(fields::Vector{MYSQL_FIELD})
-        nfields = length(fields)
-        names = Array{String}(nfields)
-        mtypes = Array{MYSQL_TYPE}(nfields)
-        jtypes = Array{Type}(nfields)
-        lens = Array{Int}(nfields)
-        is_nullables = Array{Bool}(nfields)
-        for i in 1:nfields
-            names[i] = unsafe_string(fields[i].name)
-            mtypes[i] = fields[i].field_type
-            is_nullable = mysql_is_nullable(fields[i])
-            is_nullables[i] = is_nullable
-            T = mysql_get_julia_type(fields[i].field_type)
-            jtypes[i] = is_nullable ? Union{Missing, T} : T
-            lens[i] = fields[i].field_length
+@inline function Data.streamfrom(source::Query{hasresult}, ::Type{Data.Field}, ::Type{T}, row, col) where {hasresult, T}
+    if !hasresult
+        return T(source.result.ptr)
+    else
+        deref = unsafe_load(source.ptr, col)
+        if deref == C_NULL
+            val = missing
+        else
+            val = cast(unsafe_string(deref), T)
         end
-        new(names, mtypes, jtypes, lens, is_nullables, nfields)
+        if col >= source.ncols
+            source.ptr = API.mysql_fetch_row(source.result.ptr)
+        end
     end
+    return val
 end
-
-export MySQLHandle, MySQLResult, MySQLRowIterator,
-       MySQLInternalError, MySQLStatementError,
-       MySQLInterfaceError, MySQLMetadata, MySQLStatementIterator
+Data.accesspattern(::Query) = Data.RandomAccess()
