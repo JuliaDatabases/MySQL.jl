@@ -21,7 +21,7 @@ end
 
 const conn = MySQL.connect("127.0.0.1", "root", ""; port=3306)
 
-MySQL.execute!(conn, "DROP DATABASE mysqltest")
+MySQL.execute!(conn, "DROP DATABASE if exists mysqltest")
 MySQL.execute!(conn, "CREATE DATABASE mysqltest")
 MySQL.execute!(conn, "use mysqltest")
 MySQL.execute!(conn, """CREATE TABLE Employee
