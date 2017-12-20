@@ -27,33 +27,78 @@ const MYSQL_TYPE_VAR_STRING  = UInt32(253)
 const MYSQL_TYPE_STRING      = UInt32(254)
 const MYSQL_TYPE_GEOMETRY    = UInt32(255)
 
-export MYSQL_TYPE_DECIMAL,
-       MYSQL_TYPE_TINY,
-       MYSQL_TYPE_SHORT,
-       MYSQL_TYPE_LONG,
-       MYSQL_TYPE_FLOAT,
-       MYSQL_TYPE_DOUBLE,
-       MYSQL_TYPE_NULL,
-       MYSQL_TYPE_TIMESTAMP,
-       MYSQL_TYPE_LONGLONG,
-       MYSQL_TYPE_INT24,
-       MYSQL_TYPE_DATE,
-       MYSQL_TYPE_TIME,
-       MYSQL_TYPE_DATETIME,
-       MYSQL_TYPE_YEAR,
-       MYSQL_TYPE_NEWDATE,
-       MYSQL_TYPE_VARCHAR,
-       MYSQL_TYPE_BIT,
-       MYSQL_TYPE_NEWDECIMAL,
-       MYSQL_TYPE_ENUM,
-       MYSQL_TYPE_SET,
-       MYSQL_TYPE_TINY_BLOB,
-       MYSQL_TYPE_MEDIUM_BLOB,
-       MYSQL_TYPE_LONG_BLOB,
-       MYSQL_TYPE_BLOB,
-       MYSQL_TYPE_VAR_STRING,
-       MYSQL_TYPE_STRING,
-       MYSQL_TYPE_GEOMETRY
+if length(methods(Base.bitstring)) == 1
+    bitstring(x) = bits(x)
+end
+
+struct Bit
+    bits::UInt64
+end
+Base.show(io::IO, b::Bit) = print(io, "MySQL.API.Bit(\"$(lstrip(bitstring(b.bits), '0'))\")")
+
+mysql_type(::Type{Bit}) = MYSQL_TYPE_BIT
+mysql_type(::Type{Cchar}) = MYSQL_TYPE_TINY
+mysql_type(::Type{Cshort}) = MYSQL_TYPE_SHORT
+mysql_type(::Type{Cint}) = MYSQL_TYPE_LONG
+mysql_type(::Type{Int64}) = MYSQL_TYPE_LONGLONG
+mysql_type(::Type{Cfloat}) = MYSQL_TYPE_FLOAT
+mysql_type(::Type{Dec64}) = MYSQL_TYPE_DECIMAL
+mysql_type(::Type{Cdouble}) = MYSQL_TYPE_DOUBLE
+mysql_type(::Type{Vector{UInt8}}) = MYSQL_TYPE_BLOB
+mysql_type(::Type{DateTime}) = MYSQL_TYPE_TIMESTAMP
+mysql_type(::Type{Date}) = MYSQL_TYPE_DATE
+mysql_type(::Type{Dates.Time}) = MYSQL_TYPE_TIME
+mysql_type(::Type{Missing}) = MYSQL_TYPE_NULL
+mysql_type(::Type{Void}) = MYSQL_TYPE_NULL
+mysql_type(::Type{T}) where {T} = MYSQL_TYPE_VARCHAR
+mysql_type(x) = mysql_type(typeof(x))
+
+function julia_type(mysqltype)
+    if mysqltype == API.MYSQL_TYPE_BIT
+        return Bit
+    elseif mysqltype == API.MYSQL_TYPE_TINY ||
+            mysqltype == API.MYSQL_TYPE_ENUM
+        return Cchar
+    elseif mysqltype == API.MYSQL_TYPE_SHORT
+        return Cshort
+    elseif mysqltype == API.MYSQL_TYPE_LONG ||
+            mysqltype == API.MYSQL_TYPE_INT24
+        return Cint
+    elseif mysqltype == API.MYSQL_TYPE_LONGLONG
+        return Int64
+    elseif mysqltype == API.MYSQL_TYPE_FLOAT
+        return Cfloat
+    elseif mysqltype == API.MYSQL_TYPE_DECIMAL ||
+           mysqltype == API.MYSQL_TYPE_NEWDECIMAL
+        return Dec64
+    elseif mysqltype == API.MYSQL_TYPE_DOUBLE
+        return Cdouble
+    elseif mysqltype == API.MYSQL_TYPE_TINY_BLOB ||
+           mysqltype == API.MYSQL_TYPE_MEDIUM_BLOB ||
+           mysqltype == API.MYSQL_TYPE_LONG_BLOB ||
+           mysqltype == API.MYSQL_TYPE_BLOB ||
+           mysqltype == API.MYSQL_TYPE_GEOMETRY
+        return Vector{UInt8}
+    elseif mysqltype == API.MYSQL_TYPE_YEAR
+        return Clong
+    elseif mysqltype == API.MYSQL_TYPE_TIMESTAMP
+        return DateTime
+    elseif mysqltype == API.MYSQL_TYPE_DATE
+        return Date
+    elseif mysqltype == API.MYSQL_TYPE_TIME
+        return Dates.Time
+    elseif mysqltype == API.MYSQL_TYPE_DATETIME
+        return DateTime
+    elseif mysqltype == API.MYSQL_TYPE_SET ||
+           mysqltype == API.MYSQL_TYPE_NULL ||
+           mysqltype == API.MYSQL_TYPE_VARCHAR ||
+           mysqltype == API.MYSQL_TYPE_VAR_STRING ||
+           mysqltype == API.MYSQL_TYPE_STRING
+        return String
+    else
+        return String
+    end
+end
 
 # Constant indicating whether multiple statements in queries should be supported.
 const CLIENT_MULTI_STATEMENTS = UInt32( unsigned(1) << 16)
@@ -98,49 +143,8 @@ const MYSQL_SERVER_PUBLIC_KEY = UInt32(35)
 const MYSQL_ENABLE_CLEARTEXT_PLUGIN = UInt32(36)
 const MYSQL_OPT_CAN_HANDLE_EXPIRED_PASSWORDS = UInt32(37)
 
-export MYSQL_OPT_CONNECT_TIMEOUT,
-       MYSQL_OPT_COMPRESS,
-       MYSQL_OPT_NAMED_PIPE,
-       MYSQL_INIT_COMMAND,
-       MYSQL_READ_DEFAULT_FILE,
-       MYSQL_READ_DEFAULT_GROUP,
-       MYSQL_SET_CHARSET_DIR,
-       MYSQL_SET_CHARSET_NAME,
-       MYSQL_OPT_LOCAL_INFILE,
-       MYSQL_OPT_PROTOCOL,
-       MYSQL_SHARED_MEMORY_BASE_NAME,
-       MYSQL_OPT_READ_TIMEOUT,
-       MYSQL_OPT_WRITE_TIMEOUT,
-       MYSQL_OPT_USE_RESULT,
-       MYSQL_OPT_USE_REMOTE_CONNECTION,
-       MYSQL_OPT_USE_EMBEDDED_CONNECTION,
-       MYSQL_OPT_GUESS_CONNECTION,
-       MYSQL_SET_CLIENT_IP,
-       MYSQL_SECURE_AUTH,
-       MYSQL_REPORT_DATA_TRUNCATION,
-       MYSQL_OPT_RECONNECT,
-       MYSQL_OPT_SSL_VERIFY_SERVER_CERT,
-       MYSQL_PLUGIN_DIR,
-       MYSQL_DEFAULT_AUTH,
-       MYSQL_OPT_BIND,
-       MYSQL_OPT_SSL_KEY,
-       MYSQL_OPT_SSL_CERT,
-       MYSQL_OPT_SSL_CA,
-       MYSQL_OPT_SSL_CAPATH,
-       MYSQL_OPT_SSL_CIPHER,
-       MYSQL_OPT_SSL_CRL,
-       MYSQL_OPT_SSL_CRLPATH,
-       MYSQL_OPT_CONNECT_ATTR_RESET,
-       MYSQL_OPT_CONNECT_ATTR_ADD,
-       MYSQL_OPT_CONNECT_ATTR_DELETE,
-       MYSQL_SERVER_PUBLIC_KEY,
-       MYSQL_ENABLE_CLEARTEXT_PLUGIN,
-       MYSQL_OPT_CAN_HANDLE_EXPIRED_PASSWORDS
-
-
 const MYSQL_DATA_FRAME = 0
 const MYSQL_TUPLES = 1
-
 export MYSQL_DATA_FRAME, MYSQL_TUPLES
 
 const MYSQL_TIMESTAMP_DATE     = 0
@@ -148,12 +152,13 @@ const MYSQL_TIMESTAMP_DATETIME = 1
 const MYSQL_TIMESTAMP_TIME     = 2
 
 const NOT_NULL_FLAG = UInt32(1)
+const UNSIGNED_FLAG = UInt32(32)
 const MYSQL_NO_DATA = 100
 
 const MYSQL_DEFAULT_PORT = 3306
 
 if Compat.Sys.iswindows()
-	MYSQL_DEFAULT_SOCKET = "MySQL"
+	const MYSQL_DEFAULT_SOCKET = "MySQL"
 else
-	MYSQL_DEFAULT_SOCKET = "/tmp/mysql.sock"
+	const MYSQL_DEFAULT_SOCKET = "/tmp/mysql.sock"
 end
