@@ -50,7 +50,7 @@ MySQL.execute!(conn, """INSERT INTO Employee (Name, Salary, JoinDate, LastLogin,
 id = MySQL.insertid(conn)
 println("Last insert id was $id")
 
-res = MySQL.query(conn, "select * from employee")
+res = MySQL.query(conn, "select * from Employee")
 
 @test length(res) == 10
 @test length(res[1]) == 4
@@ -74,14 +74,14 @@ expected = @NT(
 # insert null row
 MySQL.execute!(conn, "INSERT INTO Employee () VALUES ();")
 
-res = MySQL.query(conn, "select * from employee")
+res = MySQL.query(conn, "select * from Employee")
 
 foreach(x->push!(x[2], x[1] == 1 ? Int32(5) : missing), enumerate(expected))
 if isdefined(Core, :NamedTuple)
 @test isequal(res, expected)
 end
 
-q = MySQL.Query(conn, "select * from employee")
+q = MySQL.Query(conn, "select * from Employee")
 for row in Data.rows(q)
     println(row)
 end
@@ -91,12 +91,12 @@ end
 stmt = MySQL.Stmt(conn, "UPDATE Employee SET Salary = ? WHERE ID > ?;")
 affrows = MySQL.execute!(stmt, [25000, 2])
 
-res = MySQL.query(conn, "select Salary from employee")
+res = MySQL.query(conn, "select Salary from Employee")
 @test all(res[1][3:end] .== 25000)
 
 affrows = MySQL.execute!(stmt, [missing, 2])
 
-res = MySQL.query(conn, "select Salary from employee")
+res = MySQL.query(conn, "select Salary from Employee")
 @test all(res[1][3:end] .=== missing)
 
 stmt = MySQL.Stmt(conn, "INSERT INTO Employee (Name, Salary, JoinDate, LastLogin, LunchTime, OfficeNo, empno) VALUES (?, ?, ?, ?, ?, ?, ?);")
@@ -108,6 +108,6 @@ values = [@NT(Name="John", Salary=10000.50, JoinDate=Date("2015-8-3"), LastLogin
 
 Data.stream!(values, stmt)
 
-res = MySQL.query(conn, "select * from employee")
+res = MySQL.query(conn, "select * from Employee")
 @test length(res) == 10
 @test length(res[1]) == 9
