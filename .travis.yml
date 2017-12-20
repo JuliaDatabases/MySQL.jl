@@ -1,14 +1,15 @@
 # Documentation: http://docs.travis-ci.com/user/languages/julia/
 language: julia
-services:
-  - mysql
-os:
-  - linux
-  - os: osx
-    osx_image: xcode9
-    before_install:
-      - brew install mariadb
-      - mysql.server start
+
+matrix:
+  include:
+    - os: linux
+      service: mysql
+    - os: osx
+      osx_image: xcode9
+      before_install:
+        - brew install mysql
+        - mysql.server start
 
 julia:
   - 0.6
@@ -27,7 +28,6 @@ after_success:
 before_script:
   - export OLD_PATH=$LD_LIBRARY_PATH
   - export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:`mysql_config --libs | cut -d ' ' -f1 | sed 's/-L//'`
-  - if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then brew install mariadb          ; fi
 
 
 after_script:
