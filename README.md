@@ -1,133 +1,98 @@
-MySQL.jl
-======
 
-[![Build Status](https://travis-ci.org/JuliaDB/MySQL.jl.svg?branch=master)](https://travis-ci.org/JuliaDB/MySQL.jl)
+# MySQL
 
-Julia bindings and helper functions for [MariaDB](https://mariadb.org/)/MySQL C library.
+*Package for interfacing with MySQL databases from Julia*
 
-# Installation
+| **PackageEvaluator**                                            | **Build Status**                                                                                |
+|:---------------------------------------------------------------:|:-----------------------------------------------------------------------------------------------:|
+|[![][pkg-0.6-img]][pkg-0.6-url] | [![][travis-img]][travis-url] [![][codecov-img]][codecov-url] |
 
-Install [MySQL](http://dev.mysql.com/doc/refman/5.7/en/installing.html).
 
-Then in the julia prompt enter:
-```julia
-Pkg.add("MySQL")
-```
+## Installation
 
-# Examples
-
-The following example connects to a database, creates a table, inserts values,
- retrieves the results and disconnects:
+The package is registered in `METADATA.jl` and so can be installed with `Pkg.add`.
 
 ```julia
-using MySQL
-con = mysql_connect("192.168.23.24", "username", "password", "db_name")
-command = """CREATE TABLE Employee
-             (
-                 ID INT NOT NULL AUTO_INCREMENT,
-                 Name VARCHAR(255),
-                 Salary FLOAT,
-                 JoinDate DATE,
-                 PRIMARY KEY (ID)
-             );"""
-mysql_execute(con, command)
-
-# Insert some values
-mysql_execute(con, "INSERT INTO Employee (Name, Salary, JoinDate) values ('John', 25000.00, '2015-12-12'), ('Sam', 35000.00, '2012-8-17'), ('Tom', 50000.00, '2013-12-14');")
-
-# Get SELECT results
-command = "SELECT * FROM Employee;"
-dframe = mysql_execute(con, command)
-
-# Close connection
-mysql_disconnect(con)
+julia> Pkg.add("MySQL")
 ```
 
-## Getting the result set
+## Project Status
 
-By default, `mysql_execute` returns a DataFrame.  To obtain each row as a tuple use `mysql_execute(con, command; opformat=MYSQL_TUPLES)`.  The same can also be done with the `MySQLRowIterator`, example:
+The package is tested against the current Julia `0.6` release and nightly on Linux and OS X.
+
+## Contributing and Questions
+
+Contributions are very welcome, as are feature requests and suggestions. Please open an
+[issue][issues-url] if you encounter any problems or would just like to ask a question.
+
+
+<!-- [docs-latest-img]: https://img.shields.io/badge/docs-latest-blue.svg
+[docs-latest-url]: https://JuliaData.github.io/MySQL.jl/latest -->
+
+[docs-stable-img]: https://img.shields.io/badge/docs-stable-blue.svg
+[docs-stable-url]: https://JuliaData.github.io/MySQL.jl/stable
+
+[travis-img]: https://travis-ci.org/JuliaData/MySQL.jl.svg?branch=master
+[travis-url]: https://travis-ci.org/JuliaData/MySQL.jl
+
+[codecov-img]: https://codecov.io/gh/JuliaData/MySQL.jl/branch/master/graph/badge.svg
+[codecov-url]: https://codecov.io/gh/JuliaData/MySQL.jl
+
+[issues-url]: https://github.com/JuliaData/MySQL.jl/issues
+
+[pkg-0.6-img]: http://pkg.julialang.org/badges/MySQL_0.6.svg
+[pkg-0.6-url]: http://pkg.julialang.org/?pkg=MySQL
+
+## Documentation
 
 ```julia
-for row in MySQLRowIterator(con, command)
-    # do stuff with row
-end
+MySQL.connect(host::String, user::String, passwd::String; db::String = "", port = "3306", socket::String = MySQL.API.MYSQL_DEFAULT_SOCKET, opts = Dict())
 ```
-
-# Extended example: Prepared Statements
-
-Prepared statements are used to optimize queries.  Queries that are run repeatedly can be
- prepared once and then executed many times.  The query can take parameters, these are
- indicated by '?'s. Using the `mysql_stmt_bind_param` the values can be bound to the query.
- An Example:
+Connect to a mysql database, returns a `MySQL.Connection` object to be passed to other API functions
 
 ```julia
-mysql_stmt_prepare(conn, "INSERT INTO Employee (Name, Salary, JoinDate) values (?, ?, ?);")
-
-values = [("John", 10000.50, "2015-8-3"),
-          ("Tom", 20000.25, "2015-8-4"),
-          ("Jim", 30000.00, "2015-6-2")]
-
-for val in values
-    mysql_execute(conn, [MYSQL_TYPE_VARCHAR, MYSQL_TYPE_FLOAT, MYSQL_TYPE_DATE], val)
-end
-
-mysql_stmt_prepare(conn, "SELECT * from Employee WHERE ID = ? AND Salary > ?")
-dframe = mysql_execute(conn, [MYSQL_TYPE_LONG, MYSQL_TYPE_FLOAT], [5, 35000.00])
-
-# To iterate over the result and get each row as a tuple
-for row in MySQLRowIterator(conn, [MYSQL_TYPE_LONG, MYSQL_TYPE_FLOAT], [5, 35000.00])
-    # do stuff with row
-end
+MySQL.disconnect(conn::MySQL.Connection)
 ```
-
-# Metadata
+Disconnect a `MySQL.Connection` object from the remote database:
 
 ```julia
-mysql_query(con, "SELECT * FROM some_table;")
-result = mysql_store_result(con)          # result set can be used later to retrieve values.
-meta = mysql_metadata(result)
-for i in 1:meta.nfields
-    println("Field name is: ", meta.names[i])
-    println("Field length is: ", meta.lens[i])
-    println("MySQL type is: ", meta.mtypes[i])
-    println("Julia type is: ", meta.jtypes[i])
-    println("Is nullable: ", meta.is_nullables[i])
-end
+MYSQL.insertid(conn::Connection)
+```
+Get the insert id of the most recently executed SQL statement:
+
+```julia
+MySQL.escape(conn::MySQL.Connection, str::String) -> String
+```
+Escape an SQL statement
+
+```julia
+MySQL.execute!(conn, sql) => # of affected rows
+```
+Execute an SQL statement without returning results (useful for DDL statements, update, delete, etc.)
+
+```julia
+MySQL.query(conn, sql, sink=Data.Table; append::Bool=false) => sink
+```
+Execute an SQL statement and return the results in `sink`, which can be any valid `Data.Sink` (interface from DataStreams.jl). By default, a NamedTuple of Vectors are returned.
+
+Passing `append=true` as a keyword argument will cause the resultset to be _appended_ to the sink instead of replacing.
+
+```julia
+MySQL.Query(conn, sql, sink=Data.Table; append::Bool=false) => MySQL.Query
+```
+execute an sql statement and return a `MySQL.Query` object. Result rows can be iterated as NamedTuples via `Data.rows(query)` where `query` is the `MySQL.Query` object. Results can also be streamed to any valid `Data.Sink` via `Data.stream!(query, sink)`.
+
+```julia
+MySQL.Stmt(conn, sql) => MySQL.Stmt
+```
+Prepare an SQL statement that may contain `?` parameter placeholders.
+
+A `MySQL.Stmt` may then be executed by calling `MySQL.execute!(stmt, params)` where `params` are the values to be bound to the `?` placeholders in the original SQL statement. Params must be provided for every `?` and will be matched in the same order they appeared in the original SQL statement.
+
+Bulk statement execution can be accomplished by "streaming" a param source like:
+
+```julia
+Data.stream!(source, stmt)
 ```
 
-The same function `mysql_metadata` can be called for prepared statements with the statement
- handle as the argument after preparing the query.
-
-# Multi-Query
-
-`mysql_execute` handles multi-query.  It returns an array of DataFrames and integers.
- The DataFrames correspond to the SELECT queries and the integers respresent the number of
- affected rows corresponding to non-SELECT queries in the multi statement.
-
-If `MYSQL_TUPLES` are passed as the last argument, then tuples will be returned instead
- of DataFrames.
-
-# Error types
-
-* `MySQLInterfaceError`: This error is thrown for exceptions that occur in the MySQL julia interface, such as when calling functions with a null connection.
-* `MySQLInternalError`: This error is thrown for exceptions that occur in the underlying C library.
-* `MySQLStatementError`: This error is thrown for exceptions that occur in the underlying C library when using prepared statements.
-
-# How to solve MySQL library not found error
-
-This error may occur during `using MySQL`. To resolve this-
-* **Ubuntu**: Just add the MariaDB/MySQL `.so` file to the `lib_choices` array in `src/config.jl` (the system file is at `~/.julia/v0.7/MySQL/src/config.jl`). If it is already there make sure `LD_LIBRARY_PATH` contains the MariaDB/MySQL `.so` file directory path. Usually this is something like `/usr/local/lib/mariadb/`.
-* **OSX**: Same as above. In this case the file will be something like `libmysqlclient.dylib`.  Homebrew users should look in `/usr/local/Cellar/mysql`.
-* **Windows**: The file will be picked up automatically if MySQL is installed correctly.  If you still get the error add the location of `libmysql.dll` to PATH.
-
-# Tests
-
-To run the tests you must have MySQL server running on the host. Set the constants HOST and ROOTPASS
-in `test/runtests.jl` to the host and root password on your test setup. Run the tests using:
-```
-Pkg.test("MySQL")
-```
-
-# Acknowledgement
-
-We acknowledge the contributions of [JustDial](http://www.justdial.com) towards this work.
+where `source` is any valid `Data.Source` (from DataStreams.jl). As with `MySQL.execute!`, the `source` must provide enough params and will be matched in the same order.
