@@ -96,13 +96,15 @@ function execute!(conn::Connection, sql::String)
 end
 
 """
-    MySQL.query(conn, sql, sink=Data.Table; append::Bool=false) => sink
+    MySQL.query(conn, sql, sink=Data.Table, args...; append::Bool=false) => sink
 
-execute an sql statement and return the results in `sink`, which can be any valid `Data.Sink` (interface from DataStreams.jl). By default, a NamedTuple of Vectors are returned.
+execute an sql statement and return the results in `sink`, which can be any valid `Data.Sink` (interface from DataStreams.jl), and `args...` are any necessary arguments to the sink. By default, a NamedTuple of Vectors are returned.
 
 Passing `append=true` as a keyword argument will cause the resultset to be _appended_ to the sink instead of replacing.
 
 To get the results as a `DataFrame`, you can just do `MySQL.query(conn, sql, DataFrame)`.
+
+See list of DataStreams implementations [here](https://github.com/JuliaData/DataStreams.jl#list-of-known-implementations)
 """
 function query end
 

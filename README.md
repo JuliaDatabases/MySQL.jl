@@ -79,6 +79,8 @@ Passing `append=true` as a keyword argument will cause the resultset to be _appe
 
 To get the results as a `DataFrame`, you can just do `MySQL.query(conn, sql, DataFrame)`.
 
+See list of DataStreams implementations [here](https://github.com/JuliaData/DataStreams.jl#list-of-known-implementations)
+
 ```julia
 MySQL.Query(conn, sql, sink=Data.Table; append::Bool=false) => MySQL.Query
 ```
