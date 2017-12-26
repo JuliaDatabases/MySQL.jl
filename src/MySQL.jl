@@ -101,6 +101,8 @@ end
 execute an sql statement and return the results in `sink`, which can be any valid `Data.Sink` (interface from DataStreams.jl). By default, a NamedTuple of Vectors are returned.
 
 Passing `append=true` as a keyword argument will cause the resultset to be _appended_ to the sink instead of replacing.
+
+To get the results as a `DataFrame`, you can just do `MySQL.query(conn, sql, DataFrame)`.
 """
 function query end
 

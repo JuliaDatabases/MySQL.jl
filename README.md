@@ -77,6 +77,8 @@ Execute an SQL statement and return the results in `sink`, which can be any vali
 
 Passing `append=true` as a keyword argument will cause the resultset to be _appended_ to the sink instead of replacing.
 
+To get the results as a `DataFrame`, you can just do `MySQL.query(conn, sql, DataFrame)`.
+
 ```julia
 MySQL.Query(conn, sql, sink=Data.Table; append::Bool=false) => MySQL.Query
 ```
