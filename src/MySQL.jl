@@ -85,14 +85,14 @@ function escape(conn::MySQL.Connection, str::String)
 end
 
 """
-    MySQL.execute!(conn, sql) => Void
+    MySQL.execute!(conn, sql) => Nothing
 
 execute an sql statement without returning results (useful for DDL statements, update, delete, etc.)
 """
 function execute!(conn::Connection, sql::String)
     conn.ptr == C_NULL && throw(MySQLInterfaceError("`MySQL.execute!` called with NULL connection."))
     API.mysql_query(conn.ptr, sql) == 0 || throw(MySQLInternalError(conn))
-    return API.mysql_affected_rows(conn.ptr)
+    return Int(API.mysql_affected_rows(conn.ptr))
 end
 
 """
