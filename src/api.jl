@@ -70,7 +70,7 @@ end
 import Base.==
 
 const MYSQL_DATE_FORMAT = Dates.DateFormat("yyyy-mm-dd")
-const MYSQL_DATETIME_FORMAT = Dates.DateFormat("yyyy-mm-dd HH:MM:SS")
+const MYSQL_DATETIME_FORMAT = Dates.DateFormat("yyyy-mm-dd HH:MM:SS.s")
 
 mysql_time(str) = Dates.Time(map(x->parse(Int, x), split(str, ':'))...)
 mysql_date(str) = Dates.Date(str, MYSQL_DATE_FORMAT)
