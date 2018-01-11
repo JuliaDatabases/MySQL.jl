@@ -15,10 +15,10 @@ end
 
 include("consts.jl")
 
-const MEM_ROOT = Ptr{Void}
-const LIST = Ptr{Void}
-const MYSQL_DATA = Ptr{Void}
-const MYSQL_RES = Ptr{Void}
+const MEM_ROOT = Ptr{Cvoid}
+const LIST = Ptr{Cvoid}
+const MYSQL_DATA = Ptr{Cvoid}
+const MYSQL_RES = Ptr{Cvoid}
 const MYSQL_ROW = Ptr{Ptr{Cchar}}  # pointer to an array of strings
 const MYSQL_TYPE = UInt32
 
@@ -47,7 +47,7 @@ struct MYSQL_FIELD
     decimals::Cuint              ##  Number of decimals in field
     charsetnr::Cuint             ##  Character set
     field_type::Cuint            ##  Type of field. See mysql_com.h for types
-    extension::Ptr{Void}
+    extension::Ptr{Cvoid}
 end
 nullable(field) = (field.flags & API.NOT_NULL_FLAG) == 0
 isunsigned(field) = (field.flags & API.UNSIGNED_FLAG) == 0
@@ -112,12 +112,12 @@ Mirror to MYSQL_BIND struct in mysql_bind.h
 struct MYSQL_BIND
     length::Ptr{Culong}
     is_null::Ptr{Cchar}
-    buffer::Ptr{Void}
+    buffer::Ptr{Cvoid}
     error::Ptr{Cchar}
     row_ptr::Ptr{Cuchar}
-    store_param_func::Ptr{Void}
-    fetch_result::Ptr{Void}
-    skip_result::Ptr{Void}
+    store_param_func::Ptr{Cvoid}
+    fetch_result::Ptr{Cvoid}
+    skip_result::Ptr{Cvoid}
     buffer_length::Culong 
     offset::Culong 
     length_value::Culong
@@ -128,16 +128,16 @@ struct MYSQL_BIND
     is_unsigned::Cchar
     long_data_used::Cchar
     is_null_value::Cchar
-    extension::Ptr{Void}
+    extension::Ptr{Cvoid}
 
-    function MYSQL_BIND(buff::Ptr{Void}, bufflen, bufftype)
+    function MYSQL_BIND(buff::Ptr{Cvoid}, bufflen, bufftype)
         new(0, 0, buff, C_NULL, C_NULL, 0, 0, 0, convert(Culong, bufflen),
             0, 0, 0, 0, bufftype, 0, 0, 0, 0, C_NULL)
     end
 end
 
 function MYSQL_BIND(arr, bufftype)
-    MYSQL_BIND(convert(Ptr{Void}, pointer(arr)), sizeof(arr), bufftype)
+    MYSQL_BIND(convert(Ptr{Cvoid}, pointer(arr)), sizeof(arr), bufftype)
 end
 
 """
@@ -155,7 +155,7 @@ Mirror to MYSQL_STMT struct in mysql.h
 struct MYSQL_STMT # This is different in mariadb header file.
     mem_root::MEM_ROOT
     list::LIST
-    mysql::Ptr{Void}
+    mysql::Ptr{Cvoid}
     params::MYSQL_BIND
     bind::MYSQL_BIND
     fields::MYSQL_FIELD
@@ -193,7 +193,7 @@ end
 
 # function  mysql_library_end()
 #     return ccall((:mysql_library_end, mysql_lib),
-#                  Void,
+#                  Cvoid,
 #                  (),
 #                 )
 # end
@@ -202,9 +202,9 @@ end
 Initializes the MYSQL object. Must be called before mysql_real_connect.
 Memory allocated by mysql_init can be freed with mysql_close.
 """
-function mysql_init(mysqlptr::Ptr{Void})
+function mysql_init(mysqlptr::Ptr{Cvoid})
     return ccall((:mysql_init, mysql_lib),
-                 Ptr{Void},
+                 Ptr{Cvoid},
                  (Ptr{Cuchar}, ),
                  mysqlptr)
 end
@@ -213,7 +213,7 @@ end
 Used to connect to database server. Returns a MYSQL handle on success and
 C_NULL on failure.
 """
-function mysql_real_connect(mysqlptr::Ptr{Void},
+function mysql_real_connect(mysqlptr::Ptr{Cvoid},
                               host::String,
                               user::String,
                               passwd::String,
@@ -223,8 +223,8 @@ function mysql_real_connect(mysqlptr::Ptr{Void},
                               client_flag::UInt32)
 
     return ccall((:mysql_real_connect, mysql_lib),
-                 Ptr{Void},
-                 (Ptr{Void},
+                 Ptr{Cvoid},
+                 (Ptr{Cvoid},
                   Ptr{Cuchar},
                   Ptr{Cuchar},
                   Ptr{Cuchar},
@@ -242,9 +242,9 @@ function mysql_real_connect(mysqlptr::Ptr{Void},
                  client_flag)
 end
 
-function mysql_options(mysqlptr::Ptr{Void},
+function mysql_options(mysqlptr::Ptr{Cvoid},
                         option_type::Cuint,
-                        option::Ptr{Void})
+                        option::Ptr{Cvoid})
     return ccall((:mysql_options, mysql_lib),
                  Cint,
                  (Ptr{Cuchar},
@@ -256,19 +256,19 @@ function mysql_options(mysqlptr::Ptr{Void},
 end
 
 mysql_options(mysqlptr, option_type, option::String) =
-    mysql_options(mysqlptr, option_type, convert(Ptr{Void}, pointer(option)))
+    mysql_options(mysqlptr, option_type, convert(Ptr{Cvoid}, pointer(option)))
 
 function mysql_options(mysqlptr, option_type, option)
     v = [option]
-    return mysql_options(mysqlptr, option_type, convert(Ptr{Void}, pointer(v)))
+    return mysql_options(mysqlptr, option_type, convert(Ptr{Cvoid}, pointer(v)))
 end
 
 """
 Close an opened MySQL connection.
 """
-function mysql_close(mysqlptr::Ptr{Void})
+function mysql_close(mysqlptr::Ptr{Cvoid})
     return ccall((:mysql_close, mysql_lib),
-                 Void,
+                 Cvoid,
                  (Ptr{Cuchar}, ),
                  mysqlptr)
 end
@@ -276,7 +276,7 @@ end
 """
 Returns the error number of the last API call.
 """
-function mysql_errno(mysqlptr::Ptr{Void})
+function mysql_errno(mysqlptr::Ptr{Cvoid})
     return ccall((:mysql_errno, mysql_lib),
                  Cuint,
                  (Ptr{Cuchar}, ),
@@ -287,7 +287,7 @@ end
 Returns a string of the last error message of the most recent function call.
 If no error occured and empty string is returned.
 """
-function mysql_error(mysqlptr::Ptr{Void})
+function mysql_error(mysqlptr::Ptr{Cvoid})
     return ccall((:mysql_error, mysql_lib),
                  Ptr{Cuchar},
                  (Ptr{Cuchar}, ),
@@ -314,7 +314,7 @@ function mysql_stmt_close(stmtptr)
                  stmtptr)
 end
 
-function mysql_insert_id(mysqlptr::Ptr{Void})
+function mysql_insert_id(mysqlptr::Ptr{Cvoid})
     return ccall((:mysql_insert_id, mysql_lib),
                  Int64,
                  (Ptr{Cuchar}, ),
@@ -324,7 +324,7 @@ end
 """
 Creates the sql string where the special chars are escaped
 """
-function mysql_real_escape_string(mysqlptr::Ptr{Void},
+function mysql_real_escape_string(mysqlptr::Ptr{Cvoid},
                                   to::Vector{Cuchar},
                                   from::String,
                                   length::Culong)
@@ -343,17 +343,17 @@ end
 """
 Creates a mysql_stmt handle. Should be closed with mysql_close_stmt
 """
-function mysql_stmt_init(mysqlptr::Ptr{Void})
+function mysql_stmt_init(mysqlptr::Ptr{Cvoid})
     return ccall((:mysql_stmt_init, mysql_lib),
                  Ptr{MYSQL_STMT},
-                 (Ptr{Void}, ),
+                 (Ptr{Cvoid}, ),
                  mysqlptr)
 end
 
 function mysql_stmt_prepare(stmtptr, s::String)
     return ccall((:mysql_stmt_prepare, mysql_lib),
                  Cint,
-                 (Ptr{Void}, Ptr{Cchar}, Culong),
+                 (Ptr{Cvoid}, Ptr{Cchar}, Culong),
                  stmtptr,      s,        length(s))
 end
 
@@ -421,18 +421,18 @@ function mysql_stmt_bind_result(stmtptr, bind::Ptr{MYSQL_BIND})
                  bind)
 end
 
-function mysql_query(mysqlptr::Ptr{Void}, sql::String)
+function mysql_query(mysqlptr::Ptr{Cvoid}, sql::String)
     return ccall((:mysql_query, mysql_lib),
                  Cchar,
-                 (Ptr{Void}, Ptr{Cuchar}),
+                 (Ptr{Cvoid}, Ptr{Cuchar}),
                  mysqlptr,
                  sql)
 end
 
-function mysql_store_result(mysqlptr::Ptr{Void})
+function mysql_store_result(mysqlptr::Ptr{Cvoid})
     return ccall((:mysql_store_result, mysql_lib),
                  MYSQL_RES,
-                 (Ptr{Void}, ),
+                 (Ptr{Cvoid}, ),
                  mysqlptr)
 end
 
@@ -500,9 +500,9 @@ end
 """
 Set the auto commit mode.
 """
-function mysql_autocommit(mysqlptr::Ptr{Void}, mode::Cchar)
+function mysql_autocommit(mysqlptr::Ptr{Cvoid}, mode::Cchar)
     return ccall((:mysql_autocommit, mysql_lib),
-                 Cchar, (Ptr{Void}, Cchar),
+                 Cchar, (Ptr{Cvoid}, Cchar),
                  mysqlptr, mode)
 end
 
@@ -511,7 +511,7 @@ Used to get the next result while executing multi query. Returns 0 on success
 and more results are present. Returns -1 on success and no more results. Returns
 positve on error.
 """
-function mysql_next_result(mysqlptr::Ptr{Void})
+function mysql_next_result(mysqlptr::Ptr{Cvoid})
     return ccall((:mysql_next_result, mysql_lib),
                  Cint, (MYSQL_RES, ),
                  mysqlptr)
@@ -520,9 +520,9 @@ end
 """
 Returns the number of columns for the most recent query on the connection.
 """
-function mysql_field_count(mysqlptr::Ptr{Void})
+function mysql_field_count(mysqlptr::Ptr{Cvoid})
     return ccall((:mysql_field_count, mysql_lib),
-                 Cuint, (Ptr{Void}, ), mysqlptr)
+                 Cuint, (Ptr{Cvoid}, ), mysqlptr)
 end
 
 function mysql_stmt_param_count(stmt)
@@ -549,7 +549,7 @@ Returns number of affected rows for prepared statement. `mysql_stmt_execute` mus
 """
 function mysql_stmt_affected_rows(stmt)
     return ccall((:mysql_stmt_affected_rows, mysql_lib),
-                 Culong, (Ptr{Void}, ), stmt)
+                 Culong, (Ptr{Cvoid}, ), stmt)
 end
 
 end # module

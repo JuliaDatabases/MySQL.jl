@@ -1,6 +1,6 @@
 
 mutable struct Connection
-    ptr::Ptr{Void}
+    ptr::Ptr{Cvoid}
     host::String
     port::String
     user::String
@@ -24,7 +24,7 @@ DB:   $(hndl.db)
 end
 
 struct MySQLInternalError <: MySQLError
-    ptr::Ptr{Void}
+    ptr::Ptr{Cvoid}
     MySQLInternalError(con::Connection) = new(con.ptr)
     MySQLInternalError(ptr) = new(ptr)
 end

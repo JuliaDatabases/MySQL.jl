@@ -1,5 +1,5 @@
 struct MySQLStatementError <: MySQLError
-    ptr::Ptr{Void}
+    ptr::Ptr{Cvoid}
     MySQLStatementError(ptr) = new(ptr)
 end
 Base.showerror(io::IO, e::MySQLStatementError) = print(io, unsafe_string(API.mysql_stmt_error(e.ptr)))
@@ -18,7 +18,7 @@ Bulk statement execution can be accomplished by "streaming" a param source like:
 where `source` is any valid `Data.Source` (from DataStreams.jl). As with `MySQL.execute!`, the `source` must provide enough params and will be matched in the same order.
 """
 mutable struct Stmt
-    ptr::Ptr{Void}
+    ptr::Ptr{Cvoid}
     sql::String
     nparams::Int
     rows_affected::Int
