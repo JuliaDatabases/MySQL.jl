@@ -5,7 +5,7 @@ using Compat, Compat.Dates, DecFP, Missings
 let
     global mysql_lib
     if !isdefined(@__MODULE__, :mysql_lib)
-        @static Compat.Sys.islinux()   && (lib_choices = ["libmysql.so", "libmysqlclient.so", "libmysqlclient_r.so", "libmariadb.so", "libmysqlclient_r.so.16"])
+        @static Compat.Sys.islinux()   && (lib_choices = ["libmysql.so", "libmysqlclient.so", "libmysqlclient_r.so", "libmariadb.so", "libmysqlclient_r.so.16", "libmysqlclient.so.18.0.0"])
         @static Compat.Sys.isapple()   && (lib_choices = ["libmysqlclient.dylib", "libperconaserverclient.dylib"])
         @static Compat.Sys.iswindows() && (lib_choices = ["libmysql.dll", "libmariadb.dll"])
         lib = Libdl.find_library(lib_choices)
