@@ -1,6 +1,6 @@
 module API
 
-using Compat, Compat.Dates, DecFP, Missings
+using Compat, Compat.Dates, Compat.Libdl, DecFP, Missings
 
 let
     global mysql_lib
