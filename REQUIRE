@@ -3,3 +3,4 @@ DataStreams
 Compat 0.48.0
 Missings
 DecFP
+BinaryProvider
