@@ -1,8 +1,8 @@
 # Documentation: http://docs.travis-ci.com/user/languages/julia/
 language: julia
 
-#services:
-# - mysql
+services:
+ - mysql
 
 os:
   - linux
@@ -20,12 +20,12 @@ after_success:
   #- julia -e 'cd(Pkg.dir("MySQL")); Pkg.add("Coverage"); using Coverage; Coveralls.submit(Coveralls.process_folder())'
   # push coverage results to Codecov
   - julia -e 'cd(Pkg.dir("MySQL")); Pkg.add("Coverage"); using Coverage; Codecov.submit(Codecov.process_folder())'
-    #before_script:
-    #- export OLD_PATH=$LD_LIBRARY_PATH
-    #- export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:`mysql_config --libs | cut -d ' ' -f1 | sed 's/-L//'`
-    #- if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then brew install mysql          ; fi
-    #- if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then mysql.server start          ; fi
+    before_script:
+    - export OLD_PATH=$LD_LIBRARY_PATH
+    - export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:`mysql_config --libs | cut -d ' ' -f1 | sed 's/-L//'`
+    - if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then brew install mysql          ; fi
+    - if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then mysql.server start          ; fi
 
-    #after_script:
-    #- export LD_LIBRARY_PATH=$OLD_PATH
-    #- unset OLD_PATH
+    after_script:
+    - export LD_LIBRARY_PATH=$OLD_PATH
+    - unset OLD_PATH

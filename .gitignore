@@ -32,4 +32,5 @@
 *.dSYM/
 
 deps/deps.jl
-deps/usr/*.*
+deps/usr/
+deps/mysql-connector*
