@@ -180,15 +180,15 @@ struct MYSQL_STMT # This is different in mariadb header file.
 end
 
 
-# function  libmysqlrary_init(argc=0, argv=C_NULL, groups=C_NULL)
-#     return ccall((:libmysqlrary_init, libmariadb),
+# function  mysql_library_init(argc=0, argv=C_NULL, groups=C_NULL)
+#     return ccall((:mysql_library_init, libmariadb),
 #                  Cint,
 #                  (Cint, Ptr{Ptr{UInt8}}, Ptr{Ptr{UInt8}}),
 #                  argc, argv, groups)
 # end
 
-# function  libmysqlrary_end()
-#     return ccall((:libmysqlrary_end, libmariadb),
+# function  mysql_library_end()
+#     return ccall((:mysql_library_end, libmariadb),
 #                  Cvoid,
 #                  (),
 #                 )
