@@ -25,6 +25,11 @@ if any(!satisfied(p; verbose=verbose) for p in products)
         # Download and install binaries
         url, tarball_hash = download_info[platform_key()]
         install(url, tarball_hash; prefix=prefix, force=true, verbose=true, ignore_platform=true)
+        try
+            @show readdir(prefix.path)
+            @show readdir(joinpath(prefix.path, "lib"))
+            @show readdir(joinpath(prefix.path, "bin"))
+        end
     else
         # If we don't have a BinaryProvider-compatible .tar.gz to download, complain.
         # Alternatively, you could attempt to install from a separate provider,
