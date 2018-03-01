@@ -15,7 +15,7 @@ download_info = Dict(
     Linux(:powerpc64le, :glibc) => ("$bin_prefix/MySQL.powerpc64le-linux-gnu.tar.gz", "17db7a12097fe54dfabb643d51f3798dc8821a2cb4cb9ee7fee8d9b89353f89d"),
     MacOS() => ("$bin_prefix/MySQL.x86_64-apple-darwin14.tar.gz", "ff0ab0f452171f1cd9309e38e468836a237da25752968ee3d12b7bcb867ebcd9"),
     Linux(:x86_64, :glibc) => ("$bin_prefix/MySQL.x86_64-linux-gnu.tar.gz", "6e85730e8e5a83923d6261dbb1eeef41499dd7452b4fe8f1790c476dcc626a63"),
-    Windows(:i686) => ("$bin_prefix/MySQL.i686-w64-mingw32.tar.gz", "316af0c159384fa94a24aa0439b7335c615a30d131415c9beb8069b2cbfd086c")
+    Windows(:i686) => ("$bin_prefix/MySQL.i686-w64-mingw32.tar.gz", "316af0c159384fa94a24aa0439b7335c615a30d131415c9beb8069b2cbfd086c"),
     Windows(:x86_64) => ("$bin_prefix/MySQL.x86_64-w64-mingw32.tar.gz", "578409ddbf9ebf6aab55a67833736ece56612aed2d614eefc81ec3aef77e17fd"),
 )
 
