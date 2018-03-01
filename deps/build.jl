@@ -33,4 +33,4 @@ if any(!satisfied(p; verbose=verbose) for p in products)
     end
 end
 # Write out a deps.jl file that will contain mappings for our products
-write_deps_file(joinpath(@__DIR__, "deps.jl"), [lib])
+write_deps_file(joinpath(@__DIR__, "deps.jl"), products)
