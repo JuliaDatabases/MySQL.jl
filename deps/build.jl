@@ -20,7 +20,7 @@ download_info = Dict(
 )
 
 # First, check to see if we're all satisfied
-if !satisfied(lib; verbose=true)
+if any(!satisfied(p; verbose=verbose) for p in products)
     if haskey(download_info, platform_key())
         # Download and install binaries
         url, tarball_hash = download_info[platform_key()]
