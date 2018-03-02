@@ -43,8 +43,8 @@ MySQL.execute!(conn, """INSERT INTO Employee (Name, Salary, JoinDate, LastLogin,
                  ('Tim', 15000.50, '2015-7-25', '2015-10-10 12:12:25', '12:30:00', 56, 'Accounts', b'1', 3200);
               """)
 
-id = MySQL.insertid(conn)
-println("Last insert id was $id")
+# id = MySQL.insertid(conn)
+# println("Last insert id was $id")
 
 res = MySQL.query(conn, "select * from Employee")
 
@@ -97,13 +97,13 @@ res = MySQL.query(conn, "select Salary from Employee")
 
 stmt = MySQL.Stmt(conn, "INSERT INTO Employee (Name, Salary, JoinDate, LastLogin, LunchTime, OfficeNo, empno) VALUES (?, ?, ?, ?, ?, ?, ?);")
 
-values = [@NT(Name="John", Salary=10000.50, JoinDate=Date("2015-8-3"), LastLogin=DateTime("2015-9-5T12:31:30"), LunchTime=Dates.Time(12,00,00), OfficeNo=1, empno=1301),
-          @NT(Name="Tom",  Salary=20000.25, JoinDate=Date("2015-8-4"), LastLogin=DateTime("2015-10-12T13:12:14"), LunchTime=Dates.Time(13,00,00), OfficeNo=12, empno=1422),
-          @NT(Name="Jim",  Salary=30000.00, JoinDate=Date("2015-6-2"), LastLogin=DateTime("2015-9-5T10:05:10"), LunchTime=Dates.Time(12,30,00), OfficeNo=45, empno=1567),
-          @NT(Name="Tim",  Salary=15000.50, JoinDate=Date("2015-7-25"), LastLogin=DateTime("2015-10-10T12:12:25"), LunchTime=Dates.Time(12,30,00), OfficeNo=56, empno=3200)]
+# values = [@NT(Name="John", Salary=10000.50, JoinDate=Date("2015-8-3"), LastLogin=DateTime("2015-9-5T12:31:30"), LunchTime=Dates.Time(12,00,00), OfficeNo=1, empno=1301),
+#           @NT(Name="Tom",  Salary=20000.25, JoinDate=Date("2015-8-4"), LastLogin=DateTime("2015-10-12T13:12:14"), LunchTime=Dates.Time(13,00,00), OfficeNo=12, empno=1422),
+#           @NT(Name="Jim",  Salary=30000.00, JoinDate=Date("2015-6-2"), LastLogin=DateTime("2015-9-5T10:05:10"), LunchTime=Dates.Time(12,30,00), OfficeNo=45, empno=1567),
+#           @NT(Name="Tim",  Salary=15000.50, JoinDate=Date("2015-7-25"), LastLogin=DateTime("2015-10-10T12:12:25"), LunchTime=Dates.Time(12,30,00), OfficeNo=56, empno=3200)]
 
-Data.stream!(values, stmt)
+# Data.stream!(values, stmt)
 
-res = MySQL.query(conn, "select * from Employee")
-@test length(res) == 10
-@test length(res[1]) == 9
+# res = MySQL.query(conn, "select * from Employee")
+# @test length(res) == 10
+# @test length(res[1]) == 9
