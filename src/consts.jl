@@ -50,7 +50,7 @@ mysql_type(::Type{Date}) = MYSQL_TYPE_DATE
 mysql_type(::Type{Dates.Time}) = MYSQL_TYPE_TIME
 mysql_type(::Type{Missing}) = MYSQL_TYPE_NULL
 mysql_type(::Type{Nothing}) = MYSQL_TYPE_NULL
-mysql_type(::Type{T}) where {T} = MYSQL_TYPE_VARCHAR
+mysql_type(::Type{T}) where {T} = MYSQL_TYPE_VAR_STRING
 mysql_type(x) = mysql_type(typeof(x))
 
 function julia_type(mysqltype)
