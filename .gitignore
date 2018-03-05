@@ -30,3 +30,9 @@
 
 # Debug files
 *.dSYM/
+
+deps/deps.jl
+deps/usr/
+deps/mysql-connector*
+deps/downloads/
+deps/manifests/

@@ -1,16 +1,6 @@
 using MySQL, Missings
-using Compat
+using Compat, Compat.Test, Compat.Dates
 
-@static if VERSION < v"0.7.0-DEV.2005"
-    using Base.Test
-else
-    using Test
-end
-if VERSION < v"0.7.0-DEV.2575"
-    const Dates = Base.Dates
-else
-    using Dates
-end
 @static if isdefined(Core, :NamedTuple)
     macro NT(args...)
         return esc(:(($(args...),)))
@@ -19,7 +9,13 @@ else
     using NamedTuples
 end
 
-const conn = MySQL.connect("127.0.0.1", "root", ""; port=3306)
+if haskey(ENV, "APPVEYOR_BUILD_NUMBER")
+    pwd = "Password12!"
+else
+    pwd = ""
+end
+
+const conn = MySQL.connect("127.0.0.1", "root", pwd; port=3306)
 
 MySQL.execute!(conn, "DROP DATABASE if exists mysqltest")
 MySQL.execute!(conn, "CREATE DATABASE mysqltest")
@@ -47,8 +43,8 @@ MySQL.execute!(conn, """INSERT INTO Employee (Name, Salary, JoinDate, LastLogin,
                  ('Tim', 15000.50, '2015-7-25', '2015-10-10 12:12:25', '12:30:00', 56, 'Accounts', b'1', 3200);
               """)
 
-id = MySQL.insertid(conn)
-println("Last insert id was $id")
+# id = MySQL.insertid(conn)
+# println("Last insert id was $id")
 
 res = MySQL.query(conn, "select * from Employee")
 
