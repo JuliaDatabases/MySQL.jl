@@ -30,8 +30,8 @@ struct MYSQL_FIELD
     db::Ptr{Cchar}               ##  Database for table
     catalog::Ptr{Cchar}          ##  Catalog for table
     def::Ptr{Cchar}              ##  Default value (set by mysql_list_fields)
-    field_length::Clong          ##  Width of column (create length)
-    max_length::Clong            ##  Max width for selected set
+    length::Culong               ##  Width of column (create length)
+    max_length::Culong           ##  Max width for selected set
     name_length::Cuint
     org_name_length::Cuint
     table_length::Cuint
@@ -179,6 +179,17 @@ struct MYSQL_STMT # This is different in mariadb header file.
     extension::Ptr{Cuchar}
 end
 
+macro c(func, ret, args, vals...)
+    if Compat.Sys.iswindows()
+        esc(quote
+            ret = ccall( ($func, libmariadb), stdcall, $ret, $args, $(vals...))
+        end)
+    else
+        esc(quote
+            ret = ccall( ($func, libmariadb),          $ret, $args, $(vals...))
+        end)
+    end
+end
 
 # function  mysql_library_init(argc=0, argv=C_NULL, groups=C_NULL)
 #     return ccall((:mysql_library_init, libmariadb),
@@ -199,7 +210,7 @@ Initializes the MYSQL object. Must be called before mysql_real_connect.
 Memory allocated by mysql_init can be freed with mysql_close.
 """
 function mysql_init(mysqlptr::Ptr{Cvoid})
-    return ccall((:mysql_init, libmariadb),
+    return @c(:mysql_init,
                  Ptr{Cvoid},
                  (Ptr{Cuchar}, ),
                  mysqlptr)
@@ -218,7 +229,7 @@ function mysql_real_connect(mysqlptr::Ptr{Cvoid},
                               unix_socket::String,
                               client_flag::UInt32)
 
-    return ccall((:mysql_real_connect, libmariadb),
+    return @c(:mysql_real_connect,
                  Ptr{Cvoid},
                  (Ptr{Cvoid},
                   Ptr{Cuchar},
@@ -241,7 +252,7 @@ end
 function mysql_options(mysqlptr::Ptr{Cvoid},
                         option_type::Cuint,
                         option::Ptr{Cvoid})
-    return ccall((:mysql_options, libmariadb),
+    return @c(:mysql_options,
                  Cint,
                  (Ptr{Cuchar},
                   Cint,
@@ -263,7 +274,7 @@ end
 Close an opened MySQL connection.
 """
 function mysql_close(mysqlptr::Ptr{Cvoid})
-    return ccall((:mysql_close, libmariadb),
+    return @c(:mysql_close,
                  Cvoid,
                  (Ptr{Cuchar}, ),
                  mysqlptr)
@@ -273,7 +284,7 @@ end
 Returns the error number of the last API call.
 """
 function mysql_errno(mysqlptr::Ptr{Cvoid})
-    return ccall((:mysql_errno, libmariadb),
+    return @c(:mysql_errno,
                  Cuint,
                  (Ptr{Cuchar}, ),
                  mysqlptr)
@@ -284,7 +295,7 @@ Returns a string of the last error message of the most recent function call.
 If no error occured and empty string is returned.
 """
 function mysql_error(mysqlptr::Ptr{Cvoid})
-    return ccall((:mysql_error, libmariadb),
+    return @c(:mysql_error,
                  Ptr{Cuchar},
                  (Ptr{Cuchar}, ),
                  mysqlptr)
@@ -294,7 +305,7 @@ end
 Executes the prepared query associated with the statement handle.
 """
 function mysql_stmt_execute(stmtptr)
-    return ccall((:mysql_stmt_execute, libmariadb),
+    return @c(:mysql_stmt_execute,
                  Cint,
                  (Ptr{Cuchar}, ),
                  stmtptr)
@@ -304,14 +315,14 @@ end
 Closes the prepared statement.
 """
 function mysql_stmt_close(stmtptr)
-    return ccall((:mysql_stmt_close, libmariadb),
+    return @c(:mysql_stmt_close,
                  Cchar,
                  (Ptr{Cuchar}, ),
                  stmtptr)
 end
 
 function mysql_insert_id(mysqlptr::Ptr{Cvoid})
-    return ccall((:mysql_insert_id, libmariadb),
+    return @c(:mysql_insert_id,
                  Int64,
                  (Ptr{Cuchar}, ),
                  mysqlptr)
@@ -324,7 +335,7 @@ function mysql_real_escape_string(mysqlptr::Ptr{Cvoid},
                                   to::Vector{Cuchar},
                                   from::String,
                                   length::Culong)
-    return ccall((:mysql_real_escape_string, libmariadb),
+    return @c(:mysql_real_escape_string,
                  Cuint,
                  (Ptr{Cuchar},
                   Ptr{Cuchar},
@@ -340,14 +351,14 @@ end
 Creates a mysql_stmt handle. Should be closed with mysql_close_stmt
 """
 function mysql_stmt_init(mysqlptr::Ptr{Cvoid})
-    return ccall((:mysql_stmt_init, libmariadb),
+    return @c(:mysql_stmt_init,
                  Ptr{MYSQL_STMT},
                  (Ptr{Cvoid}, ),
                  mysqlptr)
 end
 
 function mysql_stmt_prepare(stmtptr, s::String)
-    return ccall((:mysql_stmt_prepare, libmariadb),
+    return @c(:mysql_stmt_prepare,
                  Cint,
                  (Ptr{Cvoid}, Ptr{Cchar}, Culong),
                  stmtptr,      s,        length(s))
@@ -357,7 +368,7 @@ end
 Returns the error message for the recently invoked statement API
 """
 function mysql_stmt_error(stmtptr)
-    return ccall((:mysql_stmt_error, libmariadb),
+    return @c(:mysql_stmt_error,
                  Ptr{Cuchar},
                  (Ptr{Cuchar}, ),
                  stmtptr)
@@ -368,7 +379,7 @@ Store the entire result returned by the prepared statement in the
 bind datastructure provided by mysql_stmt_bind_result.
 """
 function mysql_stmt_store_result(stmtptr)
-    return ccall((:mysql_stmt_store_result, libmariadb),
+    return @c(:mysql_stmt_store_result,
                  Cint,
                  (Ptr{Cuchar}, ),
                  stmtptr)
@@ -379,7 +390,7 @@ Return the metadata for the results that will be received from
 the execution of the prepared statement.
 """
 function mysql_stmt_result_metadata(stmtptr)
-    return ccall((:mysql_stmt_result_metadata, libmariadb),
+    return @c(:mysql_stmt_result_metadata,
                  MYSQL_RES,
                  (Ptr{MYSQL_STMT}, ),
                  stmtptr)
@@ -389,7 +400,7 @@ end
 Equivalent of `mysql_num_rows` for prepared statements.
 """
 function mysql_stmt_num_rows(stmtptr)
-    return ccall((:mysql_stmt_num_rows, libmariadb),
+    return @c(:mysql_stmt_num_rows,
                  Clong,
                  (Ptr{Cuchar}, ),
                  stmtptr)
@@ -399,7 +410,7 @@ end
 Equivalent of `mysql_fetch_row` for prepared statements.
 """
 function mysql_stmt_fetch(stmtptr)
-    return ccall((:mysql_stmt_fetch, libmariadb),
+    return @c(:mysql_stmt_fetch,
                  Cint,
                  (Ptr{Cuchar}, ),
                  stmtptr)
@@ -410,7 +421,7 @@ Bind the returned data from execution of the prepared statement
 to a preallocated datastructure `bind`.
 """
 function mysql_stmt_bind_result(stmtptr, bind::Ptr{MYSQL_BIND})
-    return ccall((:mysql_stmt_bind_result, libmariadb),
+    return @c(:mysql_stmt_bind_result,
                  Cchar,
                  (Ptr{Cuchar}, Ptr{Cuchar}),
                  stmtptr,
@@ -418,15 +429,15 @@ function mysql_stmt_bind_result(stmtptr, bind::Ptr{MYSQL_BIND})
 end
 
 function mysql_query(mysqlptr::Ptr{Cvoid}, sql::String)
-    return ccall((:mysql_query, libmariadb),
-                 Cchar,
-                 (Ptr{Cvoid}, Ptr{Cuchar}),
+    return @c(:mysql_query,
+                 Cint,
+                 (Ptr{Cvoid}, Ptr{UInt8}),
                  mysqlptr,
                  sql)
 end
 
 function mysql_store_result(mysqlptr::Ptr{Cvoid})
-    return ccall((:mysql_store_result, libmariadb),
+    return @c(:mysql_store_result,
                  MYSQL_RES,
                  (Ptr{Cvoid}, ),
                  mysqlptr)
@@ -436,7 +447,7 @@ end
 Returns the field metadata.
 """
 function mysql_fetch_fields(results::MYSQL_RES)
-    return ccall((:mysql_fetch_fields, libmariadb),
+    return @c(:mysql_fetch_fields,
                  Ptr{MYSQL_FIELD},
                  (MYSQL_RES, ),
                  results)
@@ -447,7 +458,7 @@ end
 Returns the row from the result set.
 """
 function mysql_fetch_row(results::MYSQL_RES)
-    return ccall((:mysql_fetch_row, libmariadb),
+    return @c(:mysql_fetch_row,
                  MYSQL_ROW,
                  (MYSQL_RES, ),
                  results)
@@ -457,7 +468,7 @@ end
 Frees the result set.
 """
 function mysql_free_result(results)
-    return ccall((:mysql_free_result, libmariadb),
+    return @c(:mysql_free_result,
                  Ptr{Cuchar},
                  (MYSQL_RES, ),
                  results.ptr)
@@ -467,7 +478,7 @@ end
 Returns the number of fields in the result set.
 """
 function mysql_num_fields(results::MYSQL_RES)
-    return ccall((:mysql_num_fields, libmariadb),
+    return @c(:mysql_num_fields,
                  Cuint,
                  (MYSQL_RES, ),
                  results)
@@ -477,7 +488,7 @@ end
 Returns the number of records from the result set.
 """
 function mysql_num_rows(results::MYSQL_RES)
-    return ccall((:mysql_num_rows, libmariadb),
+    return @c(:mysql_num_rows,
                  Clong,
                  (MYSQL_RES, ),
                  results)
@@ -487,7 +498,7 @@ end
 Returns the # of affected rows in case of insert / update / delete.
 """
 function mysql_affected_rows(results::MYSQL_RES)
-    return ccall((:mysql_affected_rows, libmariadb),
+    return @c(:mysql_affected_rows,
                  Culong,
                  (MYSQL_RES, ),
                  results)
@@ -497,7 +508,7 @@ end
 Set the auto commit mode.
 """
 function mysql_autocommit(mysqlptr::Ptr{Cvoid}, mode::Cchar)
-    return ccall((:mysql_autocommit, libmariadb),
+    return @c(:mysql_autocommit,
                  Cchar, (Ptr{Cvoid}, Cchar),
                  mysqlptr, mode)
 end
@@ -508,7 +519,7 @@ and more results are present. Returns -1 on success and no more results. Returns
 positve on error.
 """
 function mysql_next_result(mysqlptr::Ptr{Cvoid})
-    return ccall((:mysql_next_result, libmariadb),
+    return @c(:mysql_next_result,
                  Cint, (MYSQL_RES, ),
                  mysqlptr)
 end
@@ -517,12 +528,12 @@ end
 Returns the number of columns for the most recent query on the connection.
 """
 function mysql_field_count(mysqlptr::Ptr{Cvoid})
-    return ccall((:mysql_field_count, libmariadb),
+    return @c(:mysql_field_count,
                  Cuint, (Ptr{Cvoid}, ), mysqlptr)
 end
 
 function mysql_stmt_param_count(stmt)
-    return ccall((:mysql_stmt_param_count, libmariadb),
+    return @c(:mysql_stmt_param_count,
                  Culong, (Ptr{MYSQL_STMT}, ), stmt)
 end
 
@@ -534,7 +545,7 @@ This API is used to bind input data for the parameter markers in the SQL
  each ? parameter marker that is present in the query.
 """
 function mysql_stmt_bind_param(stmt, bind::Ptr{MYSQL_BIND})
-    return ccall((:mysql_stmt_bind_param, libmariadb),
+    return @c(:mysql_stmt_bind_param,
                  Cuchar, (Ptr{MYSQL_STMT}, Ptr{MYSQL_BIND}, ),
                  stmt, bind)
 end
@@ -544,7 +555,7 @@ Returns number of affected rows for prepared statement. `mysql_stmt_execute` mus
  be called before this.
 """
 function mysql_stmt_affected_rows(stmt)
-    return ccall((:mysql_stmt_affected_rows, libmariadb),
+    return @c(:mysql_stmt_affected_rows,
                  Culong, (Ptr{Cvoid}, ), stmt)
 end
 

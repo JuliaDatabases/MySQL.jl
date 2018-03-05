@@ -75,7 +75,7 @@ function Query(conn::Connection, sql::String; kwargs...)
     if result.ptr != C_NULL
         nrows = MySQL.API.mysql_num_rows(result.ptr)
         fields = MySQL.metadata(result.ptr)
-        names = Tuple(ccall(:jl_symbol_n, Ref{Symbol}, (Ptr{UInt8}, Int), x.name, x.name_length) for x in fields)
+        names = Tuple(ccall(:jl_symbol_n, Ref{Symbol}, (Ptr{UInt8}, Csize_t), x.name, x.name_length) for x in fields)
         T = Tuple{(julia_type(x.field_type, API.nullable(x)) for x in fields)...}
         hasresult = true
         ncols = length(fields)
