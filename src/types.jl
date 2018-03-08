@@ -24,11 +24,12 @@ DB:   $(hndl.db)
 end
 
 struct MySQLInternalError <: MySQLError
-    ptr::Ptr{Cvoid}
-    MySQLInternalError(con::Connection) = new(con.ptr)
-    MySQLInternalError(ptr) = new(ptr)
+    errno::Cuint
+    msg::String
+    MySQLInternalError(con::Connection) = new(API.mysql_errno(con.ptr), unsafe_string(API.mysql_error(con.ptr)))
+    MySQLInternalError(ptr) = new(API.mysql_errno(ptr), unsafe_string(API.mysql_error(ptr)))
 end
-Base.showerror(io::IO, e::MySQLInternalError) = print(io, unsafe_string(API.mysql_error(e.ptr)))
+Base.showerror(io::IO, e::MySQLInternalError) = print(io, "($(e.errno)): $(e.msg)")
 
 mutable struct Result
     ptr
@@ -54,9 +55,10 @@ mutable struct Query{hasresult, names, T}
     nrows::Int
 end
 
-function julia_type(field_type, nullable)
+function julia_type(field_type, nullable, isunsigned)
     T = API.julia_type(field_type)
-    return nullable ? Union{Missing, T} : T
+    T2 = isunsigned ? unsigned(T) : T
+    return nullable ? Union{Missing, T2} : T2
 end
 
 function MySQLRowIterator(args...)
@@ -76,7 +78,7 @@ function Query(conn::Connection, sql::String; kwargs...)
         nrows = MySQL.API.mysql_num_rows(result.ptr)
         fields = MySQL.metadata(result.ptr)
         names = Tuple(ccall(:jl_symbol_n, Ref{Symbol}, (Ptr{UInt8}, Csize_t), x.name, x.name_length) for x in fields)
-        T = Tuple{(julia_type(x.field_type, API.nullable(x)) for x in fields)...}
+        T = Tuple{(julia_type(x.field_type, API.nullable(x), API.isunsigned(x)) for x in fields)...}
         hasresult = true
         ncols = length(fields)
         ptr = MySQL.API.mysql_fetch_row(result.ptr)

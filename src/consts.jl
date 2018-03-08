@@ -78,7 +78,7 @@ function julia_type(mysqltype)
            mysqltype == API.MYSQL_TYPE_LONG_BLOB ||
            mysqltype == API.MYSQL_TYPE_BLOB ||
            mysqltype == API.MYSQL_TYPE_GEOMETRY
-        return Vector{UInt8}
+        return String # Vector{UInt8}
     elseif mysqltype == API.MYSQL_TYPE_YEAR
         return Clong
     elseif mysqltype == API.MYSQL_TYPE_TIMESTAMP
@@ -156,6 +156,9 @@ const UNSIGNED_FLAG = UInt32(32)
 const MYSQL_NO_DATA = 100
 
 const MYSQL_DEFAULT_PORT = 3306
+
+const CR_SERVER_GONE_ERROR = 2006
+const CR_SERVER_LOST = 2013
 
 if Compat.Sys.iswindows()
 	const MYSQL_DEFAULT_SOCKET = "MySQL"

@@ -45,8 +45,8 @@ struct MYSQL_FIELD
     field_type::Cuint            ##  Type of field. See mysql_com.h for types
     extension::Ptr{Cvoid}
 end
-nullable(field) = (field.flags & API.NOT_NULL_FLAG) == 0
-isunsigned(field) = (field.flags & API.UNSIGNED_FLAG) == 0
+nullable(field) = (field.flags & API.NOT_NULL_FLAG) > 0
+isunsigned(field) = (field.flags & API.UNSIGNED_FLAG) > 0
 
 """
 Type mirroring MYSQL_TIME C struct.
