@@ -55,10 +55,10 @@ mutable struct Query{hasresult, names, T}
     nrows::Int
 end
 
-function julia_type(field_type, nullable, isunsigned)
+function julia_type(field_type, notnullable, isunsigned)
     T = API.julia_type(field_type)
     T2 = isunsigned ? unsigned(T) : T
-    return nullable ? Union{Missing, T2} : T2
+    return notnullable ? T2 : Union{Missing, T2}
 end
 
 function MySQLRowIterator(args...)
@@ -78,7 +78,7 @@ function Query(conn::Connection, sql::String; kwargs...)
         nrows = MySQL.API.mysql_num_rows(result.ptr)
         fields = MySQL.metadata(result.ptr)
         names = Tuple(ccall(:jl_symbol_n, Ref{Symbol}, (Ptr{UInt8}, Csize_t), x.name, x.name_length) for x in fields)
-        T = Tuple{(julia_type(x.field_type, API.nullable(x), API.isunsigned(x)) for x in fields)...}
+        T = Tuple{(julia_type(x.field_type, API.notnullable(x), API.isunsigned(x)) for x in fields)...}
         hasresult = true
         ncols = length(fields)
         ptr = MySQL.API.mysql_fetch_row(result.ptr)

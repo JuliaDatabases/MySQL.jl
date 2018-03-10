@@ -35,6 +35,7 @@ struct Bit
     bits::UInt64
 end
 Base.show(io::IO, b::Bit) = print(io, "MySQL.API.Bit(\"$(lstrip(bitstring(b.bits), '0'))\")")
+Base.unsigned(::Type{Bit}) = Bit
 
 mysql_type(::Type{Bit}) = MYSQL_TYPE_BIT
 mysql_type(::Type{Cchar}) = MYSQL_TYPE_TINY
