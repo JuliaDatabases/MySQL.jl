@@ -51,6 +51,7 @@ end
 mutable struct Query{hasresult, names, T}
     result::Result
     ptr::Ptr{Ptr{Int8}}
+    lengths::Ptr{Culong}
     ncols::Int
     nrows::Int
 end
@@ -82,6 +83,7 @@ function Query(conn::Connection, sql::String; kwargs...)
         hasresult = true
         ncols = length(fields)
         ptr = MySQL.API.mysql_fetch_row(result.ptr)
+        lengths = MySQL.API.mysql_fetch_lengths(result.ptr)
     elseif API.mysql_field_count(conn.ptr) == 0
         result = Result(Int(API.mysql_affected_rows(conn.ptr)))
         nrows = ncols = 1
@@ -92,7 +94,7 @@ function Query(conn::Connection, sql::String; kwargs...)
     else
         throw(MySQLInterfaceError("Query expected to produce results but did not."))
     end
-    return Query{hasresult, names, T}(result, ptr, ncols, nrows)
+    return Query{hasresult, names, T}(result, ptr, lengths, ncols, nrows)
 end
 
 function Data.schema(rt::Query{hasresult, names, T}) where {hasresult, names, T}
@@ -116,13 +118,15 @@ cast(str, ::Type{DateTime}) = mysql_datetime(str)
         return T(source.result.ptr)
     else
         deref = unsafe_load(source.ptr, col)
+        len = unsafe_load(source.lengths, col)
         if deref == C_NULL
             val = missing
         else
-            val = cast(unsafe_string(deref), T)
+            val = cast(unsafe_string(deref, len), T)
         end
         if col >= source.ncols
             source.ptr = API.mysql_fetch_row(source.result.ptr)
+            source.lengths = API.mysql_fetch_lengths(source.result.ptr)
         end
     end
     return val

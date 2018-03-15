@@ -453,6 +453,15 @@ function mysql_fetch_fields(results::MYSQL_RES)
                  results)
 end
 
+"""
+Returns the lengths of the columns of the current row within a result set.
+"""
+function mysql_fetch_lengths(results::MYSQL_RES)
+    return @c(:mysql_fetch_lengths,
+                 Ptr{Culong},
+                 (MYSQL_RES, ),
+                 results)
+end
 
 """
 Returns the row from the result set.
