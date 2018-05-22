@@ -91,8 +91,14 @@ execute an sql statement without returning results (useful for DDL statements, u
 """
 function execute!(conn::Connection, sql::String)
     conn.ptr == C_NULL && throw(MySQLInterfaceError("`MySQL.execute!` called with NULL connection."))
-    API.mysql_query(conn.ptr, sql) == 0 || throw(MySQLInternalError(conn))
-    return Int(API.mysql_affected_rows(conn.ptr))
+    status = API.mysql_query(conn.ptr, sql)
+    status == 0 || throw(MySQLInternalError(conn))
+    res = 0
+    while status == 0
+        res += Int(API.mysql_affected_rows(conn.ptr))
+        status = API.mysql_next_result(conn.ptr)
+    end
+    return res
 end
 
 """

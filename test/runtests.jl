@@ -107,3 +107,15 @@ Data.stream!(values, stmt)
 res = MySQL.query(conn, "select * from Employee")
 @test length(res) == 10
 @test length(res[1]) == 9
+
+# test multi-statement execution
+MySQL.execute!(conn, """DROP DATABASE if exists mysqltest2;
+    CREATE DATABASE mysqltest2;
+    USE mysqltest2;
+    CREATE TABLE test (a varchar(20), b integer);
+    INSERT INTO test (a,b) value ("test",123);""")
+
+res = MySQL.query(conn, """select * from test;""")
+
+@test res.a[1] == "test"
+@test res.b[1] == 123
