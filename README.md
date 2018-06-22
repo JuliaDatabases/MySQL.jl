@@ -199,7 +199,7 @@ num_foo = foo[1,1]
 my_stmt = MySQL.Stmt(conn, """INSERT INTO my_second_table ('foo_id','foo_name') VALUES (?,?);""")
 
 for i = 1:num_foo
-  MySQL.execute!(my_stmt, i, "foo_$i")
+  MySQL.execute!(my_stmt, [i, "foo_$i"])
 end
 
 MySQL.disconnect(conn)
