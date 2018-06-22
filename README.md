@@ -62,7 +62,7 @@ Contributions are very welcome, as are feature requests and suggestions. Please 
 ```julia
 MySQL.connect(host::String, user::String, passwd::String; db::String = "", port = "3306", socket::String = MySQL.API.MYSQL_DEFAULT_SOCKET, opts = Dict())
 ```
-Connect to a mysql database. Returns a [`MySQL.Connection`](#mysql.connection) object to be passed to other API functions.
+Connect to a mysql database. Returns a [`MySQL.Connection`](#mysqlconnection) object to be passed to other API functions.
 
 Options are passed via dictionary. The available keys are below and a descrition of the options can be found in the [MySQL documentation](https://dev.mysql.com/doc/refman/8.0/en/mysql-options.html).
 
@@ -142,7 +142,7 @@ MySQL.execute!(stmt::MySQL.Stmt, params)
 ```
 Execute an SQL statement without returning results (useful for DDL statements, update, delete, etc.)
 
-The SQL can either be passed as either a string or a prepared MySQL statement (see [MySQL.Statement](#mysql.statement)).
+The SQL can either be passed as either a string or a prepared MySQL statement (see [MySQL.Statement](#mysqlstatement)).
 
 #### MySQL.insertid
 
