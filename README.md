@@ -142,7 +142,7 @@ MySQL.execute!(stmt::MySQL.Stmt, params)
 ```
 Execute an SQL statement without returning results (useful for DDL statements, update, delete, etc.)
 
-The SQL can either be passed as either a string or a prepared MySQL statement (see [MySQL.Statement](#mysqlstatement)).
+The SQL can either be passed as either a string or a prepared MySQL statement (see [MySQL.Stmt](#mysqlstmt)).
 
 #### MySQL.insertid
 
