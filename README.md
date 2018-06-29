@@ -42,13 +42,13 @@ Contributions are very welcome, as are feature requests and suggestions. Please 
 [docs-stable-img]: https://img.shields.io/badge/docs-stable-blue.svg
 [docs-stable-url]: https://JuliaData.github.io/MySQL.jl/stable
 
-[travis-img]: https://travis-ci.org/JuliaData/MySQL.jl.svg?branch=master
-[travis-url]: https://travis-ci.org/JuliaData/MySQL.jl
+[travis-img]: https://travis-ci.org/JuliaDatabases/MySQL.jl.svg?branch=master
+[travis-url]: https://travis-ci.org/JuliaDatabases/MySQL.jl
 
-[codecov-img]: https://codecov.io/gh/JuliaData/MySQL.jl/branch/master/graph/badge.svg
-[codecov-url]: https://codecov.io/gh/JuliaData/MySQL.jl
+[codecov-img]: https://codecov.io/gh/JuliaDatabases/MySQL.jl/branch/master/graph/badge.svg
+[codecov-url]: https://codecov.io/gh/JuliaDatabases/MySQL.jl
 
-[issues-url]: https://github.com/JuliaData/MySQL.jl/issues
+[issues-url]: https://github.com/JuliaDatabases/MySQL.jl/issues
 
 [pkg-0.6-img]: http://pkg.julialang.org/badges/MySQL_0.6.svg
 [pkg-0.6-url]: http://pkg.julialang.org/?pkg=MySQL
@@ -205,4 +205,3 @@ end
 MySQL.disconnect(conn)
 
 ```
-
