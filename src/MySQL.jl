@@ -1,17 +1,8 @@
-__precompile__(true)
 module MySQL
-using Compat, Compat.Dates
-using DataStreams, Missings
+
+using DataStreams, Missings, Dates
 
 export Data
-
-@static if isdefined(Core, :NamedTuple)
-    macro NT(args...)
-        return esc(:(($(args...),)))
-    end
-else
-    using NamedTuples
-end
 
 abstract type MySQLError end
 # For errors that happen in MySQL.jl
@@ -130,10 +121,5 @@ query(source::Query, sink=Data.Table, args...; append::Bool=false, transforms::D
 query(source::Query, sink::T; append::Bool=false, transforms::Dict=Dict{Int,Function}()) where {T} = (sink = Data.stream!(source, sink; append=append, transforms=transforms); return Data.close!(sink))
 
 include("prepared.jl")
-
-Base.@deprecate mysql_options MySQL.setoptions!
-Base.@deprecate mysql_connect MySQL.connect
-Base.@deprecate mysql_disconnect MySQL.disconnect
-Base.@deprecate mysql_insert_id MySQL.insertid
 
 end # module

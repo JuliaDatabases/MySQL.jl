@@ -27,10 +27,6 @@ const MYSQL_TYPE_VAR_STRING  = UInt32(253)
 const MYSQL_TYPE_STRING      = UInt32(254)
 const MYSQL_TYPE_GEOMETRY    = UInt32(255)
 
-if length(methods(Base.bitstring)) == 1
-    bitstring(x) = bits(x)
-end
-
 struct Bit
     bits::UInt64
 end
@@ -161,7 +157,7 @@ const MYSQL_DEFAULT_PORT = 3306
 const CR_SERVER_GONE_ERROR = 2006
 const CR_SERVER_LOST = 2013
 
-if Compat.Sys.iswindows()
+if Sys.iswindows()
 	const MYSQL_DEFAULT_SOCKET = "MySQL"
 else
 	const MYSQL_DEFAULT_SOCKET = "/tmp/mysql.sock"

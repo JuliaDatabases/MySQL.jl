@@ -36,7 +36,7 @@ mutable struct Result
     function Result(ptr)
         res = new(ptr)
         if ptr != C_NULL
-            @compat finalizer(API.mysql_free_result, res)
+            finalizer(API.mysql_free_result, res)
         end
         return res
     end

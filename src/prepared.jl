@@ -27,7 +27,7 @@ mutable struct Stmt
         API.mysql_stmt_prepare(ptr, sql) != 0 && throw(MySQLInternalError(conn))
         nparams = API.mysql_stmt_param_count(ptr)
         stmt = new(ptr, sql, nparams, 0)
-        @compat finalizer(x->API.mysql_stmt_close(x.ptr), stmt)
+        finalizer(x->API.mysql_stmt_close(x.ptr), stmt)
         return stmt
     end
 end

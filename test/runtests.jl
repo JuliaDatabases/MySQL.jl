@@ -1,13 +1,5 @@
 using MySQL, Missings
-using Compat, Compat.Test, Compat.Dates
-
-@static if isdefined(Core, :NamedTuple)
-    macro NT(args...)
-        return esc(:(($(args...),)))
-    end
-else
-    using NamedTuples
-end
+using Test, Dates
 
 if haskey(ENV, "APPVEYOR_BUILD_NUMBER")
     pwd = "Password12!"
@@ -52,7 +44,7 @@ res = MySQL.query(conn, "select * from Employee")
 @test length(res[1]) == 4
 @test res.ID == [1,2,3,4]
 
-expected = @NT(
+expected = (
   ID        = Int32[1, 2, 3, 4],
   Name      = Union{Missing, String}["John", "Tom", "Jim", "Tim"],
   Salary    = Union{Missing, Float32}[10000.5, 20000.25, 30000.0, 15000.5],
@@ -73,9 +65,7 @@ MySQL.execute!(conn, "INSERT INTO Employee () VALUES ();")
 res = MySQL.query(conn, "select * from Employee")
 
 foreach(x->push!(x[2], x[1] == 1 ? Int32(5) : missing), enumerate(expected))
-if isdefined(Core, :NamedTuple)
 @test isequal(res, expected)
-end
 
 q = MySQL.Query(conn, "select * from Employee")
 for row in Data.rows(q)
@@ -97,10 +87,10 @@ res = MySQL.query(conn, "select Salary from Employee")
 
 stmt = MySQL.Stmt(conn, "INSERT INTO Employee (Name, Salary, JoinDate, LastLogin, LunchTime, OfficeNo, empno) VALUES (?, ?, ?, ?, ?, ?, ?);")
 
-values = [@NT(Name="John", Salary=10000.50, JoinDate=Date("2015-8-3"), LastLogin=DateTime("2015-9-5T12:31:30"), LunchTime=Dates.Time(12,00,00), OfficeNo=1, empno=1301),
-          @NT(Name="Tom",  Salary=20000.25, JoinDate=Date("2015-8-4"), LastLogin=DateTime("2015-10-12T13:12:14"), LunchTime=Dates.Time(13,00,00), OfficeNo=12, empno=1422),
-          @NT(Name="Jim",  Salary=30000.00, JoinDate=Date("2015-6-2"), LastLogin=DateTime("2015-9-5T10:05:10"), LunchTime=Dates.Time(12,30,00), OfficeNo=45, empno=1567),
-          @NT(Name="Tim",  Salary=15000.50, JoinDate=Date("2015-7-25"), LastLogin=DateTime("2015-10-10T12:12:25"), LunchTime=Dates.Time(12,30,00), OfficeNo=56, empno=3200)]
+values = [(Name="John", Salary=10000.50, JoinDate=Date("2015-8-3"), LastLogin=DateTime("2015-9-5T12:31:30"), LunchTime=Dates.Time(12,00,00), OfficeNo=1, empno=1301),
+          (Name="Tom",  Salary=20000.25, JoinDate=Date("2015-8-4"), LastLogin=DateTime("2015-10-12T13:12:14"), LunchTime=Dates.Time(13,00,00), OfficeNo=12, empno=1422),
+          (Name="Jim",  Salary=30000.00, JoinDate=Date("2015-6-2"), LastLogin=DateTime("2015-9-5T10:05:10"), LunchTime=Dates.Time(12,30,00), OfficeNo=45, empno=1567),
+          (Name="Tim",  Salary=15000.50, JoinDate=Date("2015-7-25"), LastLogin=DateTime("2015-10-10T12:12:25"), LunchTime=Dates.Time(12,30,00), OfficeNo=56, empno=3200)]
 
 Data.stream!(values, stmt)
 
