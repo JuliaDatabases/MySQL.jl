@@ -180,7 +180,7 @@ struct MYSQL_STMT # This is different in mariadb header file.
 end
 
 macro c(func, ret, args, vals...)
-    if Compat.Sys.iswindows()
+    if Sys.iswindows()
         esc(quote
             ret = ccall( ($func, libmariadb), stdcall, $ret, $args, $(vals...))
         end)
