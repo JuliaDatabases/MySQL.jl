@@ -70,7 +70,7 @@ const MYSQL_DATETIME_FORMAT = Dates.DateFormat("yyyy-mm-dd HH:MM:SS.s")
 
 mysql_time(str) = Dates.Time(map(x->parse(Int, x), split(str, ':'))...)
 mysql_date(str) = Dates.Date(str, MYSQL_DATE_FORMAT)
-mysql_datetime(str) = Dates.DateTime(contains(str, " ") ? str : "1970-01-01 " * str, MYSQL_DATETIME_FORMAT)
+mysql_datetime(str) = Dates.DateTime(occursin(" ", str) ? str : "1970-01-01 " * str, MYSQL_DATETIME_FORMAT)
 export mysql_time, mysql_date, mysql_datetime
 
 function Base.convert(::Type{DateTime}, mtime::MYSQL_TIME)
