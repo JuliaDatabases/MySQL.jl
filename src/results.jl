@@ -257,7 +257,7 @@ end
 Get a bind array for binding to results.
 """
 function mysql_bind_array(meta::MySQLMetadata)
-    bindarr = Vector{MYSQL_BIND}(uninitialized, meta.nfields)
+    bindarr = Vector{MYSQL_BIND}(undef, meta.nfields)
     for i in 1:meta.nfields
         bufflen = zero(Culong)
         bindbuff = C_NULL

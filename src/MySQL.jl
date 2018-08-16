@@ -67,7 +67,7 @@ end
 Escapes a string using `mysql_real_escape_string()`, returns the escaped string.
 """
 function escape(conn::MySQL.Connection, str::String)
-    output = Vector{UInt8}(uninitialized, length(str) * 2 + 1)
+    output = Vector{UInt8}(undef, length(str) * 2 + 1)
     output_len = API.mysql_real_escape_string(conn.ptr, output, str, Culong(length(str)))
     if output_len == typemax(Cuint)
         throw(MySQLInternalError(conn))
