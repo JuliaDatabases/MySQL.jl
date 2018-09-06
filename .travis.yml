@@ -6,7 +6,6 @@ services:
 
 os:
   - linux
-  - osx
 
 julia:
   - 1.0
@@ -24,8 +23,6 @@ after_success:
 before_script:
 - export OLD_PATH=$LD_LIBRARY_PATH
 - export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:`mysql_config --libs | cut -d ' ' -f1 | sed 's/-L//'`
-- if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then brew install mysql          ; fi
-- if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then mysql.server start --default-authentication-plugin=mysql_native_password          ; fi
 
 after_script:
 - export LD_LIBRARY_PATH=$OLD_PATH
