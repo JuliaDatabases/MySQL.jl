@@ -1,5 +1,4 @@
-using MySQL, Missings
-using Test, Dates
+using Test, MySQL, Tables, Dates
 
 if haskey(ENV, "APPVEYOR_BUILD_NUMBER")
     pwd = "Password12!"
@@ -68,7 +67,7 @@ foreach(x->push!(x[2], x[1] == 1 ? Int32(5) : missing), enumerate(expected))
 @test isequal(res, expected)
 
 q = MySQL.Query(conn, "select * from Employee")
-for row in Data.rows(q)
+for row in q
     println(row)
 end
 
@@ -92,7 +91,7 @@ values = [(Name="John", Salary=10000.50, JoinDate=Date("2015-8-3"), LastLogin=Da
           (Name="Jim",  Salary=30000.00, JoinDate=Date("2015-6-2"), LastLogin=DateTime("2015-9-5T10:05:10"), LunchTime=Dates.Time(12,30,00), OfficeNo=45, empno=1567),
           (Name="Tim",  Salary=15000.50, JoinDate=Date("2015-7-25"), LastLogin=DateTime("2015-10-10T12:12:25"), LunchTime=Dates.Time(12,30,00), OfficeNo=56, empno=3200)]
 
-Data.stream!(values, stmt)
+MySQL.execute!(values, stmt)
 
 res = MySQL.query(conn, "select * from Employee")
 @test length(res) == 10

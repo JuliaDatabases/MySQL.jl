@@ -65,8 +65,8 @@ end
 Escapes a string using `mysql_real_escape_string()`, returns the escaped string.
 """
 function escape(conn::MySQL.Connection, str::String)
-    output = Vector{UInt8}(undef, length(str) * 2 + 1)
-    output_len = API.mysql_real_escape_string(conn.ptr, output, str, Culong(length(str)))
+    output = Vector{UInt8}(undef, sizeof(str) * 2 + 1)
+    output_len = API.mysql_real_escape_string(conn.ptr, output, str, Culong(sizeof(str)))
     if output_len == typemax(Cuint)
         throw(MySQLInternalError(conn))
     end
@@ -103,20 +103,41 @@ See list of DataStreams implementations [here](https://github.com/JuliaData/Data
 """
 function query end
 
-# function query(conn::Connection, sql::String, sink::Type=Data.Table, args...; append::Bool=false, kwargs...)
-#     source = Query(conn, sql; kwargs...)
-#     sink = Data.stream!(source, sink, args...; append=append)
-#     return Data.close!(sink)
-# end
+function query(conn::Connection, sql::String, sink::Union{Type, Nothing}=nothing, args...; append::Bool=false, kwargs...)
+    if sink === nothing
+        Base.depwarn("`MySQL.query(conn, sql)` will return a MySQL.Query in the future; to materialize the result, use `MySQL.query(conn, sql) |> columntable` or `MySQL.query(conn, sql) |> DataFrame` instead", nothing)
+        sink = columntable
+    else
+        Base.depwarn("`MySQL.query(conn, sql, $sink)` is deprecated; use `MySQL.query(conn, sql) |> $sink(args...)` instead", nothing)
+    end
+    if append
+        Base.depwarn("`append=true` is deprecated; use sink-specific append features instead. For example, `columntable(existing, MySQL.query(conn, sql))` or `append!(existing_df, MySQL.query(conn, sql))`")
+    end
+    return Query(conn, sql; kwargs...) |> sink
+end
 
-# function query(conn::Connection, sql::String, sink::T; append::Bool=false, kwargs...) where {T}
-#     source = Query(conn, sql; kwargs...)
-#     sink = Data.stream!(source, sink; append=append)
-#     return Data.close!(sink)
-# end
+function query(conn::Connection, sql::String, sink::T; append::Bool=false, kwargs...) where {T}
+    Base.depwarn("`MySQL.query(conn, sql, ::$T)` is deprecated; `MySQL.Query` now supports the Tables.jl interface, so any valid Tables.jl sink can receive a resultset", nothing)
+    if append
+        Base.depwarn("`append=true` is deprecated; use sink-specific append features instead. For example, `columntable(existing, MySQL.query(conn, sql))` or `append!(existing_df, MySQL.query(conn, sql))`")
+    end
+    return Query(conn, sql; kwargs...) |> T
+end
 
-# query(source::Query, sink=Data.Table, args...; append::Bool=false, transforms::Dict=Dict{Int,Function}()) = (sink = Data.stream!(source, sink, args...; append=append, transforms=transforms); return Data.close!(sink))
-# query(source::Query, sink::T; append::Bool=false, transforms::Dict=Dict{Int,Function}()) where {T} = (sink = Data.stream!(source, sink; append=append, transforms=transforms); return Data.close!(sink))
+function query(source::Query, sink=columntable, args...; append::Bool=false)
+    Base.depwarn("`MySQL.query(q::MySQL.Query)` is deprecated and will be removed in the future; `MySQL.Query` itself will iterate rows as NamedTuples and supports the Tables.jl interface", nothing)
+    if append
+        Base.depwarn("`append=true` is deprecated; use sink-specific append features instead. For example, `columntable(existing, MySQL.query(conn, sql))` or `append!(existing_df, MySQL.query(conn, sql))`")
+    end
+    return source |> sink
+end
+function query(source::Query, sink::T; append::Bool=false) where {T}
+    Base.depwarn("`MySQL.query(q::MySQL.Query)` is deprecated and will be removed in the future; `MySQL.Query` itself will iterate rows as NamedTuples and supports the Tables.jl interface", nothing)
+    if append
+        Base.depwarn("`append=true` is deprecated; use sink-specific append features instead. For example, `columntable(existing, MySQL.query(conn, sql))` or `append!(existing_df, MySQL.query(conn, sql))`")
+    end
+    return source |> T
+end
 
 include("prepared.jl")
 
