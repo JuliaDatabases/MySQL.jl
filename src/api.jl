@@ -1,6 +1,6 @@
 module API
 
-using Dates, DecFP, Missings
+using Dates, DecFP
 
 # Load libmariadb from our deps.jl
 const depsjl_path = joinpath(dirname(@__FILE__), "..", "deps", "deps.jl")

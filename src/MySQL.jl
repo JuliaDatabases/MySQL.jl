@@ -1,8 +1,6 @@
 module MySQL
 
-using DataStreams, Missings, Dates
-
-export Data
+using Dates, Tables
 
 abstract type MySQLError end
 # For errors that happen in MySQL.jl
@@ -105,20 +103,20 @@ See list of DataStreams implementations [here](https://github.com/JuliaData/Data
 """
 function query end
 
-function query(conn::Connection, sql::String, sink::Type=Data.Table, args...; append::Bool=false, kwargs...)
-    source = Query(conn, sql; kwargs...)
-    sink = Data.stream!(source, sink, args...; append=append)
-    return Data.close!(sink)
-end
+# function query(conn::Connection, sql::String, sink::Type=Data.Table, args...; append::Bool=false, kwargs...)
+#     source = Query(conn, sql; kwargs...)
+#     sink = Data.stream!(source, sink, args...; append=append)
+#     return Data.close!(sink)
+# end
 
-function query(conn::Connection, sql::String, sink::T; append::Bool=false, kwargs...) where {T}
-    source = Query(conn, sql; kwargs...)
-    sink = Data.stream!(source, sink; append=append)
-    return Data.close!(sink)
-end
+# function query(conn::Connection, sql::String, sink::T; append::Bool=false, kwargs...) where {T}
+#     source = Query(conn, sql; kwargs...)
+#     sink = Data.stream!(source, sink; append=append)
+#     return Data.close!(sink)
+# end
 
-query(source::Query, sink=Data.Table, args...; append::Bool=false, transforms::Dict=Dict{Int,Function}()) = (sink = Data.stream!(source, sink, args...; append=append, transforms=transforms); return Data.close!(sink))
-query(source::Query, sink::T; append::Bool=false, transforms::Dict=Dict{Int,Function}()) where {T} = (sink = Data.stream!(source, sink; append=append, transforms=transforms); return Data.close!(sink))
+# query(source::Query, sink=Data.Table, args...; append::Bool=false, transforms::Dict=Dict{Int,Function}()) = (sink = Data.stream!(source, sink, args...; append=append, transforms=transforms); return Data.close!(sink))
+# query(source::Query, sink::T; append::Bool=false, transforms::Dict=Dict{Int,Function}()) where {T} = (sink = Data.stream!(source, sink; append=append, transforms=transforms); return Data.close!(sink))
 
 include("prepared.jl")
 

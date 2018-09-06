@@ -61,10 +61,6 @@ function julia_type(field_type, notnullable, isunsigned)
     return notnullable ? T2 : Union{Missing, T2}
 end
 
-function MySQLRowIterator(args...)
-    throw(ArgumentError("`MySQLRowIterator` is deprecated, use `Data.rows(MySQL.Query(conn, sql))` to get a NamedTuple row iterator for a query resultset"))
-end
-
 """
     MySQL.Query(conn, sql, sink=Data.Table; append::Bool=false) => MySQL.Query
 
@@ -95,12 +91,13 @@ function Query(conn::Connection, sql::String; kwargs...)
     return Query{hasresult, names, T}(result, ptr, ncols, nrows)
 end
 
-function Data.schema(rt::Query{hasresult, names, T}) where {hasresult, names, T}
-    return Data.Schema(Type[A for A in T.parameters],
-                        collect(map(string, names)), rt.nrows)
-end
-Data.isdone(source::Query, row, col) = row > source.nrows
-Data.streamtype(::Type{Query}, ::Type{Data.Field}) = true
+Tables.istable(::Type{<:Query}) = true
+Tables.rowaccess(::Type{<:Query}) = true
+Tables.rows(q::Query) = q
+Tables.schema(q::Query{hasresult, names, T}) where {hasresult, names, T} = Tables.Schema(names, T)
+
+Base.length(q::Query) = q.ptr == C_NULL ? 0 : q.nrows
+Base.eltype(q::Query{hasresult, names, types}) where {hasresult, names, types} = NamedTuple{names, types}
 
 cast(str, ::Type{Union{Missing, T}}) where {T} = cast(str, T)
 cast(str, ::Type{API.Bit}) = API.Bit(isempty(str) ? 0 : UInt64(str[1]))
@@ -111,20 +108,25 @@ cast(str, ::Type{Time}) = mysql_time(str)
 cast(str, ::Type{Date}) = mysql_date(str)
 cast(str, ::Type{DateTime}) = mysql_datetime(str)
 
-@inline function Data.streamfrom(source::Query{hasresult}, ::Type{Data.Field}, ::Type{T}, row, col) where {hasresult, T}
-    if !hasresult
-        return T(source.result.ptr)
-    else
-        deref = unsafe_load(source.ptr, col)
-        if deref == C_NULL
-            val = missing
-        else
-            val = cast(unsafe_string(deref), T)
-        end
-        if col >= source.ncols
-            source.ptr = API.mysql_fetch_row(source.result.ptr)
-        end
-    end
-    return val
+function getvalue(ptr, col, ::Type{T}) where {T}
+    deref = unsafe_load(ptr, col)
+    return deref == C_NULL ? missing : cast(unsafe_string(deref), T)
 end
-Data.accesspattern(::Query) = Data.RandomAccess()
+
+function generate_namedtuple(::Type{NamedTuple{names, types}}, q) where {names, types}
+    if @generated
+        vals = Tuple(:(getvalue(q.ptr, $i, $(fieldtype(types, i)))) for i = 1:fieldcount(types))
+        return :(NamedTuple{names, types}(($(vals...),)))
+    else
+        return NamedTuple{names, types}(Tuple(getvalue(q.ptr, i, fieldtype(types, i)) for i = 1:fieldcount(types)))
+    end
+end
+
+function Base.iterate(q::Query{hasresult, names, types}, st=1) where {hasresult, names, types}
+    st > length(q) && return nothing
+    !hasresult && return (num_rows_affected=Int(q.result.ptr),), 2
+    q.ptr == C_NULL && return nothing
+    nt = generate_namedtuple(NamedTuple{names, types}, q)
+    q.ptr = API.mysql_fetch_row(q.result.ptr)
+    return nt, st + 1
+end

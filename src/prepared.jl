@@ -48,15 +48,26 @@ function execute!(stmt::Stmt, params=[])
     return API.mysql_stmt_affected_rows(stmt.ptr)
 end
 
-Data.streamtypes(::Type{Stmt}) = [Data.Row]
-function Data.streamto!(sink::Stmt, ::Type{Data.Row}, val, row, col)
-    sink.rows_affected += execute!(sink, val)
-    return
-end
+execute!(itr, conn::Connection, sql::String) = execute!(itr, Stmt(conn, sql))
+function execute!(itr, stmt::Stmt)
+    rows = Tables.rows(itr)
+    state = iterate(rows)
+    state === nothing && return stmt
+    row, st = state
+    sch = Tables.Schema(propertynames(row), nothing)
+    binds = Vector{API.MYSQL_BIND}(undef, stmt.nparams)
+    bindptr = pointer(binds)
 
-Stmt(sch::Data.Schema, ::Type{Data.Row}, append::Bool, conn::Connection, sql::String) = Stmt(conn, sql)
-Stmt(sink::Stmt, sch::Data.Schema, ::Type{Data.Row}, append::Bool) = sink
-
-function MySQLStatementIterator(args...)
-    throw(ArgumentError("`MySQLStatementIterator` is deprecated; instead, you can create a prepared statement by doing `stmt = MySQL.Stmt(conn, sql)` and then \"stream\" parameters to it, with the statement being executed once for each row in the source, like `Data.stream!(source, stmt)`"))
+    while true
+        Tables.eachcolumn(sch, row) do val, col, nm
+            binds[col] = bind(val)
+        end
+        API.mysql_stmt_bind_param(stmt.ptr, bindptr) == 0 || throw(MySQLStatementError(stmt.ptr))
+        API.mysql_stmt_execute(stmt.ptr) == 0 || throw(MySQLStatementError(stmt.ptr))
+        stmt.rows_affected += API.mysql_stmt_affected_rows(stmt.ptr)
+        state = iterate(rows, st)
+        state === nothing && break
+        row, st = state
+    end
+    return stmt
 end
