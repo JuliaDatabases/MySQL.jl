@@ -24,7 +24,7 @@ function setoptions!(ptr, opts)
 end
 
 """
-    MySQL.connect(host::String, user::String, passwd::String; db::String = "", port = "3306", socket::String = MySQL.API.MYSQL_DEFAULT_SOCKET, opts = Dict())
+    MySQL.connect(host::String, user::String, passwd::String; db::String="", port::Integer=3306, unix_socket::String=API.MYSQL_DEFAULT_SOCKET, client_flag=API.CLIENT_MULTI_STATEMENTS, opts = Dict())
 
 Connect to a MySQL database.
 """
