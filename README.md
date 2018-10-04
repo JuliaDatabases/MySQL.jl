@@ -60,7 +60,7 @@ Contributions are very welcome, as are feature requests and suggestions. Please 
 #### MySQL.connect
 
 ```julia
-MySQL.connect(host::String, user::String, passwd::String; db::String = "", port = "3306", socket::String = MySQL.API.MYSQL_DEFAULT_SOCKET, opts = Dict())
+MySQL.connect(host::String, user::String, passwd::String; db::String="", port::Integer=3306, unix_socket::String=API.MYSQL_DEFAULT_SOCKET, client_flag=API.CLIENT_MULTI_STATEMENTS, opts = Dict())
 ```
 Connect to a mysql database. Returns a [`MySQL.Connection`](#mysqlconnection) object to be passed to other API functions.
 
@@ -156,7 +156,7 @@ Get the insert id of the most recently executed SQL statement.
 #### MySQL.Connection
 
 ```julia
-MySQL.connect(host::String, user::String, passwd::String; db::String = "", port = "3306", socket::String = MySQL.API.MYSQL_DEFAULT_SOCKET, opts = Dict())
+MySQL.connect(host::String, user::String, passwd::String; db::String="", port::Integer=3306, unix_socket::String=API.MYSQL_DEFAULT_SOCKET, client_flag=API.CLIENT_MULTI_STATEMENTS, opts = Dict())
 ```
 A connection to a MySQL database.
 
