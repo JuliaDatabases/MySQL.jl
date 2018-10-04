@@ -105,10 +105,10 @@ function query end
 
 function query(conn::Connection, sql::String, sink::Union{Type, Nothing}=nothing, args...; append::Bool=false, kwargs...)
     if sink === nothing
-        Base.depwarn("`MySQL.query(conn, sql)` will return a MySQL.Query in the future; to materialize the result, use `MySQL.query(conn, sql) |> columntable` or `MySQL.query(conn, sql) |> DataFrame` instead", nothing)
+        Base.depwarn("`MySQL.query(conn, sql)` will return a MySQL.Query in the future; to materialize the result, use `MySQL.Query(conn, sql) |> columntable` or `MySQL.Query(conn, sql) |> DataFrame` instead", nothing)
         sink = columntable
     else
-        Base.depwarn("`MySQL.query(conn, sql, $sink)` is deprecated; use `MySQL.query(conn, sql) |> $sink(args...)` instead", nothing)
+        Base.depwarn("`MySQL.query(conn, sql, $sink)` is deprecated; use `MySQL.Query(conn, sql) |> $sink(args...)` instead", nothing)
     end
     if append
         Base.depwarn("`append=true` is deprecated; use sink-specific append features instead. For example, `columntable(existing, MySQL.query(conn, sql))` or `append!(existing_df, MySQL.query(conn, sql))`")
