@@ -28,7 +28,7 @@ julia> Pkg.add("MySQL")
 
 ## Project Status
 
-The package is tested against the current Julia `0.6` release and nightly on Linux and OS X.
+The package is tested against the current Julia `1.0` release and nightly on Linux and OS X.
 
 ## Contributing and Questions
 
@@ -64,7 +64,7 @@ MySQL.connect(host::String, user::String, passwd::String; db::String="", port::I
 ```
 Connect to a mysql database. Returns a [`MySQL.Connection`](#mysqlconnection) object to be passed to other API functions.
 
-Options are passed via dictionary. The available keys are below and a descrition of the options can be found in the [MySQL documentation](https://dev.mysql.com/doc/refman/8.0/en/mysql-options.html).
+Options are passed via dictionary. The available keys are below and a description of the options can be found in the [MySQL documentation](https://dev.mysql.com/doc/refman/8.0/en/mysql-options.html).
 
 ```
 MySQL.API.MYSQL_OPT_CONNECT_TIMEOUT
