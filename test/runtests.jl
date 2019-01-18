@@ -84,6 +84,7 @@ affrows = MySQL.execute!(stmt, [missing, 2])
 res = MySQL.Query(conn, "select Salary from Employee") |> columntable
 @test all(res[1][3:end] .=== missing)
 
+# test prepared statements
 stmt = MySQL.Stmt(conn, "INSERT INTO Employee (Name, Salary, JoinDate, LastLogin, LunchTime, OfficeNo, empno) VALUES (?, ?, ?, ?, ?, ?, ?);")
 
 values = [(Name="John", Salary=10000.50, JoinDate=Date("2015-8-3"), LastLogin=DateTime("2015-9-5T12:31:30"), LunchTime=Dates.Time(12,00,00), OfficeNo=1, empno=1301),
