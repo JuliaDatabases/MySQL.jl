@@ -175,7 +175,7 @@ Alternately, a source implementing the Tables.jl interface can be streamed by ex
 #### MySQL.Query
 
 ```julia
-MySQL.Query(conn, sql, sink=Data.Table; append::Bool=false) => MySQL.Query
+MySQL.Query(conn, sql, sink=Data.Table, kwargs...) => MySQL.Query
 ```
 
 Execute an SQL statement and return a `MySQL.Query` object. Result rows can be iterated.
