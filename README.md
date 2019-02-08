@@ -131,8 +131,6 @@ Execute an SQL statement and return the results as a MySQL.Query object (see [My
 The results can be materialized as a data sink that implements the Tables.jl interface.
 E.g. `MySQL.Query(conn, sql) |> DataFrame` or `MySQL.Query(conn, sql) |> columntable`
 
-Passing `append=true` as a keyword argument will cause the resultset to be _appended_ to the sink instead of replacing.
-
 #### MySQL.execute!
 
 ```julia
