@@ -62,7 +62,7 @@ function julia_type(field_type, notnullable, isunsigned)
 end
 
 """
-    MySQL.Query(conn, sql, sink=Data.Table; append::Bool=false) => MySQL.Query
+    MySQL.Query(conn, sql, sink=Data.Table; kwargs...) => MySQL.Query
 
 Execute an SQL statement and return a `MySQL.Query` object. Result rows can be
 iterated as NamedTuples via `Data.rows(query)` where `query` is the `MySQL.Query`
