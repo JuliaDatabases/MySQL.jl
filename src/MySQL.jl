@@ -14,9 +14,24 @@ using .API
 
 include("types.jl")
 
+
+#Dict of the default option to pass to the driver
+const defaultOption = Dict(
+    MySQL.API.MYSQL_SET_CHARSET_NAME=>"utf8"
+)
+
+#load default option with priority to option explicitly passed via opts
+function addDefaultOption(opts::Dict)::Dict
+    out = Dict()
+    for (k, v) in defaultOption out[k] = v end
+    for (k, v) in opts out[k] = v end
+    return(out)
+end
+
 function setoptions!(ptr, opts)
     ptr == C_NULL && throw(MySQLInterfaceError("`MySQL.setoptions!` called with NULL connection."))
-    for (k, v) in opts
+    fullOpts = addDefaultOption(opts)
+    for (k, v) in fullOpts
         val = API.mysql_options(ptr, k, v)
         val != 0 && throw(MySQLInternalError(ptr))
     end
