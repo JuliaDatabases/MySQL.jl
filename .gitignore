@@ -37,3 +37,6 @@ deps/mysql-connector*
 deps/downloads/
 deps/manifests/
 deps/build.log
+
+# Manifest file
+Manifest.toml

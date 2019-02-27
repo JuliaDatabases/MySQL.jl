@@ -37,7 +37,7 @@ MySQL.execute!(conn, """INSERT INTO Employee (Name, Salary, JoinDate, LastLogin,
 # id = MySQL.insertid(conn)
 # println("Last insert id was $id")
 
-res = MySQL.query(conn, "select * from Employee")
+res = MySQL.Query(conn, "select * from Employee") |> columntable
 
 @test length(res) == 10
 @test length(res[1]) == 4
@@ -61,7 +61,7 @@ expected = (
 # insert null row
 MySQL.execute!(conn, "INSERT INTO Employee () VALUES ();")
 
-res = MySQL.query(conn, "select * from Employee")
+res = MySQL.Query(conn, "select * from Employee") |> columntable
 
 foreach(x->push!(x[2], x[1] == 1 ? Int32(5) : missing), enumerate(expected))
 @test isequal(res, expected)
@@ -76,14 +76,15 @@ end
 stmt = MySQL.Stmt(conn, "UPDATE Employee SET Salary = ? WHERE ID > ?;")
 affrows = MySQL.execute!(stmt, [25000, 2])
 
-res = MySQL.query(conn, "select Salary from Employee")
+res = MySQL.Query(conn, "select Salary from Employee") |> columntable
 @test all(res[1][3:end] .== 25000)
 
 affrows = MySQL.execute!(stmt, [missing, 2])
 
-res = MySQL.query(conn, "select Salary from Employee")
+res = MySQL.Query(conn, "select Salary from Employee") |> columntable
 @test all(res[1][3:end] .=== missing)
 
+# test prepared statements
 stmt = MySQL.Stmt(conn, "INSERT INTO Employee (Name, Salary, JoinDate, LastLogin, LunchTime, OfficeNo, empno) VALUES (?, ?, ?, ?, ?, ?, ?);")
 
 values = [(Name="John", Salary=10000.50, JoinDate=Date("2015-8-3"), LastLogin=DateTime("2015-9-5T12:31:30"), LunchTime=Dates.Time(12,00,00), OfficeNo=1, empno=1301),
@@ -93,7 +94,7 @@ values = [(Name="John", Salary=10000.50, JoinDate=Date("2015-8-3"), LastLogin=Da
 
 MySQL.execute!(values, stmt)
 
-res = MySQL.query(conn, "select * from Employee")
+res = MySQL.Query(conn, "select * from Employee") |> columntable
 @test length(res) == 10
 @test length(res[1]) == 9
 
@@ -104,7 +105,7 @@ MySQL.execute!(conn, """DROP DATABASE if exists mysqltest2;
     CREATE TABLE test (a varchar(20), b integer);
     INSERT INTO test (a,b) value ("test",123);""")
 
-res = MySQL.query(conn, """select * from test;""")
+res = MySQL.Query(conn, """select * from test;""") |> columntable
 
 @test res.a[1] == "test"
 @test res.b[1] == 123

@@ -62,9 +62,13 @@ function julia_type(field_type, notnullable, isunsigned)
 end
 
 """
-    MySQL.Query(conn, sql, sink=Data.Table; append::Bool=false) => MySQL.Query
+    MySQL.Query(conn, sql, sink=Data.Table; kwargs...) => MySQL.Query
 
-execute an sql statement and return a `MySQL.Query` object. Result rows can be iterated as NamedTuples via `Data.rows(query)` where `query` is the `MySQL.Query` object. Results can also be streamed to any valid `Data.Sink` via `Data.stream!(query, sink)`.
+Execute an SQL statement and return a `MySQL.Query` object. Result rows can be
+iterated as NamedTuples via `Data.rows(query)` where `query` is the `MySQL.Query`
+object.
+
+To materialize the results as a `DataFrame`, use `MySQL.query(conn, sql) |> DataFrame`.
 """
 function Query(conn::Connection, sql::String; kwargs...)
     conn.ptr == C_NULL && throw(MySQLInterfaceError("Method called with null connection."))
