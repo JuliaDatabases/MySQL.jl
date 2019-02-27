@@ -19,7 +19,7 @@ const MYSQL_ROW = Ptr{Ptr{Cchar}}  # pointer to an array of strings
 const MYSQL_TYPE = UInt32
 
 """
-The field object that contains the metadata of the table. 
+The field object that contains the metadata of the table.
 Returned by mysql_fetch_fields API.
 """
 struct MYSQL_FIELD
@@ -114,8 +114,8 @@ struct MYSQL_BIND
     store_param_func::Ptr{Cvoid}
     fetch_result::Ptr{Cvoid}
     skip_result::Ptr{Cvoid}
-    buffer_length::Culong 
-    offset::Culong 
+    buffer_length::Culong
+    offset::Culong
     length_value::Culong
     param_number::Cuint
     pack_length::Cuint
@@ -438,6 +438,13 @@ end
 
 function mysql_store_result(mysqlptr::Ptr{Cvoid})
     return @c(:mysql_store_result,
+                 MYSQL_RES,
+                 (Ptr{Cvoid}, ),
+                 mysqlptr)
+end
+
+function mysql_use_result(mysqlptr::Ptr{Cvoid})
+    return @c(:mysql_use_result,
                  MYSQL_RES,
                  (Ptr{Cvoid}, ),
                  mysqlptr)
