@@ -9,13 +9,13 @@ Base.showerror(io::IO, e::MySQLStatementError) = print(io, unsafe_string(API.mys
 
 Prepare an SQL statement that may contain `?` parameter placeholders.
 
-A `MySQL.Stmt` may then be executed by calling `MySQL.execute!(stmt, params)` where `params` are the values to be bound to the `?` placeholders in the original SQL statement. Params must be provided for every `?` and will be matched in the same order they appeared in the original SQL statement.
+A `MySQL.Stmt` may then be executed by calling `MySQL.execute!(stmt, params)` where
+`params` is a vector with the values to be bound to the `?` placeholders in the
+original SQL statement. Params must be provided for every `?` and will be matched in the same order they
+appeared in the original SQL statement.
 
-Bulk statement execution can be accomplished by "streaming" a param source like:
-
-    Data.stream!(source, stmt)
-
-where `source` is any valid `Data.Source` (from DataStreams.jl). As with `MySQL.execute!`, the `source` must provide enough params and will be matched in the same order.
+Alternately, a source implementing the Tables.jl interface can be streamed by executing
+`MySQL.execute!(itr, stmt)`. Each row must have a value for each param.
 """
 mutable struct Stmt
     ptr::Ptr{Cvoid}
