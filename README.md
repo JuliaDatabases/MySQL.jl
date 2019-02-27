@@ -121,18 +121,15 @@ MySQL.escape(conn::MySQL.Connection, str::String) -> String
 ```
 Escape an SQL statement
 
-#### MySQL.query
+#### MySQL.Query (previously MySQL.query)
 
 ```julia
-MySQL.query(conn::MySQL.Connection, sql::String, sink=Data.Table; append::Bool=false) => sink
+MySQL.Query(conn::MySQL.Connection, sql::String; append::Bool=false) => sink
 ```
-Execute an SQL statement and return the results in the `sink`, which can be any valid `Data.Sink` (interface from [DataStreams.jl](https://github.com/JuliaData/DataStreams.jl)). By default, a NamedTuple of Vectors is returned.
+Execute an SQL statement and return the results as a MySQL.Query object (see [MySQL.Query](#mysqlquery)).
 
-Passing `append=true` as a keyword argument will cause the resultset to be _appended_ to the sink instead of replacing.
-
-To get the results as a `DataFrame`, you can just do `MySQL.query(conn, sql, DataFrame)`.
-
-See list of DataStreams implementations [here](https://github.com/JuliaData/DataStreams.jl#list-of-known-implementations)
+The results can be materialized as a data sink that implements the Tables.jl interface.
+E.g. `MySQL.Query(conn, sql) |> DataFrame` or `MySQL.Query(conn, sql) |> columntable`
 
 #### MySQL.execute!
 
@@ -167,22 +164,21 @@ MySQL.Stmt(conn::MySQL.Connection, sql::String) => MySQL.Stmt
 ```
 A prepared SQL statement that may contain `?` parameter placeholders.
 
-A `MySQL.Stmt` may then be executed by calling `MySQL.execute!(stmt, params)` where `params` are the values to be bound to the `?` placeholders in the original SQL statement. Params must be provided for every `?` and will be matched in the same order they appeared in the original SQL statement.
+A `MySQL.Stmt` may then be executed by calling `MySQL.execute!(stmt, params)` where
+`params` is a vector with the values to be bound to the `?` placeholders in the
+original SQL statement. Params must be provided for every `?` and will be matched in the same order they
+appeared in the original SQL statement.
 
-Bulk statement execution can be accomplished by "streaming" a param source like:
-
-```julia
-Data.stream!(source::Data.Source, stmt::MySQL.Stmt)
-```
-
-where `source` is any valid `Data.Source` (from DataStreams.jl). As with `MySQL.execute!`, the `source` must provide enough params and will be matched in the same order.
+Alternately, a source implementing the Tables.jl interface can be streamed by executing
+`MySQL.execute!(itr, stmt)`. Each row must have a value for each param.
 
 #### MySQL.Query
 
 ```julia
-MySQL.Query(conn, sql, sink=Data.Table; append::Bool=false) => MySQL.Query
+MySQL.Query(conn, sql, sink=Data.Table, kwargs...) => MySQL.Query
 ```
-Execute an SQL statement and return a `MySQL.Query` object. Result rows can be iterated as NamedTuples via `Data.rows(query)` where `query` is the `MySQL.Query` object. Results can also be streamed to any valid `Data.Sink` via `Data.stream!(query, sink)`.
+
+Execute an SQL statement and return a `MySQL.Query` object. Result rows can be iterated.
 
 ### Example
 
@@ -193,7 +189,7 @@ using DataFrames
 
 conn = MySQL.connect("localhost", "root", "password", db = "test_db")
 
-foo = MySQL.query(conn, """SELECT COUNT(*) FROM my_first_table;""", DataFrame)
+foo = MySQL.query(conn, """SELECT COUNT(*) FROM my_first_table;""") |> DataFrame
 num_foo = foo[1,1]
 
 my_stmt = MySQL.Stmt(conn, """INSERT INTO my_second_table ('foo_id','foo_name') VALUES (?,?);""")
@@ -203,5 +199,4 @@ for i = 1:num_foo
 end
 
 MySQL.disconnect(conn)
-
 ```
