@@ -73,7 +73,7 @@ end
     MySQL.Query(conn, sql; kwargs...) => MySQL.Query
 
 Execute an SQL statement and return a `MySQL.Query` object. Result rows can be
-iterated as NamedTuples via `Data.rows(query)` where `query` is the `MySQL.Query`
+iterated as NamedTuples via `Table.rows(query)` where `query` is the `MySQL.Query`
 object.
 
 To materialize the results as a `DataFrame`, use `MySQL.query(conn, sql) |> DataFrame`.
