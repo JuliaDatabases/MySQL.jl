@@ -28,7 +28,7 @@ julia> Pkg.add("MySQL")
 
 ## Project Status
 
-The package is tested against the current Julia `1.0` release and nightly on Linux and OS X.
+The package is tested against the current Julia `1.1` release and nightly on Linux and OS X.
 
 ## Contributing and Questions
 
@@ -175,10 +175,23 @@ Alternately, a source implementing the Tables.jl interface can be streamed by ex
 #### MySQL.Query
 
 ```julia
-MySQL.Query(conn, sql, sink=Data.Table, kwargs...) => MySQL.Query
+MySQL.Query(conn, sql, kwargs...) => MySQL.Query
 ```
 
-Execute an SQL statement and return a `MySQL.Query` object. Result rows can be iterated.
+Execute an SQL statement and return a `MySQL.Query` object. Implements the `Tables.jl`
+interface. Result rows can be iterated via `Table.rows`.
+
+#### MySQL.StreamingQuery
+
+```julia
+MySQL.StreamingQuery(conn, sql, kwargs...) => MySQL.StreamingQuery
+```
+
+Execute an SQL statement and return a `MySQL.StreamingQuery` object. This is a lower
+level query interface, which does not implement the `Tables.jl` interface. The
+`MySQL.StreamingQuery` result must be iterated to process the result. Performing the query
+in this way is less memory intensive on MySQL, but the number of returned rows is
+unknown until iteration is complete.
 
 ### Example
 
