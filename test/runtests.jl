@@ -59,7 +59,9 @@ expected = (
 @test res == expected
 
 # Streaming Queries
-sres = MySQL.StreamingQuery(conn, "select * from Employee")
+sres = MySQL.Query(conn, "select * from Employee", streaming=true)
+
+@test sres.nrows == 0
 
 data = []
 for row in sres

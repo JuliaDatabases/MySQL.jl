@@ -191,20 +191,6 @@ macro c(func, ret, args, vals...)
     end
 end
 
-# function  mysql_library_init(argc=0, argv=C_NULL, groups=C_NULL)
-#     return ccall((:mysql_library_init, libmariadb),
-#                  Cint,
-#                  (Cint, Ptr{Ptr{UInt8}}, Ptr{Ptr{UInt8}}),
-#                  argc, argv, groups)
-# end
-
-# function  mysql_library_end()
-#     return ccall((:mysql_library_end, libmariadb),
-#                  Cvoid,
-#                  (),
-#                 )
-# end
-
 """
 Initializes the MYSQL object. Must be called before mysql_real_connect.
 Memory allocated by mysql_init can be freed with mysql_close.
@@ -428,6 +414,9 @@ function mysql_stmt_bind_result(stmtptr, bind::Ptr{MYSQL_BIND})
                  bind)
 end
 
+"""
+Submit a query to the server
+"""
 function mysql_query(mysqlptr::Ptr{Cvoid}, sql::String)
     return @c(:mysql_query,
                  Cint,
@@ -436,6 +425,9 @@ function mysql_query(mysqlptr::Ptr{Cvoid}, sql::String)
                  sql)
 end
 
+"""
+After mysql_query or mysql_real_query used to store result in memory and send all to client
+"""
 function mysql_store_result(mysqlptr::Ptr{Cvoid})
     return @c(:mysql_store_result,
                  MYSQL_RES,
@@ -443,6 +435,9 @@ function mysql_store_result(mysqlptr::Ptr{Cvoid})
                  mysqlptr)
 end
 
+"""
+After mysql_query or mysql_real_query used to stream result and send to client row by row
+"""
 function mysql_use_result(mysqlptr::Ptr{Cvoid})
     return @c(:mysql_use_result,
                  MYSQL_RES,

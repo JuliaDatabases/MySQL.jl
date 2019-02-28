@@ -48,8 +48,9 @@ function metadata(result::API.MYSQL_RES)
     return unsafe_wrap(Array, rawfields, nfields)
 end
 
-# implements Table interface
-mutable struct Query{hasresult, names, T}
+# resulttype is a symbol with values :none :streaming :default
+# names and types relate to the returned columns in the query
+mutable struct Query{resulttype, names, T}
     result::Result
     ptr::Ptr{Ptr{Int8}}
     ncols::Int
@@ -76,18 +77,28 @@ Execute an SQL statement and return a `MySQL.Query` object. Result rows can be
 iterated as NamedTuples via `Table.rows(query)` where `query` is the `MySQL.Query`
 object.
 
+Supported Key Word Arguments:
+* `streaming` - Defaults to false. If true, length of the result size is unknown as the result is returned row by row. May be more memory efficient.
+
 To materialize the results as a `DataFrame`, use `MySQL.query(conn, sql) |> DataFrame`.
 """
 function Query(conn::Connection, sql::String; kwargs...)
     conn.ptr == C_NULL && throw(MySQLInterfaceError("Method called with null connection."))
     MySQL.API.mysql_query(conn.ptr, sql) != 0 && throw(MySQLInternalError(conn))
-    result = MySQL.Result(MySQL.API.mysql_store_result(conn.ptr))
+
+    if get(kwargs, :streaming, false)
+        resulttype = :streaming
+        result = MySQL.Result(MySQL.API.mysql_use_result(conn.ptr))
+    else
+        resulttype = :default
+        result = result = MySQL.Result(MySQL.API.mysql_store_result(conn.ptr))
+    end
+
     if result.ptr != C_NULL
         nrows = MySQL.API.mysql_num_rows(result.ptr)
         fields = MySQL.metadata(result.ptr)
         names = Tuple(ccall(:jl_symbol_n, Ref{Symbol}, (Ptr{UInt8}, Csize_t), x.name, x.name_length) for x in fields)
         T = Tuple{(julia_type(x.field_type, API.notnullable(x), API.isunsigned(x)) for x in fields)...}
-        hasresult = true
         ncols = length(fields)
         ptr = MySQL.API.mysql_fetch_row(result.ptr)
     elseif API.mysql_field_count(conn.ptr) == 0
@@ -95,44 +106,15 @@ function Query(conn::Connection, sql::String; kwargs...)
         nrows = ncols = 1
         names = (:num_rows_affected,)
         T = Tuple{Int}
-        hasresult = false
+        resulttype = :none
         ptr = C_NULL
     else
         throw(MySQLInterfaceError("Query expected to produce results but did not."))
     end
-    return Query{hasresult, names, T}(result, ptr, ncols, nrows)
+    return Query{resulttype, names, T}(result, ptr, ncols, nrows)
 end
 
-
-"""
-    MySQL.StreamingQuery(conn, sql; kwargs...) => MySQL.Query
-
-Execute an SQL statement and return a `MySQL.StreamingQuery` object. Object must
-be iterated to return result set. This is lower level functionality to support
-streaming processing of large datasets.
-"""
-function StreamingQuery(conn::Connection, sql::String; kwargs...)
-    conn.ptr == C_NULL && throw(MySQLInterfaceError("Method called with null connection."))
-    MySQL.API.mysql_query(conn.ptr, sql) != 0 && throw(MySQLInternalError(conn))
-    result = MySQL.Result(MySQL.API.mysql_use_result(conn.ptr))
-    if result.ptr != C_NULL
-        fields = MySQL.metadata(result.ptr)
-        names = Tuple(ccall(:jl_symbol_n, Ref{Symbol}, (Ptr{UInt8}, Csize_t), x.name, x.name_length) for x in fields)
-        T = Tuple{(julia_type(x.field_type, API.notnullable(x), API.isunsigned(x)) for x in fields)...}
-        hasresult = true
-        ncols = length(fields)
-        ptr = MySQL.API.mysql_fetch_row(result.ptr)
-    elseif API.mysql_field_count(conn.ptr) == 0
-        result = Result(Int(API.mysql_affected_rows(conn.ptr)))
-        names = (:num_rows_affected,)
-        T = Tuple{Int}
-        hasresult = false
-        ptr = C_NULL
-    else
-        throw(MySQLInterfaceError("Query expected to produce results but did not."))
-    end
-    return StreamingQuery{hasresult, names, T}(result, ptr, ncols)
-end
+Base.IteratorSize(::Type{Query{resulttype, names, T}}) where {resulttype, names, T} = resulttype == :streaming ? Base.SizeUnknown() : Base.HasLength()
 
 Tables.istable(::Type{<:Query}) = true
 Tables.rowaccess(::Type{<:Query}) = true
@@ -165,19 +147,10 @@ function generate_namedtuple(::Type{NamedTuple{names, types}}, q) where {names, 
     end
 end
 
-function Base.iterate(q::Query{hasresult, names, types}, st=1) where {hasresult, names, types}
-    st > length(q) && return nothing
-    !hasresult && return (num_rows_affected=Int(q.result.ptr),), 2
+function Base.iterate(q::Query{resulttype, names, types}, st=1) where {resulttype, names, types}
+    st == 1 && resulttype == :none && return (num_rows_affected=Int(q.result.ptr),), 2
     q.ptr == C_NULL && return nothing
     nt = generate_namedtuple(NamedTuple{names, types}, q)
     q.ptr = API.mysql_fetch_row(q.result.ptr)
     return nt, st + 1
-end
-
-function Base.iterate(q::StreamingQuery{hasresult, names, types}, st=1) where {hasresult, names, types}
-    q.ptr == C_NULL && return nothing
-    !hasresult && return (num_rows_affected=Int(q.result.ptr),), 2
-    nt = generate_namedtuple(NamedTuple{names, types}, q)
-    q.ptr = API.mysql_fetch_row(q.result.ptr)
-    return nt, st
 end
