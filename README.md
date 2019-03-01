@@ -28,7 +28,7 @@ julia> Pkg.add("MySQL")
 
 ## Project Status
 
-The package is tested against the current Julia `1.0` release and nightly on Linux and OS X.
+The package is tested against the current Julia `1.1` release and nightly on Linux and OS X.
 
 ## Contributing and Questions
 
@@ -121,15 +121,9 @@ MySQL.escape(conn::MySQL.Connection, str::String) -> String
 ```
 Escape an SQL statement
 
-#### MySQL.Query (previously MySQL.query)
+#### MySQL.query (deprecated)
 
-```julia
-MySQL.Query(conn::MySQL.Connection, sql::String; append::Bool=false) => sink
-```
-Execute an SQL statement and return the results as a MySQL.Query object (see [MySQL.Query](#mysqlquery)).
-
-The results can be materialized as a data sink that implements the Tables.jl interface.
-E.g. `MySQL.Query(conn, sql) |> DataFrame` or `MySQL.Query(conn, sql) |> columntable`
+Deprecated - see [MySQL.Query](#mysqlquery)
 
 #### MySQL.execute!
 
@@ -175,10 +169,17 @@ Alternately, a source implementing the Tables.jl interface can be streamed by ex
 #### MySQL.Query
 
 ```julia
-MySQL.Query(conn, sql, sink=Data.Table, kwargs...) => MySQL.Query
+MySQL.Query(conn, sql, kwargs...) => MySQL.Query
 ```
 
-Execute an SQL statement and return a `MySQL.Query` object. Result rows can be iterated.
+Execute an SQL statement and return a `MySQL.Query` object. Result rows can be
+iterated as NamedTuples via `Table.rows(query)` where `query` is the `MySQL.Query`
+object.
+
+Supported Key Word Arguments:
+* `streaming` - Defaults to false. If true, length of the result size is unknown as the result is returned row by row. May be more memory efficient.
+
+To materialize the results as a `DataFrame`, use `MySQL.Query(conn, sql) |> DataFrame`.
 
 ### Example
 
@@ -189,7 +190,7 @@ using DataFrames
 
 conn = MySQL.connect("localhost", "root", "password", db = "test_db")
 
-foo = MySQL.query(conn, """SELECT COUNT(*) FROM my_first_table;""") |> DataFrame
+foo = MySQL.Query(conn, """SELECT COUNT(*) FROM my_first_table;""") |> DataFrame
 num_foo = foo[1,1]
 
 my_stmt = MySQL.Stmt(conn, """INSERT INTO my_second_table ('foo_id','foo_name') VALUES (?,?);""")

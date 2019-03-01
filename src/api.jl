@@ -19,7 +19,7 @@ const MYSQL_ROW = Ptr{Ptr{Cchar}}  # pointer to an array of strings
 const MYSQL_TYPE = UInt32
 
 """
-The field object that contains the metadata of the table. 
+The field object that contains the metadata of the table.
 Returned by mysql_fetch_fields API.
 """
 struct MYSQL_FIELD
@@ -114,8 +114,8 @@ struct MYSQL_BIND
     store_param_func::Ptr{Cvoid}
     fetch_result::Ptr{Cvoid}
     skip_result::Ptr{Cvoid}
-    buffer_length::Culong 
-    offset::Culong 
+    buffer_length::Culong
+    offset::Culong
     length_value::Culong
     param_number::Cuint
     pack_length::Cuint
@@ -190,20 +190,6 @@ macro c(func, ret, args, vals...)
         end)
     end
 end
-
-# function  mysql_library_init(argc=0, argv=C_NULL, groups=C_NULL)
-#     return ccall((:mysql_library_init, libmariadb),
-#                  Cint,
-#                  (Cint, Ptr{Ptr{UInt8}}, Ptr{Ptr{UInt8}}),
-#                  argc, argv, groups)
-# end
-
-# function  mysql_library_end()
-#     return ccall((:mysql_library_end, libmariadb),
-#                  Cvoid,
-#                  (),
-#                 )
-# end
 
 """
 Initializes the MYSQL object. Must be called before mysql_real_connect.
@@ -428,6 +414,9 @@ function mysql_stmt_bind_result(stmtptr, bind::Ptr{MYSQL_BIND})
                  bind)
 end
 
+"""
+Submit a query to the server
+"""
 function mysql_query(mysqlptr::Ptr{Cvoid}, sql::String)
     return @c(:mysql_query,
                  Cint,
@@ -436,8 +425,21 @@ function mysql_query(mysqlptr::Ptr{Cvoid}, sql::String)
                  sql)
 end
 
+"""
+After mysql_query or mysql_real_query used to store result in memory and send all to client
+"""
 function mysql_store_result(mysqlptr::Ptr{Cvoid})
     return @c(:mysql_store_result,
+                 MYSQL_RES,
+                 (Ptr{Cvoid}, ),
+                 mysqlptr)
+end
+
+"""
+After mysql_query or mysql_real_query used to stream result and send to client row by row
+"""
+function mysql_use_result(mysqlptr::Ptr{Cvoid})
+    return @c(:mysql_use_result,
                  MYSQL_RES,
                  (Ptr{Cvoid}, ),
                  mysqlptr)

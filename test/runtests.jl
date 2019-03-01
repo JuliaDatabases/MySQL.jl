@@ -1,12 +1,12 @@
 using Test, MySQL, Tables, Dates
 
 if haskey(ENV, "APPVEYOR_BUILD_NUMBER")
-    pwd = "Password12!"
+    pswd = "Password12!"
 else
-    pwd = ""
+    pswd = ""
 end
 
-const conn = MySQL.connect("127.0.0.1", "root", pwd; port=3306)
+const conn = MySQL.connect("127.0.0.1", "root", pswd; port=3306)
 
 MySQL.execute!(conn, "DROP DATABASE if exists mysqltest")
 MySQL.execute!(conn, "CREATE DATABASE mysqltest")
@@ -57,6 +57,19 @@ expected = (
 )
 
 @test res == expected
+
+# Streaming Queries
+sres = MySQL.Query(conn, "select * from Employee", streaming=true)
+
+@test sres.nrows == 0
+
+data = []
+for row in sres
+    push!(data, row)
+end
+@test length(data) == 4
+@test length(data[1]) == 10
+@test data[1].Name == "John"
 
 # insert null row
 MySQL.execute!(conn, "INSERT INTO Employee () VALUES ();")
