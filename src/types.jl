@@ -57,13 +57,6 @@ mutable struct Query{resulttype, names, T}
     nrows::Int
 end
 
-# does not implement Table interface - lower level interaction
-mutable struct StreamingQuery{hasresult, names, T}
-    result::Result
-    ptr::Ptr{Ptr{Int8}}
-    ncols::Int
-end
-
 function julia_type(field_type, notnullable, isunsigned)
     T = API.julia_type(field_type)
     T2 = isunsigned ? unsigned(T) : T
@@ -80,13 +73,13 @@ object.
 Supported Key Word Arguments:
 * `streaming` - Defaults to false. If true, length of the result size is unknown as the result is returned row by row. May be more memory efficient.
 
-To materialize the results as a `DataFrame`, use `MySQL.query(conn, sql) |> DataFrame`.
+To materialize the results as a `DataFrame`, use `MySQL.Query(conn, sql) |> DataFrame`.
 """
-function Query(conn::Connection, sql::String; kwargs...)
+function Query(conn::Connection, sql::String; streaming::Bool=false, kwargs...)
     conn.ptr == C_NULL && throw(MySQLInterfaceError("Method called with null connection."))
     MySQL.API.mysql_query(conn.ptr, sql) != 0 && throw(MySQLInternalError(conn))
 
-    if get(kwargs, :streaming, false)
+    if streaming
         resulttype = :streaming
         result = MySQL.Result(MySQL.API.mysql_use_result(conn.ptr))
     else

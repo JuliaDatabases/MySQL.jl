@@ -179,7 +179,7 @@ object.
 Supported Key Word Arguments:
 * `streaming` - Defaults to false. If true, length of the result size is unknown as the result is returned row by row. May be more memory efficient.
 
-To materialize the results as a `DataFrame`, use `MySQL.query(conn, sql) |> DataFrame`.
+To materialize the results as a `DataFrame`, use `MySQL.Query(conn, sql) |> DataFrame`.
 
 ### Example
 
@@ -190,7 +190,7 @@ using DataFrames
 
 conn = MySQL.connect("localhost", "root", "password", db = "test_db")
 
-foo = MySQL.query(conn, """SELECT COUNT(*) FROM my_first_table;""") |> DataFrame
+foo = MySQL.Query(conn, """SELECT COUNT(*) FROM my_first_table;""") |> DataFrame
 num_foo = foo[1,1]
 
 my_stmt = MySQL.Stmt(conn, """INSERT INTO my_second_table ('foo_id','foo_name') VALUES (?,?);""")
