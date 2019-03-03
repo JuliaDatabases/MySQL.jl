@@ -17,7 +17,7 @@ include("types.jl")
 
 #Dict of the default option to pass to the driver
 const defaultOption = Dict(
-    MySQL.API.MYSQL_SET_CHARSET_NAME=>"utf8"
+    MySQL.API.MYSQL_SET_CHARSET_NAME=>"utf8mb4"
 )
 
 #load default option with priority to option explicitly passed via opts
