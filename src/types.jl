@@ -115,7 +115,7 @@ Tables.rows(q::Query) = q
 Tables.schema(q::Query{hasresult, names, T}) where {hasresult, names, T} = Tables.Schema(names, T)
 
 Base.length(q::Query) = q.ptr == C_NULL ? 0 : q.nrows
-Base.eltype(q::Query{hasresult, names, types}) where {hasresult, names, types} = NamedTuple{names, types}
+Base.eltype(q::Query{hasresult, names, types}) where {hasresult, names, types} = NamedTuple{names}
 
 cast(str, ::Type{Union{Missing, T}}) where {T} = cast(str, T)
 cast(str, ::Type{API.Bit}) = API.Bit(isempty(str) ? 0 : UInt64(str[1]))
@@ -134,9 +134,9 @@ end
 function generate_namedtuple(::Type{NamedTuple{names, types}}, q) where {names, types}
     if @generated
         vals = Tuple(:(getvalue(q.ptr, $i, $(fieldtype(types, i)))) for i = 1:fieldcount(types))
-        return :(NamedTuple{names, types}(($(vals...),)))
+        return :(NamedTuple{names}(($(vals...),)))
     else
-        return NamedTuple{names, types}(Tuple(getvalue(q.ptr, i, fieldtype(types, i)) for i = 1:fieldcount(types)))
+        return NamedTuple{names}(Tuple(getvalue(q.ptr, i, fieldtype(types, i)) for i = 1:fieldcount(types)))
     end
 end
 
