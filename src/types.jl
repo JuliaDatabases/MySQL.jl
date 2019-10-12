@@ -131,19 +131,10 @@ function getvalue(ptr, col, ::Type{T}) where {T}
     return deref == C_NULL ? missing : cast(unsafe_string(deref), T)
 end
 
-function generate_namedtuple(::Type{NamedTuple{names, types}}, q) where {names, types}
-    if @generated
-        vals = Tuple(:(getvalue(q.ptr, $i, $(fieldtype(types, i)))) for i = 1:fieldcount(types))
-        return :(NamedTuple{names}(($(vals...),)))
-    else
-        return NamedTuple{names}(Tuple(getvalue(q.ptr, i, fieldtype(types, i)) for i = 1:fieldcount(types)))
-    end
-end
-
 function Base.iterate(q::Query{resulttype, names, types}, st=1) where {resulttype, names, types}
     st == 1 && resulttype == :none && return (num_rows_affected=Int(q.result.ptr),), 2
     q.ptr == C_NULL && return nothing
-    nt = generate_namedtuple(NamedTuple{names, types}, q)
+    nt = NamedTuple{names}([getvalue(q.ptr, i, fieldtype(types, i)) for i in 1:fieldcount(types)])
     q.ptr = API.mysql_fetch_row(q.result.ptr)
     return nt, st + 1
 end
