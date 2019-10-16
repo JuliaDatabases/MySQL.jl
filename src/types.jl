@@ -84,7 +84,7 @@ function Query(conn::Connection, sql::String; streaming::Bool=false, kwargs...)
         result = MySQL.Result(MySQL.API.mysql_use_result(conn.ptr))
     else
         resulttype = :default
-        result = result = MySQL.Result(MySQL.API.mysql_store_result(conn.ptr))
+        result = MySQL.Result(MySQL.API.mysql_store_result(conn.ptr))
     end
 
     if result.ptr != C_NULL
