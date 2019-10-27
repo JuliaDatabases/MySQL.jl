@@ -84,7 +84,7 @@ function Query(conn::Connection, sql::String; streaming::Bool=false, kwargs...)
         result = MySQL.Result(MySQL.API.mysql_use_result(conn.ptr))
     else
         resulttype = :default
-        result = result = MySQL.Result(MySQL.API.mysql_store_result(conn.ptr))
+        result = MySQL.Result(MySQL.API.mysql_store_result(conn.ptr))
     end
 
     if result.ptr != C_NULL
@@ -115,7 +115,7 @@ Tables.rows(q::Query) = q
 Tables.schema(q::Query{hasresult, names, T}) where {hasresult, names, T} = Tables.Schema(names, T)
 
 Base.length(q::Query) = q.ptr == C_NULL ? 0 : q.nrows
-Base.eltype(q::Query{hasresult, names, types}) where {hasresult, names, types} = NamedTuple{names, types}
+Base.eltype(q::Query{hasresult, names, types}) where {hasresult, names, types} = NamedTuple{names}
 
 cast(str, ::Type{Union{Missing, T}}) where {T} = cast(str, T)
 cast(str, ::Type{API.Bit}) = API.Bit(isempty(str) ? 0 : UInt64(str[1]))
@@ -131,19 +131,10 @@ function getvalue(ptr, col, ::Type{T}) where {T}
     return deref == C_NULL ? missing : cast(unsafe_string(deref), T)
 end
 
-function generate_namedtuple(::Type{NamedTuple{names, types}}, q) where {names, types}
-    if @generated
-        vals = Tuple(:(getvalue(q.ptr, $i, $(fieldtype(types, i)))) for i = 1:fieldcount(types))
-        return :(NamedTuple{names, types}(($(vals...),)))
-    else
-        return NamedTuple{names, types}(Tuple(getvalue(q.ptr, i, fieldtype(types, i)) for i = 1:fieldcount(types)))
-    end
-end
-
 function Base.iterate(q::Query{resulttype, names, types}, st=1) where {resulttype, names, types}
     st == 1 && resulttype == :none && return (num_rows_affected=Int(q.result.ptr),), 2
     q.ptr == C_NULL && return nothing
-    nt = generate_namedtuple(NamedTuple{names, types}, q)
+    nt = NamedTuple{names}([getvalue(q.ptr, i, fieldtype(types, i)) for i in 1:fieldcount(types)])
     q.ptr = API.mysql_fetch_row(q.result.ptr)
     return nt, st + 1
 end
