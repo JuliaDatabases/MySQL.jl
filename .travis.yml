@@ -6,25 +6,29 @@ services:
 
 os:
   - linux
+  - osx
+  - windows
+
+arch:
+  - x64
+  - x86
 
 julia:
-  - 1.1
-  - 1.2
+  - 1.3
   - nightly
+
+env:
+  - JULIA_PROJECT="@."
+
+matrix:
+  exclude:
+    - os: osx
+      arch: x86
+  allow_failures:
+  - julia: nightly
 
 notifications:
   email: false
 
 after_success:
-  # push coverage results to Coveralls
-  #- julia -e 'cd(Pkg.dir("MySQL")); Pkg.add("Coverage"); using Coverage; Coveralls.submit(Coveralls.process_folder())'
-  # push coverage results to Codecov
-  - julia -e 'using Pkg; cd(Pkg.dir("MySQL")); Pkg.add("Coverage"); using Coverage; Codecov.submit(Codecov.process_folder())'
-
-before_script:
-- export OLD_PATH=$LD_LIBRARY_PATH
-- export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:`mysql_config --libs | cut -d ' ' -f1 | sed 's/-L//'`
-
-after_script:
-- export LD_LIBRARY_PATH=$OLD_PATH
-- unset OLD_PATH
+   - julia -e 'ENV["TRAVIS_JULIA_VERSION"] == "1.3" && ENV["TRAVIS_OS_NAME"] != "linux" && exit(); using Pkg; Pkg.add("Coverage"); using Coverage; Codecov.submit(Codecov.process_folder())'
