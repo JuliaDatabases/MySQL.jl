@@ -5,8 +5,8 @@ services:
  - mysql
 
 os:
-  - linux
-  - osx
+  # - linux
+  # - osx
   - windows
 
 arch:
@@ -29,11 +29,12 @@ matrix:
 
 before_install:
 - |-
-    case $TRAVIS_OS_NAME in
-      windows)
-        choco install mysql
-        refreshenv
-        mysqld --install
+    case $TRAVIS_OS_NAME in windows)
+        choco install mysql --params "/installLocation:"
+        dir C:\tools\mysql
+        dir C:\tools\mysql\current
+        dir C:\tools\mysql\current\bin
+        C:\tools\mysql\current\bin\mysqld --install
         ;;
     esac
 
