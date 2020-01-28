@@ -17,7 +17,7 @@ DBInterface.execute!(conn, """CREATE TABLE Employee
                      LunchTime TIME,
                      JoinDate DATE,
                      LastLogin DATETIME,
-                     LastLogin2 TIMESTAMP,
+                     LastLogin2 TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
                      Initial CHAR(1),
                      Name VARCHAR(255),
                      Photo BLOB,
