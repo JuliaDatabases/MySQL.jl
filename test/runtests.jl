@@ -155,7 +155,7 @@ for i = 1:length(expected)
     end
 end
 
-DBInterface.execute!(stmt, missing, missing, missing, missing, missing, missing, missing, missing, missing, missing, missing, missing, missing, missing, missing)
+DBInterface.execute!(stmt, missing, missing, missing, missing, missing, missing, missing, missing, missing, DateTime("2015-09-05T12:31:30"), missing, missing, missing, missing, missing)
 res = DBInterface.execute!(DBInterface.prepare(conn, "select * from Employee")) |> columntable
 for i = 1:length(expected)
     if i != 11 && i != 1

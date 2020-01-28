@@ -102,7 +102,8 @@ function DBInterface.execute!(conn::Connection, sql::AbstractString, args...; my
 
     buffered = false
     nrows = -1
-    rows_affected = nfields = 0
+    rows_affected = UInt64(0)
+    nfields = 0
     if mysql_store_result
         buffered = true
         result = API.storeresult(conn.mysql)
