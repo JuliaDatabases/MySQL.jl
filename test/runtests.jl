@@ -74,7 +74,6 @@ end
 res = DBInterface.execute!(conn, "select * from Employee") |> columntable
 @test length(res) == 16
 @test length(res[1]) == 4
-@test res.ID == [1,2,3,4]
 @test res == expected
 
 # as a prepared statement
@@ -100,7 +99,6 @@ end
 res = DBInterface.execute!(stmt) |> columntable
 @test length(res) == 16
 @test length(res[1]) == 4
-@test res.ID == [1,2,3,4]
 @test res == expected
 
 @test DBInterface.close!(stmt) === nothing
@@ -119,7 +117,6 @@ end
 res = DBInterface.execute!(conn, "select * from Employee") |> columntable
 @test length(res) == 16
 @test length(res[1]) == 5
-@test res.ID == [1,2,3,4,5]
 for i = 1:length(expected)
     if i != 11
         @test isequal(res[i], expected[i])
@@ -129,7 +126,6 @@ end
 res = DBInterface.execute!(DBInterface.prepare(conn, "select * from Employee")) |> columntable
 @test length(res) == 16
 @test length(res[1]) == 5
-@test res.ID == [1,2,3,4,5]
 for i = 1:length(expected)
     if i != 11
         @test isequal(res[i], expected[i])
@@ -153,7 +149,6 @@ DBInterface.executemany!(stmt, Base.structdiff(expected, NamedTuple{(:ID,)})...)
 res = DBInterface.execute!(DBInterface.prepare(conn, "select * from Employee")) |> columntable
 @test length(res) == 16
 @test length(res[1]) == 4
-@test res.ID == [7, 8, 9, 10]
 for i = 1:length(expected)
     if i != 11 && i != 1
         @test isequal(res[i], expected[i])

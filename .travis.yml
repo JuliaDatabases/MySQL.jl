@@ -27,6 +27,14 @@ matrix:
   allow_failures:
   - julia: nightly
 
+addons:
+homebrew:
+  packages:
+  - mysql
+
+before_script:
+  - if [ "$TRAVIS_OS_NAME" == "osx" ) ]; then brew services start mysql; fi
+
 notifications:
   email: false
 
