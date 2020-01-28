@@ -236,10 +236,10 @@ function mysql_get_option(mysql::Ptr{Cvoid}, option::Integer, arg::Ref{Bool})
                 mysql, option, arg)
 end
 
-function mysql_get_option(mysql::Ptr{Cvoid}, option::Integer, arg::Ref{String})
+function mysql_get_option(mysql::Ptr{Cvoid}, option::Integer, arg::Ptr{Cvoid})
     return @c(:mysql_get_option,
                 Cint,
-                (Ptr{Cvoid}, Cint, Ref{String}),
+                (Ptr{Cvoid}, Cint, Ptr{Cvoid}),
                 mysql, option, arg)
 end
 
@@ -359,10 +359,10 @@ function mysql_options(mysql::Ptr{Cvoid}, option::mysql_option, arg::Ref{Bool})
                 mysql, option, arg)
 end
 
-function mysql_options(mysql::Ptr{Cvoid}, option::mysql_option, arg::Ref{String})
+function mysql_options(mysql::Ptr{Cvoid}, option::mysql_option, arg::Ptr{Cvoid})
     return @c(:mysql_options,
                 Cint,
-                (Ptr{Cvoid}, Cint, Ref{String}),
+                (Ptr{Cvoid}, Cint, Ptr{Cvoid}),
                 mysql, option, arg)
 end
 

@@ -20,9 +20,8 @@ mutable struct Connection <: DBInterface.Connection
 
     function Connection(host::String, user::String, passwd::String, db::String, port::Integer, unix_socket::String, client_flag)
         mysql = API.init()
-        mysql = withenv("MARIADB_PLUGIN_DIR" => joinpath(API.MariaDB_Connector_C_jll.artifact_dir, "lib", "mariadb", "plugin")) do
-            API.connect(mysql, host, user, passwd, db, port, unix_socket, client_flag)
-        end
+        API.setoption(mysql, API.MYSQL_PLUGIN_DIR, joinpath(API.MariaDB_Connector_C_jll.artifact_dir, "lib", "mariadb", "plugin"))
+        mysql = API.connect(mysql, host, user, passwd, db, port, unix_socket, client_flag)
         return new(mysql, host, user, string(port), db)
     end
 end

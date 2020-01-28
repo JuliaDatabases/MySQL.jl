@@ -969,7 +969,7 @@ function setoption(mysql::MYSQL, option::mysql_option, arg="0")
     elseif option in BOOLOPTS
         ref = Ref{Bool}(arg)
     else
-        ref = Ref{String}(arg)
+        ref = convert(Ptr{Cvoid}, pointer(arg))
     end
     return @checksuccess mysql mysql_options(mysql.ptr, option, ref)
 end
