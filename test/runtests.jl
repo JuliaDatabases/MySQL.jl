@@ -167,9 +167,9 @@ end
 res = DBInterface.execute!(conn, "select * from Employee"; mysql_store_result=false) |> columntable
 @test length(res) == 16
 @test length(res[1]) == 5
-@test res.OfficeNo == [1, 1, 1, 1, missing]
+@test isequal(res.OfficeNo, [1, 1, 1, 1, missing])
 
 res = DBInterface.execute!(DBInterface.prepare(conn, "select * from Employee"); mysql_store_result=false) |> columntable
 @test length(res) == 16
 @test length(res[1]) == 5
-@test res.OfficeNo == [1, 1, 1, 1, missing]
+@test isequal(res.OfficeNo, [1, 1, 1, 1, missing])
