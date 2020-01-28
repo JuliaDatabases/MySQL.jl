@@ -31,10 +31,8 @@ addons:
 homebrew:
   packages:
   - mysql
-  taps:
-  - homebrew/services
 
-before_script:
+script:
   - if [ "$TRAVIS_OS_NAME" == "osx" ]; then brew services start mysql; fi
 
 notifications:
