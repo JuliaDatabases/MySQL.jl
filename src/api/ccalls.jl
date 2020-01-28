@@ -24,7 +24,7 @@ end
 # "uint64_t mysql_affected_rows(MYSQL *mysql)"
 function mysql_affected_rows(mysql::Ptr{Cvoid})
     return @c(:mysql_affected_rows,
-                 Culong,
+                 UInt64,
                  (Ptr{Cvoid}, ),
                  mysql)
 end

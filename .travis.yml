@@ -5,8 +5,8 @@ services:
  - mysql
 
 os:
-  # - linux
-  # - osx
+  - linux
+  - osx
   - windows
 
 arch:
