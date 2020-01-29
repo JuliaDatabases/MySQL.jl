@@ -1,13 +1,17 @@
 module API
 
-using Dates, DecFP, MariaDB_Connector_C_jll
+using Dates, DecFP
 
+if VERSION < v"1.3.0"
 # Load libmariadb from our deps.jl
-# const depsjl_path = joinpath(dirname(@__FILE__), "..", "deps", "deps.jl")
-# if !isfile(depsjl_path)
-#     error("MySQL not installed properly, run Pkg.build(\"MySQL\"), restart Julia and try again")
-# end
-# include(depsjl_path)
+const depsjl_path = joinpath(dirname(@__FILE__), "..", "deps", "deps.jl")
+if !isfile(depsjl_path)
+    error("MySQL not installed properly, run Pkg.build(\"MySQL\"), restart Julia and try again")
+end
+include(depsjl_path)
+else
+using MariaDB_Connector_C_jll
+end
 
 # const definitions from mysql client library
 include("consts.jl")
