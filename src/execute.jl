@@ -84,9 +84,12 @@ Base.IteratorSize(::Type{TextCursor{true}}) = Base.HasLength()
 Base.IteratorSize(::Type{TextCursor{false}}) = Base.SizeUnknown()
 Base.length(c::TextCursor) = c.nrows
 
-function Base.iterate(cursor::TextCursor, i=1)
+function Base.iterate(cursor::TextCursor{buffered}, i=1) where {buffered}
     rowptr = API.fetchrow(cursor.conn.mysql, cursor.result)
-    rowptr == C_NULL && return nothing
+    if rowptr == C_NULL
+        !buffered && API.errno(cursor.conn.mysql) != 0 && throw(Error(cursor.conn.mysql))
+        return nothing
+    end
     lengths = API.fetchlengths(cursor.result, cursor.nfields)
     return TextRow(cursor, rowptr, lengths), i + 1
 end

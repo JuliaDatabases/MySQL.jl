@@ -963,13 +963,13 @@ For more information about option files used by MySQL programs, see Section 4.2.
 """=#
 function setoption(mysql::MYSQL, option::mysql_option, arg="0")
     if option in CUINTOPTS
-        ref = Ref{Cuint}(arg)
+        ref = Ref{Cuint}(Cuint(arg))
     elseif option in CULONGOPTS
-        ref = Ref{Culong}(arg)
+        ref = Ref{Culong}(Culong(arg))
     elseif option in BOOLOPTS
-        ref = Ref{Bool}(arg)
+        ref = Ref{Bool}(Bool(arg))
     else
-        ref = convert(Ptr{Cvoid}, pointer(arg))
+        ref = arg == C_NULL ? C_NULL : convert(Ptr{Cvoid}, pointer(arg))
     end
     return @checksuccess mysql mysql_options(mysql.ptr, option, ref)
 end
@@ -1145,6 +1145,7 @@ function escapestring(mysql::MYSQL, str::String)
     len = sizeof(str)
     to = Base.StringVector(len * 2 + 1)
     tolen = mysql_real_escape_string(mysql.ptr, to, str, len)
+    tolen == Core.bitcast(UInt64, -1) && throw(Error(mysql.ptr))
     resize!(to, tolen)
     return String(to)
 end

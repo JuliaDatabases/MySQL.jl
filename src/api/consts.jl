@@ -112,8 +112,13 @@ function juliatype(mysqltype)
     end
 end
 
-# Constant indicating whether multiple statements in queries should be supported.
-const CLIENT_MULTI_STATEMENTS = UInt32( unsigned(1) << 16)
+@enum mysql_protocol_type begin
+    MYSQL_PROTOCOL_DEFAULT
+    MYSQL_PROTOCOL_TCP
+    MYSQL_PROTOCOL_SOCKET
+    MYSQL_PROTOCOL_PIPE
+    MYSQL_PROTOCOL_MEMORY
+end
 
 # Options to be passed to mysql_options API.
 @enum mysql_option begin
@@ -229,3 +234,11 @@ end
 
 const BOOL_STMT_ATTR = Set([STMT_ATTR_UPDATE_MAX_LENGTH])
 const CULONG_STMT_ATTR = Set([STMT_ATTR_CURSOR_TYPE, STMT_ATTR_PREFETCH_ROWS])
+
+const CLIENT_FOUND_ROWS = 2
+const CLIENT_NO_SCHEMA = 16
+const CLIENT_COMPRESS = 32
+const CLIENT_LOCAL_FILES = 128
+const CLIENT_IGNORE_SPACE = 256
+const CLIENT_MULTI_STATEMENTS =  (UInt64(1) << 16)
+const CLIENT_MULTI_RESULTS =     (UInt64(1) << 17)
