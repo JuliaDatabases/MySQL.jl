@@ -29,7 +29,12 @@ mutable struct MYSQL_RES
     function MYSQL_RES(ptr)
         res = new(ptr)
         if ptr != C_NULL
-            finalizer(x -> mysql_free_result(x.ptr), res)
+            finalizer(res) do x
+                if x.ptr != C_NULL
+                    mysql_free_result(x.ptr)
+                    x.ptr = C_NULL
+                end
+            end
         end
         return res
     end

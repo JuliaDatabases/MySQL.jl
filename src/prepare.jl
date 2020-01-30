@@ -21,15 +21,26 @@ end
 @noinline checkstmt(stmt::Statement) = checkstmt(stmt.stmt)
 @noinline checkstmt(stmt::API.MYSQL_STMT) = stmt.ptr == C_NULL && error("prepared mysql statement has been closed")
 
+"""
+    DBInterface.close!(stmt)
+
+Close a prepared statement and free any underlying resources. The statement should not be used in any way afterwards.
+"""
 DBInterface.close!(stmt::Statement) = finalize(stmt.stmt)
 
+"""
+    DBInterface.prepare(conn::MySQL.Connection, sql) => MySQL.Statement
+
+Send a `sql` SQL string to the database to be prepared, returning a `MySQL.Statement` object
+that can be passed to `DBInterface.execute!(stmt, args...)` to be repeatedly executed,
+optionally passing `args` for parameters to be bound on each execution.
+"""
 function DBInterface.prepare(conn::Connection, sql::AbstractString)
     stmt = API.stmtinit(conn.mysql)
     API.prepare(stmt, sql)
     nparams = API.paramcount(stmt)
     bindhelpers = [API.BindHelper() for i = 1:nparams]
     binds = [API.MYSQL_BIND(bindhelpers[i].length, bindhelpers[i].is_null) for i = 1:nparams]
-    nparams > 0 && API.bindparam(stmt, binds)
     nfields = API.fieldcount(stmt)
     result = API.resultmetadata(stmt)
     if result.ptr != C_NULL
@@ -107,6 +118,16 @@ end
 @noinline kwcheck(kw) = !isempty(kw) && throw(MySQLInterfaceError("named parameters not supported by mysql; parameters must be provided in order by position; e.g. `DBInterface.execute!(stmt, param1, param2)`"))
 @noinline paramcheck(stmt, args) = length(args) == stmt.nparams || throw(MySQLInterfaceError("stmt requires $(stmt.nparams) params, only $(length(args)) provided"))
 
+"""
+    DBInterface.execute!(stmt, args...; mysql_store_result=true) => MySQL.Cursor
+
+Execute a prepared statement, optionally passing `args` to be bound as parameters (like `?` in the sql).
+Returns a `Cursor` object, which iterates resultset rows and satisfies the `Tables.jl` interface, meaning
+results can be sent to any valid sink function (`DataFrame(cursor)`, `CSV.write("results.csv", cursor)`, etc.).
+Specifying `mysql_store_result=false` will avoid buffering the full resultset to the client after executing
+the query, which has memory use advantages, though ties up the database server since resultset rows must be
+fetched one at a time.
+"""
 function DBInterface.execute!(stmt::Statement, args...; mysql_store_result::Bool=true, kw...)
     checkstmt(stmt)
     kwcheck(kw)

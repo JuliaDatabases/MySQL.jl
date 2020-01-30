@@ -87,7 +87,7 @@ Base.length(c::TextCursor) = c.nrows
 function Base.iterate(cursor::TextCursor{buffered}, i=1) where {buffered}
     rowptr = API.fetchrow(cursor.conn.mysql, cursor.result)
     if rowptr == C_NULL
-        !buffered && API.errno(cursor.conn.mysql) != 0 && throw(Error(cursor.conn.mysql))
+        !buffered && API.errno(cursor.conn.mysql) != 0 && throw(API.Error(cursor.conn.mysql))
         return nothing
     end
     lengths = API.fetchlengths(cursor.result, cursor.nfields)
@@ -101,6 +101,11 @@ end
 
 function DBInterface.execute!(conn::Connection, sql::AbstractString, args...; mysql_store_result::Bool=true, kw...)
     checkconn(conn)
+    if conn.lastresult !== nothing
+        while API.fetchrow(conn.mysql, conn.lastresult) != C_NULL
+        end
+        finalize(conn.lastresult)
+    end
     API.query(conn.mysql, sql)
 
     buffered = false
@@ -113,6 +118,7 @@ function DBInterface.execute!(conn::Connection, sql::AbstractString, args...; my
     else
         result = API.useresult(conn.mysql)
     end
+    conn.lastresult = result
 
     if result.ptr != C_NULL
         if buffered

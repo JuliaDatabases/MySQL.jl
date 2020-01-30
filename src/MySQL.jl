@@ -17,6 +17,7 @@ mutable struct Connection <: DBInterface.Connection
     user::String
     port::String
     db::String
+    lastresult::Union{Nothing, API.MYSQL_RES}
 
     function Connection(host::String, user::String, passwd::String, db::String, port::Integer, unix_socket::String; kw...)
         mysql = API.init()
@@ -25,7 +26,7 @@ mutable struct Connection <: DBInterface.Connection
         client_flag = clientflags(; kw...)
         setoptions!(mysql; kw...)
         mysql = API.connect(mysql, host, user, passwd, db, port, unix_socket, client_flag)
-        return new(mysql, host, user, string(port), db)
+        return new(mysql, host, user, string(port), db, nothing)
     end
 end
 
