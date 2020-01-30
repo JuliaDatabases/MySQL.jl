@@ -110,6 +110,11 @@ function Base.iterate(cursor::Cursor, i=1)
     return Row(cursor), i + 1
 end
 
+"""
+    DBInterface.lastrowid(c::MySQL.Cursor)
+
+Return the last inserted row id.
+"""
 function DBInterface.lastrowid(c::Cursor)
     checkstmt(c.stmt)
     return API.insertid(c.stmt)

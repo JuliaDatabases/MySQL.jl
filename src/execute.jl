@@ -94,11 +94,27 @@ function Base.iterate(cursor::TextCursor{buffered}, i=1) where {buffered}
     return TextRow(cursor, rowptr, lengths), i + 1
 end
 
+"""
+    DBInterface.lastrowid(c::MySQL.TextCursor)
+
+Return the last inserted row id.
+"""
 function DBInterface.lastrowid(c::TextCursor)
     checkconn(c.conn)
     return API.insertid(c.conn.mysql)
 end
 
+"""
+    DBInterface.execute!(conn::MySQL.Connection, sql) => MySQL.TextCursor
+
+Execute the SQL `sql` statement with the database connection `conn`. Parameter binding is
+only supported via prepared statements, see `?DBInterface.prepare(conn, sql)`.
+Returns a `Cursor` object, which iterates resultset rows and satisfies the `Tables.jl` interface, meaning
+results can be sent to any valid sink function (`DataFrame(cursor)`, `CSV.write("results.csv", cursor)`, etc.).
+Specifying `mysql_store_result=false` will avoid buffering the full resultset to the client after executing
+the query, which has memory use advantages, though ties up the database server since resultset rows must be
+fetched one at a time.
+"""
 function DBInterface.execute!(conn::Connection, sql::AbstractString, args...; mysql_store_result::Bool=true, kw...)
     checkconn(conn)
     if conn.lastresult !== nothing

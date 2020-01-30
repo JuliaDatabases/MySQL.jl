@@ -2,6 +2,8 @@ module MySQL
 
 using Dates, DBInterface, Tables, Parsers, DecFP
 
+export DBInterface
+
 # For non-C-api errors that happen in MySQL.jl
 struct MySQLInterfaceError
     msg::String
