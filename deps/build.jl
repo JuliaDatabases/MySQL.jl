@@ -3,7 +3,7 @@ if VERSION < v"1.3.0"
 using BinaryProvider # requires BinaryProvider 0.3.0 or later
 
 # Parse some basic command-line arguments
-const verbose = "--verbose" in ARGS
+const verbose = true
 const prefix = Prefix(get([a for a in ARGS if a != "--verbose"], 1, joinpath(@__DIR__, "usr")))
 products = [
     LibraryProduct(joinpath(prefix, "lib/mariadb"), "libmariadb", :libmariadb),
@@ -43,7 +43,9 @@ if unsatisfied || !isinstalled(dl_info...; prefix=prefix)
     # Download and install binaries
     install(dl_info...; prefix=prefix, force=true, verbose=verbose)
 end
-
+@show readdir(prefix)
+@show readdir(joinpath(prefix, "lib"))
+@show readir(joinpath(prefix, "lib/mariadb"))
 # Write out a deps.jl file that will contain mappings for our products
 write_deps_file(joinpath(@__DIR__, "deps.jl"), products, verbose=verbose)
 
