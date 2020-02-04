@@ -45,7 +45,7 @@ if unsatisfied || !isinstalled(dl_info...; prefix=prefix)
 end
 @show readdir(joinpath(@__DIR__, "usr"))
 @show readdir(joinpath(joinpath(@__DIR__, "usr"), "lib"))
-@show readir(joinpath(joinpath(@__DIR__, "usr"), "lib/mariadb"))
+@show readdir(joinpath(joinpath(@__DIR__, "usr"), "lib/mariadb"))
 # Write out a deps.jl file that will contain mappings for our products
 write_deps_file(joinpath(@__DIR__, "deps.jl"), products, verbose=verbose)
 
