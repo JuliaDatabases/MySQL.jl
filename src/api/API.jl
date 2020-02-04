@@ -4,7 +4,7 @@ using Dates, DecFP
 
 if VERSION < v"1.3.0"
 # Load libmariadb from our deps.jl
-const depsjl_path = joinpath(dirname(@__FILE__), "..", "deps", "deps.jl")
+const depsjl_path = joinpath(dirname(@__FILE__), "..", "..", "deps", "deps.jl")
 if !isfile(depsjl_path)
     error("MySQL not installed properly, run Pkg.build(\"MySQL\"), restart Julia and try again")
 end
