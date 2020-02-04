@@ -43,9 +43,9 @@ if unsatisfied || !isinstalled(dl_info...; prefix=prefix)
     # Download and install binaries
     install(dl_info...; prefix=prefix, force=true, verbose=verbose)
 end
-@show readdir(prefix)
-@show readdir(joinpath(prefix, "lib"))
-@show readir(joinpath(prefix, "lib/mariadb"))
+@show readdir(joinpath(@__DIR__, "usr"))
+@show readdir(joinpath(joinpath(@__DIR__, "usr"), "lib"))
+@show readir(joinpath(joinpath(@__DIR__, "usr"), "lib/mariadb"))
 # Write out a deps.jl file that will contain mappings for our products
 write_deps_file(joinpath(@__DIR__, "deps.jl"), products, verbose=verbose)
 
