@@ -23,7 +23,7 @@ mutable struct Connection <: DBInterface.Connection
 
     function Connection(host::String, user::String, passwd::String, db::String, port::Integer, unix_socket::String; kw...)
         mysql = API.init()
-        API.setoption(mysql, API.MYSQL_PLUGIN_DIR, joinpath(API.MariaDB_Connector_C_jll.artifact_dir, "lib", "mariadb", "plugin"))
+        API.setoption(mysql, API.MYSQL_PLUGIN_DIR, API.PLUGIN_DIR)
         API.setoption(mysql, API.MYSQL_SET_CHARSET_NAME, "utf8mb4")
         client_flag = clientflags(; kw...)
         setoptions!(mysql; kw...)
