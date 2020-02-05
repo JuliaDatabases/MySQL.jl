@@ -23,8 +23,6 @@ mutable struct Connection <: DBInterface.Connection
 
     function Connection(host::String, user::String, passwd::String, db::String, port::Integer, unix_socket::String; kw...)
         mysql = API.init()
-        @show API.PLUGIN_DIR
-        @show readdir(API.PLUGIN_DIR)
         API.setoption(mysql, API.MYSQL_PLUGIN_DIR, API.PLUGIN_DIR)
         API.setoption(mysql, API.MYSQL_SET_CHARSET_NAME, "utf8mb4")
         client_flag = clientflags(; kw...)

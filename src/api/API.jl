@@ -10,7 +10,7 @@ if !isfile(depsjl_path)
     error("MySQL not installed properly, run Pkg.build(\"MySQL\"), restart Julia and try again")
 end
 include(depsjl_path)
-const PLUGIN_DIR = joinpath(dirname(@__FILE__), "..", "..", "deps", "lib", "mariadb", "plugin")
+const PLUGIN_DIR = joinpath(dirname(@__FILE__), "..", "..", "deps", "usr", "lib", "mariadb", "plugin")
 
 else
 
