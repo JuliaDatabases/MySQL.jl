@@ -171,13 +171,13 @@ end
 # @test length(res[1]) == 5
 # @test isequal(res.OfficeNo, [1, 1, 1, 1, missing])
 
-res = DBInterface.execute!(DBInterface.prepare(conn, "select DeptNo, OfficeNo from Employee"); mysql_store_result=false) |> columntable
-@test length(res) == 2
-@test length(res[1]) == 5
-@test isequal(res.OfficeNo, [1, 1, 1, 1, missing])
+# res = DBInterface.execute!(DBInterface.prepare(conn, "select DeptNo, OfficeNo from Employee"); mysql_store_result=false) |> columntable
+# @test length(res) == 2
+# @test length(res[1]) == 5
+# @test isequal(res.OfficeNo, [1, 1, 1, 1, missing])
 
-stmt = DBInterface.prepare(conn, "select DeptNo, OfficeNo from Employee where OfficeNo = ?")
-res = DBInterface.execute!(stmt, 1; mysql_store_result=false) |> columntable
-@test length(res) == 2
-@test length(res[1]) == 4
-@test isequal(res.OfficeNo, [1, 1, 1, 1])
+# stmt = DBInterface.prepare(conn, "select DeptNo, OfficeNo from Employee where OfficeNo = ?")
+# res = DBInterface.execute!(stmt, 1; mysql_store_result=false) |> columntable
+# @test length(res) == 2
+# @test length(res[1]) == 4
+# @test isequal(res.OfficeNo, [1, 1, 1, 1])
