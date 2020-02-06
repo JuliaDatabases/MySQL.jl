@@ -43,7 +43,9 @@ if unsatisfied || !isinstalled(dl_info...; prefix=prefix)
 end
 
 for path in readdir(joinpath(@__DIR__, "usr", "lib", "mariadb"))
-    mv(path, joinpath(@__DIR__, "usr", "lib", basename(path)))
+    if isfile(path)
+        mv(path, joinpath(@__DIR__, "usr", "lib", basename(path)))
+    end
 end
 
 # Write out a deps.jl file that will contain mappings for our products
