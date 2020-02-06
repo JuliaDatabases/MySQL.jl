@@ -1,4 +1,4 @@
-if VERSION < v"1.3.0"
+@static if VERSION < v"1.3.0"
 
 using BinaryProvider # requires BinaryProvider 0.3.0 or later
 
