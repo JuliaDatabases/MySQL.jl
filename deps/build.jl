@@ -8,7 +8,7 @@ const prefix = Prefix(get([a for a in ARGS if a != "--verbose"], 1, joinpath(@__
 
 # These are the two binary objects we care about
 products = [
-    LibraryProduct(joinpath(prefix, "lib/mariadb"), "libmariadb", :libmariadb),
+    LibraryProduct(prefix, "libmariadb", :libmariadb),
 ]
 
 dependencies = [

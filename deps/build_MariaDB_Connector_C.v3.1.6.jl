@@ -4,7 +4,7 @@ using BinaryProvider # requires BinaryProvider 0.3.0 or later
 const verbose = true
 const prefix = Prefix(get([a for a in ARGS if a != "--verbose"], 1, joinpath(@__DIR__, "usr")))
 products = [
-    LibraryProduct(joinpath(prefix, "lib/mariadb"), "libmariadb", :libmariadb),
+    LibraryProduct(prefix, "libmariadb", :libmariadb),
 ]
 
 # Download binaries from hosted location
@@ -40,6 +40,14 @@ end
 if unsatisfied || !isinstalled(dl_info...; prefix=prefix)
     # Download and install binaries
     install(dl_info...; prefix=prefix, force=true, verbose=verbose)
+end
+
+@static if Sys.iswindows()
+    mv(joinpath(@__DIR__, "usr", "lib", "mariadb", "libmariadb.dll"), joinpath(@__DIR__, "usr", "bin", "libmariadb.dll"))
+elseif Sys.isapple()
+    mv(joinpath(@__DIR__, "usr", "lib", "mariadb", "libmariadb.dylib"), joinpath(@__DIR__, "usr", "lib", "libmariadb.dylib"))
+else
+    mv(joinpath(@__DIR__, "usr", "lib", "mariadb", "libmariadb.so"), joinpath(@__DIR__, "usr", "lib", "libmariadb.so"))
 end
 
 # Write out a deps.jl file that will contain mappings for our products
