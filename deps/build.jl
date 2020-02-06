@@ -14,9 +14,15 @@ using BinaryProvider # requires BinaryProvider 0.3.0 or later
 const verbose = "--verbose" in ARGS
 const prefix = Prefix(get([a for a in ARGS if a != "--verbose"], 1, joinpath(@__DIR__, "usr")))
 
+if Sys.iswindows()
+    pre = prefix
+else
+    pre = joinpath(prefix, "lib/mariadb")
+end
+
 # These are the two binary objects we care about
 products = [
-    LibraryProduct(joinpath(prefix, "lib/mariadb"), "libmariadb", :libmariadb),
+    LibraryProduct(pre, "libmariadb", :libmariadb),
 ]
 
 Anon1.include("build_MbedTLS.v2.16.0.jl")

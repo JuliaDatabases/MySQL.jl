@@ -3,8 +3,15 @@ using BinaryProvider # requires BinaryProvider 0.3.0 or later
 # Parse some basic command-line arguments
 const verbose = true
 const prefix = Prefix(get([a for a in ARGS if a != "--verbose"], 1, joinpath(@__DIR__, "usr")))
+
+if Sys.iswindows()
+    pre = prefix
+else
+    pre = joinpath(prefix, "lib/mariadb")
+end
+
 products = [
-    LibraryProduct(joinpath(prefix, "lib/mariadb"), "libmariadb", :libmariadb),
+    LibraryProduct(pre, "libmariadb", :libmariadb),
 ]
 
 # Download binaries from hosted location
@@ -42,13 +49,16 @@ if unsatisfied || !isinstalled(dl_info...; prefix=prefix)
     install(dl_info...; prefix=prefix, force=true, verbose=verbose)
 end
 
-# for path in readdir(joinpath(@__DIR__, "usr", "lib", "mariadb"))
-#     println("checking if should move $path")
-#     if isfile(joinpath(@__DIR__, "usr", "lib", "mariadb", path))
-#         println("moving $path")
-#         mv(joinpath(@__DIR__, "usr", "lib", "mariadb", path), joinpath(@__DIR__, "usr", "lib", path); force=true)
-#     end
-# end
+if Sys.iswindows()
+    for path in readdir(joinpath(@__DIR__, "usr", "lib", "mariadb"))
+        println("checking if should move $path")
+        if isfile(joinpath(@__DIR__, "usr", "lib", "mariadb", path))
+            println("moving $path")
+            mv(joinpath(@__DIR__, "usr", "lib", "mariadb", path), joinpath(@__DIR__, "usr", "bin", path); force=true)
+        end
+    end
+    flush(stdout)
+end
 
 # Write out a deps.jl file that will contain mappings for our products
 write_deps_file(joinpath(@__DIR__, "deps.jl"), products, verbose=verbose)
