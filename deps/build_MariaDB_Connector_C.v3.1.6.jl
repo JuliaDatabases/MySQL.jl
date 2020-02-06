@@ -44,7 +44,7 @@ end
 
 for path in readdir(joinpath(@__DIR__, "usr", "lib", "mariadb"))
     println("checking if should move $path")
-    if isfile(path)
+    if isfile(joinpath(@__DIR__, "usr", "lib", "mariadb", path))
         println("moving $path")
         mv(joinpath(@__DIR__, "usr", "lib", "mariadb", path), joinpath(@__DIR__, "usr", "lib", path); force=true)
     end
