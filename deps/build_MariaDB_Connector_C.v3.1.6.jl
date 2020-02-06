@@ -42,12 +42,8 @@ if unsatisfied || !isinstalled(dl_info...; prefix=prefix)
     install(dl_info...; prefix=prefix, force=true, verbose=verbose)
 end
 
-@static if Sys.iswindows()
-    mv(joinpath(@__DIR__, "usr", "lib", "mariadb", "libmariadb.dll"), joinpath(@__DIR__, "usr", "bin", "libmariadb.dll"))
-elseif Sys.isapple()
-    mv(joinpath(@__DIR__, "usr", "lib", "mariadb", "libmariadb.dylib"), joinpath(@__DIR__, "usr", "lib", "libmariadb.dylib"))
-else
-    mv(joinpath(@__DIR__, "usr", "lib", "mariadb", "libmariadb.so"), joinpath(@__DIR__, "usr", "lib", "libmariadb.so"))
+for path in readdir(joinpath(@__DIR__, "usr", "lib", "mariadb"))
+    mv(joinpath(@__DIR__, "usr", "lib", basename(path)), path)
 end
 
 # Write out a deps.jl file that will contain mappings for our products
