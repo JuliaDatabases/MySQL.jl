@@ -43,8 +43,10 @@ if unsatisfied || !isinstalled(dl_info...; prefix=prefix)
 end
 
 for path in readdir(joinpath(@__DIR__, "usr", "lib", "mariadb"))
+    println("checking if should move $path")
     if isfile(path)
-        mv(path, joinpath(@__DIR__, "usr", "lib", basename(path)))
+        println("moving $path")
+        mv(joinpath(@__DIR__, "usr", "lib", "mariadb", path), joinpath(@__DIR__, "usr", "lib", path); force=true)
     end
 end
 
