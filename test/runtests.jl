@@ -4,6 +4,9 @@ conn = DBInterface.connect(MySQL.Connection, "127.0.0.1", "root", ""; port=3306)
 # load host/user + options from file
 conn = DBInterface.connect(MySQL.Connection, "", "", ""; option_file="my.ini")
 
+res = DBInterface.execute!(conn, "show databases"; mysql_store_result=false) |> rowtable
+@test length(res) > 0
+
 DBInterface.execute!(conn, "DROP DATABASE if exists mysqltest")
 DBInterface.execute!(conn, "CREATE DATABASE mysqltest")
 DBInterface.execute!(conn, "use mysqltest")
