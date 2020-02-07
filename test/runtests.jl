@@ -176,20 +176,19 @@ for i = 1:length(expected)
 end
 
 # mysql_use_result
-DBInterface.execute!(conn, "create table employee2 as select * from employee")
-res = DBInterface.execute!(conn, "select DeptNo, OfficeNo from Employee2"; mysql_store_result=false) |> columntable
+res = DBInterface.execute!(conn, "select DeptNo, OfficeNo from Employee"; mysql_store_result=false) |> columntable
 @test length(res) == 2
 @test length(res[1]) == 5
 @test isequal(res.OfficeNo, [1, 1, 1, 1, missing])
 
-stmt = DBInterface.prepare(conn, "select DeptNo, OfficeNo from Employee2")
+stmt = DBInterface.prepare(conn, "select DeptNo, OfficeNo from Employee")
 res = DBInterface.execute!(stmt; mysql_store_result=false) |> columntable
 DBInterface.close!(stmt)
 @test length(res) == 2
 @test length(res[1]) == 5
 @test isequal(res.OfficeNo, [1, 1, 1, 1, missing])
 
-stmt = DBInterface.prepare(conn, "select DeptNo, OfficeNo from Employee2 where OfficeNo = ?")
+stmt = DBInterface.prepare(conn, "select DeptNo, OfficeNo from Employee where OfficeNo = ?")
 res = DBInterface.execute!(stmt, 1; mysql_store_result=false) |> columntable
 DBInterface.close!(stmt)
 @test length(res) == 2
