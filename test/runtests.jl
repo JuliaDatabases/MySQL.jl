@@ -166,9 +166,8 @@ for i = 1:length(expected)
 end
 
 # mysql_use_result
-res = DBInterface.execute!(conn, "select * from Employee") |> columntable
-res = DBInterface.execute!(conn, "select * from Employee"; mysql_store_result=false) |> columntable
-@test length(res) == 16
+res = DBInterface.execute!(conn, "select DeptNo, OfficeNo from Employee"; mysql_store_result=false) |> columntable
+@test length(res) == 2
 @test length(res[1]) == 5
 @test isequal(res.OfficeNo, [1, 1, 1, 1, missing])
 
