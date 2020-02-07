@@ -19,7 +19,7 @@ mutable struct Connection <: DBInterface.Connection
     user::String
     port::String
     db::String
-    lastresult::Union{Nothing, API.MYSQL_RES}
+    lastexecute::Any
 
     function Connection(host::String, user::String, passwd::String, db::String, port::Integer, unix_socket::String; kw...)
         mysql = API.init()
@@ -39,6 +39,28 @@ function Base.show(io::IO, conn::Connection)
 end
 
 @noinline checkconn(conn::Connection) = conn.mysql.ptr == C_NULL && error("mysql connection has been closed or disconnected")
+
+function clear!(conn)
+    conn.lastexecute === nothing || clear!(conn, conn.lastexecute)
+    return
+end
+
+function clear!(conn, result::API.MYSQL_RES)
+    if result.ptr != C_NULL
+        while API.fetchrow(conn.mysql, result) != C_NULL
+        end
+        finalize(result)
+    end
+    return
+end
+
+function clear!(conn, stmt::API.MYSQL_STMT)
+    if stmt.ptr != C_NULL
+        while API.fetch(stmt) == 0
+        end
+    end
+    return
+end
 
 function clientflags(;
         found_rows::Bool=false,

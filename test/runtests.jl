@@ -1,6 +1,8 @@
 using Test, MySQL, DBInterface, Tables, Dates, DecFP
 
 conn = DBInterface.connect(MySQL.Connection, "127.0.0.1", "root", ""; port=3306)
+DBInterface.close!(conn)
+
 # load host/user + options from file
 conn = DBInterface.connect(MySQL.Connection, "", "", ""; option_file="my.ini")
 
@@ -125,7 +127,9 @@ for i = 1:length(expected)
     end
 end
 
-res = DBInterface.execute!(DBInterface.prepare(conn, "select * from Employee")) |> columntable
+stmt = DBInterface.prepare(conn, "select * from Employee")
+res = DBInterface.execute!(stmt) |> columntable
+DBInterface.close!(stmt)
 @test length(res) == 16
 @test length(res[1]) == 5
 for i = 1:length(expected)
@@ -148,7 +152,9 @@ stmt = DBInterface.prepare(conn,
 
 DBInterface.executemany!(stmt, Base.structdiff(expected, NamedTuple{(:ID,)})...)
 
-res = DBInterface.execute!(DBInterface.prepare(conn, "select * from Employee")) |> columntable
+stmt2 = DBInterface.prepare(conn, "select * from Employee")
+res = DBInterface.execute!(stmt2) |> columntable
+DBInterface.close!(stmt2)
 @test length(res) == 16
 @test length(res[1]) == 4
 for i = 1:length(expected)
@@ -158,7 +164,11 @@ for i = 1:length(expected)
 end
 
 DBInterface.execute!(stmt, missing, missing, missing, missing, missing, missing, missing, missing, missing, DateTime("2015-09-05T12:31:30"), missing, missing, missing, missing, missing)
-res = DBInterface.execute!(DBInterface.prepare(conn, "select * from Employee")) |> columntable
+DBInterface.close!(stmt)
+
+stmt = DBInterface.prepare(conn, "select * from Employee")
+res = DBInterface.execute!(stmt) |> columntable
+DBInterface.close!(stmt)
 for i = 1:length(expected)
     if i != 11 && i != 1
         @test res[i][end] === missing
@@ -166,18 +176,22 @@ for i = 1:length(expected)
 end
 
 # mysql_use_result
-res = DBInterface.execute!(conn, "select DeptNo, OfficeNo from Employee"; mysql_store_result=false) |> columntable
+DBInterface.execute!(conn, "create table employee2 as select * from employee")
+res = DBInterface.execute!(conn, "select DeptNo, OfficeNo from Employee2"; mysql_store_result=false) |> columntable
 @test length(res) == 2
 @test length(res[1]) == 5
 @test isequal(res.OfficeNo, [1, 1, 1, 1, missing])
 
-res = DBInterface.execute!(DBInterface.prepare(conn, "select DeptNo, OfficeNo from Employee"); mysql_store_result=false) |> columntable
+stmt = DBInterface.prepare(conn, "select DeptNo, OfficeNo from Employee2")
+res = DBInterface.execute!(stmt; mysql_store_result=false) |> columntable
+DBInterface.close!(stmt)
 @test length(res) == 2
 @test length(res[1]) == 5
 @test isequal(res.OfficeNo, [1, 1, 1, 1, missing])
 
-stmt = DBInterface.prepare(conn, "select DeptNo, OfficeNo from Employee where OfficeNo = ?")
+stmt = DBInterface.prepare(conn, "select DeptNo, OfficeNo from Employee2 where OfficeNo = ?")
 res = DBInterface.execute!(stmt, 1; mysql_store_result=false) |> columntable
+DBInterface.close!(stmt)
 @test length(res) == 2
 @test length(res[1]) == 4
 @test isequal(res.OfficeNo, [1, 1, 1, 1])

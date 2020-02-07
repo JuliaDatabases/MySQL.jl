@@ -1,4 +1,5 @@
 mutable struct Statement <: DBInterface.Statement
+    conn::Connection
     stmt::API.MYSQL_STMT
     sql::String
     nparams::Int
@@ -11,10 +12,10 @@ mutable struct Statement <: DBInterface.Statement
     valuehelpers::Vector{API.BindHelper}
     values::Vector{API.MYSQL_BIND}
 
-    function Statement(stmt::API.MYSQL_STMT, sql::AbstractString, nparams::Integer, nfields::Integer, bindhelpers, binds, names, types, valuehelpers, values)
+    function Statement(conn::Connection, stmt::API.MYSQL_STMT, sql::AbstractString, nparams::Integer, nfields::Integer, bindhelpers, binds, names, types, valuehelpers, values)
         lookup = Dict(x => i for (i, x) in enumerate(names))
-        stmt = new(stmt, sql, nparams, nfields, bindhelpers, binds, names, types, lookup, valuehelpers, values)
-        return stmt
+        s = new(conn, stmt, sql, nparams, nfields, bindhelpers, binds, names, types, lookup, valuehelpers, values)
+        return s
     end
 end
 
@@ -60,7 +61,7 @@ function DBInterface.prepare(conn::Connection, sql::AbstractString)
         valuehelpers = API.BindHelper[]
         values = API.MYSQL_BIND[]
     end
-    return Statement(stmt, sql, nparams, nfields, bindhelpers, binds, names, types, valuehelpers, values)
+    return Statement(conn, stmt, sql, nparams, nfields, bindhelpers, binds, names, types, valuehelpers, values)
 end
 
 struct Cursor{buffered} <: DBInterface.Cursor
@@ -104,6 +105,7 @@ Base.IteratorSize(::Type{Cursor{false}}) = Base.SizeUnknown()
 Base.length(c::Cursor) = c.rows
 
 function Base.iterate(cursor::Cursor, i=1)
+    cursor.stmt.ptr == C_NULL && return nothing
     status = API.fetch(cursor.stmt)
     status == API.MYSQL_NO_DATA && return nothing
     status == 1 && throw(API.StmtError(cursor.stmt))
@@ -137,6 +139,7 @@ function DBInterface.execute!(stmt::Statement, args...; mysql_store_result::Bool
     checkstmt(stmt)
     kwcheck(kw)
     paramcheck(stmt, args)
+    clear!(stmt.conn)
     if length(args) > 0
         foreach(1:stmt.nparams) do i
             bind!(stmt.bindhelpers[i], stmt.binds, i, args[i])
@@ -144,6 +147,7 @@ function DBInterface.execute!(stmt::Statement, args...; mysql_store_result::Bool
         API.bindparam(stmt.stmt, stmt.binds)
     end
     API.execute(stmt.stmt)
+    stmt.conn.lastexecute = stmt.stmt
     rows_affected = Core.bitcast(Int64, API.affectedrows(stmt.stmt))
     buffered = false
     rows = -1

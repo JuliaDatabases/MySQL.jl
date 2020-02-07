@@ -68,12 +68,7 @@ function cast(::Type{DateTime}, ptr, len)
 end
 
 function Base.getindex(r::TextRow, i::Int)
-    try
-        return cast(getcursor(r).types[i], unsafe_load(getrow(r), i), getlengths(r)[i])
-    catch e
-        println("error casting on col = $i")
-        rethrow(e)
-    end
+    return cast(getcursor(r).types[i], unsafe_load(getrow(r), i), getlengths(r)[i])
 end
 
 Base.getindex(r::TextRow, nm::Symbol) = getindex(r, getcursor(r).lookup[nm])
@@ -90,9 +85,11 @@ Base.IteratorSize(::Type{TextCursor{false}}) = Base.SizeUnknown()
 Base.length(c::TextCursor) = c.nrows
 
 function Base.iterate(cursor::TextCursor{buffered}, i=1) where {buffered}
+    cursor.result.ptr == C_NULL && return nothing
     rowptr = API.fetchrow(cursor.conn.mysql, cursor.result)
     if rowptr == C_NULL
         !buffered && API.errno(cursor.conn.mysql) != 0 && throw(API.Error(cursor.conn.mysql))
+        finalize(cursor.result)
         return nothing
     end
     lengths = API.fetchlengths(cursor.result, cursor.nfields)
@@ -122,11 +119,7 @@ fetched one at a time.
 """
 function DBInterface.execute!(conn::Connection, sql::AbstractString, args...; mysql_store_result::Bool=true, kw...)
     checkconn(conn)
-    if conn.lastresult !== nothing
-        while API.fetchrow(conn.mysql, conn.lastresult) != C_NULL
-        end
-        finalize(conn.lastresult)
-    end
+    clear!(conn)
     API.query(conn.mysql, sql)
 
     buffered = false
@@ -139,7 +132,7 @@ function DBInterface.execute!(conn::Connection, sql::AbstractString, args...; my
     else
         result = API.useresult(conn.mysql)
     end
-    conn.lastresult = result
+    conn.lastexecute = result
 
     if result.ptr != C_NULL
         if buffered
