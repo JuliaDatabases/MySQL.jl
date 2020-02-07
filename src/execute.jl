@@ -68,7 +68,12 @@ function cast(::Type{DateTime}, ptr, len)
 end
 
 function Base.getindex(r::TextRow, i::Int)
-    return cast(getcursor(r).types[i], unsafe_load(getrow(r), i), getlengths(r)[i])
+    try
+        return cast(getcursor(r).types[i], unsafe_load(getrow(r), i), getlengths(r)[i])
+    catch e
+        println("error casting on col = $i")
+        rethrow(e)
+    end
 end
 
 Base.getindex(r::TextRow, nm::Symbol) = getindex(r, getcursor(r).lookup[nm])
