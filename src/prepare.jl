@@ -35,6 +35,10 @@ DBInterface.close!(stmt::Statement) = finalize(stmt.stmt)
 Send a `sql` SQL string to the database to be prepared, returning a `MySQL.Statement` object
 that can be passed to `DBInterface.execute!(stmt, args...)` to be repeatedly executed,
 optionally passing `args` for parameters to be bound on each execution.
+
+Note that `DBInterface.close!(stmt)` should be called once statement executions are finished. Apart from
+freeing resources, it has been noted that too many unclosed statements and resultsets, used in conjunction
+with streaming queries (i.e. `mysql_store_result=false`) has led to occasional resultset corruption.
 """
 function DBInterface.prepare(conn::Connection, sql::AbstractString)
     stmt = API.stmtinit(conn.mysql)
