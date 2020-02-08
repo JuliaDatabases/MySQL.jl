@@ -1,137 +1,196 @@
-using Test, MySQL, Tables, Dates
+using Test, MySQL, DBInterface, Tables, Dates, DecFP
 
-if haskey(ENV, "APPVEYOR_BUILD_NUMBER")
-    pswd = "Password12!"
-else
-    pswd = ""
-end
+conn = DBInterface.connect(MySQL.Connection, "127.0.0.1", "root", ""; port=3306)
+DBInterface.close!(conn)
 
-const conn = MySQL.connect("127.0.0.1", "root", pswd; port=3306)
+# load host/user + options from file
+conn = DBInterface.connect(MySQL.Connection, "", "", ""; option_file="my.ini")
 
-MySQL.execute!(conn, "DROP DATABASE if exists mysqltest")
-MySQL.execute!(conn, "CREATE DATABASE mysqltest")
-MySQL.execute!(conn, "use mysqltest")
-MySQL.execute!(conn, """CREATE TABLE Employee
+DBInterface.execute!(conn, "DROP DATABASE if exists mysqltest")
+DBInterface.execute!(conn, "CREATE DATABASE mysqltest")
+DBInterface.execute!(conn, "use mysqltest")
+DBInterface.execute!(conn, """CREATE TABLE Employee
                  (
                      ID INT NOT NULL AUTO_INCREMENT,
-                     Name VARCHAR(255),
-                     Salary FLOAT(7,2),
+                     OfficeNo TINYINT,
+                     DeptNo SMALLINT,
+                     EmpNo BIGINT UNSIGNED,
+                     Wage FLOAT(7,2),
+                     Salary DOUBLE,
+                     Rate DECIMAL(5, 3),
+                     LunchTime TIME,
                      JoinDate DATE,
                      LastLogin DATETIME,
-                     LunchTime TIME,
-                     OfficeNo TINYINT,
+                     LastLogin2 TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                     Initial CHAR(1),
+                     Name VARCHAR(255),
+                     Photo BLOB,
                      JobType ENUM('HR', 'Management', 'Accounts'),
                      Senior BIT(1),
-                     empno SMALLINT,
                      PRIMARY KEY (ID)
                  );""")
 
-MySQL.execute!(conn, """INSERT INTO Employee (Name, Salary, JoinDate, LastLogin, LunchTime, OfficeNo, JobType, Senior, empno)
+DBInterface.execute!(conn, """INSERT INTO Employee (OfficeNo, DeptNo, EmpNo, Wage, Salary, Rate, LunchTime, JoinDate, LastLogin, LastLogin2, Initial, Name, Photo, JobType, Senior)
                  VALUES
-                 ('John', 10000.50, '2015-8-3', '2015-9-5 12:31:30', '12:00:00', 1, 'HR', b'1', 1301),
-                 ('Tom', 20000.25, '2015-8-4', '2015-10-12 13:12:14', '13:00:00', 12, 'HR', b'1', 1422),
-                 ('Jim', 30000.00, '2015-6-2', '2015-9-5 10:05:10', '12:30:00', 45, 'Management', b'0', 1567),
-                 ('Tim', 15000.50, '2015-7-25', '2015-10-10 12:12:25', '12:30:00', 56, 'Accounts', b'1', 3200);
+                 (1, 2, 1301, 3.14, 10000.50, 1.001, '12:00:00', '2015-8-3', '2015-9-5 12:31:30', '2015-9-5 12:31:30', 'A', 'John', 'abc', 'HR', b'1'),
+                 (1, 2, 1422, 3.14, 20000.25, 2.002, '13:00:00', '2015-8-4', '2015-10-12 13:12:14', '2015-10-12 13:12:14', 'B', 'Tom', 'def', 'HR', b'1'),
+                 (1, 2, 1567, 3.14, 30000.00, 3.003, '12:30:00', '2015-6-2', '2015-9-5 10:05:10', '2015-9-5 10:05:10', 'C', 'Jim', 'ghi', 'Management', b'0'),
+                 (1, 2, 3200, 3.14, 15000.50, 2.5, '12:30:00', '2015-7-25', '2015-10-10 12:12:25', '2015-10-10 12:12:25', 'D', 'Tim', 'jkl', 'Accounts', b'1');
               """)
 
-# id = MySQL.insertid(conn)
-# println("Last insert id was $id")
-
-res = MySQL.Query(conn, "select * from Employee") |> columntable
-
-@test length(res) == 10
-@test length(res[1]) == 4
-@test res.ID == [1,2,3,4]
-
 expected = (
-  ID        = Int32[1, 2, 3, 4],
-  Name      = Union{Missing, String}["John", "Tom", "Jim", "Tim"],
-  Salary    = Union{Missing, Float32}[10000.5, 20000.25, 30000.0, 15000.5],
-  JoinDate  = Union{Missing, Dates.Date}[Date("2015-08-03"), Date("2015-08-04"), Date("2015-06-02"), Date("2015-07-25")],
-  LastLogin = Union{Missing, Dates.DateTime}[DateTime("2015-09-05T12:31:30"), DateTime("2015-10-12T13:12:14"), DateTime("2015-09-05T10:05:10"), DateTime("2015-10-10T12:12:25")],
-  LunchTime = Union{Missing, Dates.Time}[Dates.Time(12,00,00), Dates.Time(13,00,00), Dates.Time(12,30,00), Dates.Time(12,30,00)],
-  OfficeNo  = Union{Missing, Int8}[1, 12, 45, 56],
-  JobType   = Union{Missing, String}["HR", "HR", "Management", "Accounts"],
-  Senior    = Union{Missing, MySQL.API.Bit}[MySQL.API.Bit(1), MySQL.API.Bit(1), MySQL.API.Bit(0), MySQL.API.Bit(1)],
-  empno     = Union{Missing, Int16}[1301, 1422, 1567, 3200],
+  ID         = Int32[1, 2, 3, 4],
+  OfficeNo   = Union{Missing, Int8}[1, 1, 1, 1],
+  DeptNo     = Union{Missing, Int16}[2, 2, 2, 2],
+  EmpNo      = Union{Missing, UInt64}[1301, 1422, 1567, 3200],
+  Wage       = Union{Missing, Float32}[3.14, 3.14, 3.14, 3.14],
+  Salary     = Union{Missing, Float64}[10000.5, 20000.25, 30000.0, 15000.5],
+  Rate       = Union{Missing, Dec64}[d64"1.001", d64"2.002", d64"3.003", d64"2.5"],
+  LunchTime  = Union{Missing, Dates.Time}[Dates.Time(12,00,00), Dates.Time(13,00,00), Dates.Time(12,30,00), Dates.Time(12,30,00)],
+  JoinDate   = Union{Missing, Dates.Date}[Date("2015-08-03"), Date("2015-08-04"), Date("2015-06-02"), Date("2015-07-25")],
+  LastLogin  = Union{Missing, Dates.DateTime}[DateTime("2015-09-05T12:31:30"), DateTime("2015-10-12T13:12:14"), DateTime("2015-09-05T10:05:10"), DateTime("2015-10-10T12:12:25")],
+  LastLogin2 = Dates.DateTime[DateTime("2015-09-05T12:31:30"), DateTime("2015-10-12T13:12:14"), DateTime("2015-09-05T10:05:10"), DateTime("2015-10-10T12:12:25")],
+  Initial    = Union{Missing, String}["A", "B", "C", "D"],
+  Name       = Union{Missing, String}["John", "Tom", "Jim", "Tim"],
+  Photo      = Union{Missing, Vector{UInt8}}[b"abc", b"def", b"ghi", b"jkl"],
+  JobType    = Union{Missing, String}["HR", "HR", "Management", "Accounts"],
+  Senior     = Union{Missing, MySQL.API.Bit}[MySQL.API.Bit(1), MySQL.API.Bit(1), MySQL.API.Bit(0), MySQL.API.Bit(1)],
 )
 
+cursor = DBInterface.execute!(conn, "select * from Employee")
+@test DBInterface.lastrowid(cursor) == 1
+@test eltype(cursor) == MySQL.TextRow
+@test Tables.istable(cursor)
+@test Tables.rowaccess(cursor)
+@test Tables.rows(cursor) === cursor
+@test Tables.schema(cursor) == Tables.Schema(propertynames(expected), eltype.(collect(expected)))
+@test Base.IteratorSize(typeof(cursor)) == Base.HasLength()
+@test length(cursor) == 4
+
+row = first(cursor)
+@test Base.IndexStyle(typeof(row)) == Base.IndexLinear()
+@test length(row) == length(expected)
+@test propertynames(row) == collect(propertynames(expected))
+for (i, prop) in enumerate(propertynames(row))
+    @test getproperty(row, prop) == row[prop] == row[i] == expected[prop][1]
+end
+
+res = DBInterface.execute!(conn, "select * from Employee") |> columntable
+@test length(res) == 16
+@test length(res[1]) == 4
 @test res == expected
 
-# Streaming Queries
-sres = MySQL.Query(conn, "select * from Employee", streaming=true)
+# as a prepared statement
+stmt = DBInterface.prepare(conn, "select * from Employee")
+cursor = DBInterface.execute!(stmt)
+@test DBInterface.lastrowid(cursor) == 1
+@test eltype(cursor) == MySQL.Row
+@test Tables.istable(cursor)
+@test Tables.rowaccess(cursor)
+@test Tables.rows(cursor) === cursor
+@test Tables.schema(cursor) == Tables.Schema(propertynames(expected), eltype.(collect(expected)))
+@test Base.IteratorSize(typeof(cursor)) == Base.HasLength()
+@test length(cursor) == 4
 
-@test sres.nrows == 0
-
-data = []
-for row in sres
-    push!(data, row)
+row = first(cursor)
+@test Base.IndexStyle(typeof(row)) == Base.IndexLinear()
+@test length(row) == length(expected)
+@test propertynames(row) == collect(propertynames(expected))
+for (i, prop) in enumerate(propertynames(row))
+    @test getproperty(row, prop) == row[prop] == row[i] == expected[prop][1]
 end
-@test length(data) == 4
-@test length(data[1]) == 10
-@test data[1].Name == "John"
+
+res = DBInterface.execute!(stmt) |> columntable
+@test length(res) == 16
+@test length(res[1]) == 4
+@test res == expected
+
+@test DBInterface.close!(stmt) === nothing
 
 # insert null row
-MySQL.execute!(conn, "INSERT INTO Employee () VALUES ();")
-
-res = MySQL.Query(conn, "select * from Employee") |> columntable
-
-foreach(x->push!(x[2], x[1] == 1 ? Int32(5) : missing), enumerate(expected))
-@test isequal(res, expected)
-
-q = MySQL.Query(conn, "select * from Employee")
-for row in q
-    println(row)
+DBInterface.execute!(conn, "INSERT INTO Employee () VALUES ();")
+for i = 1:length(expected)
+    if i == 1
+        push!(expected[i], 5)
+    elseif i == 11
+    else
+        push!(expected[i], missing)
+    end
 end
 
-@test MySQL.escape(conn, "quoting 'test'") == "quoting \\'test\\'"
+res = DBInterface.execute!(conn, "select * from Employee") |> columntable
+@test length(res) == 16
+@test length(res[1]) == 5
+for i = 1:length(expected)
+    if i != 11
+        @test isequal(res[i], expected[i])
+    end
+end
 
-stmt = MySQL.Stmt(conn, "UPDATE Employee SET Salary = ? WHERE ID > ?;")
-affrows = MySQL.execute!(stmt, [25000, 2])
+stmt = DBInterface.prepare(conn, "select * from Employee")
+res = DBInterface.execute!(stmt) |> columntable
+DBInterface.close!(stmt)
+@test length(res) == 16
+@test length(res[1]) == 5
+for i = 1:length(expected)
+    if i != 11
+        @test isequal(res[i], expected[i])
+    end
+end
 
-res = MySQL.Query(conn, "select Salary from Employee") |> columntable
-@test all(res[1][3:end] .== 25000)
+# now test insert/parameter binding
+DBInterface.execute!(conn, "DELETE FROM Employee")
+for i = 1:length(expected)
+    if i != 11
+        pop!(expected[i])
+    end
+end
 
-affrows = MySQL.execute!(stmt, [missing, 2])
+stmt = DBInterface.prepare(conn,
+    "INSERT INTO Employee (OfficeNo, DeptNo, EmpNo, Wage, Salary, Rate, LunchTime, JoinDate, LastLogin, LastLogin2, Initial, Name, Photo, JobType, Senior)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
 
-res = MySQL.Query(conn, "select Salary from Employee") |> columntable
-@test all(res[1][3:end] .=== missing)
+DBInterface.executemany!(stmt, Base.structdiff(expected, NamedTuple{(:ID,)})...)
 
-# test prepared statements
-stmt = MySQL.Stmt(conn, "INSERT INTO Employee (Name, Salary, JoinDate, LastLogin, LunchTime, OfficeNo, empno) VALUES (?, ?, ?, ?, ?, ?, ?);")
+stmt2 = DBInterface.prepare(conn, "select * from Employee")
+res = DBInterface.execute!(stmt2) |> columntable
+DBInterface.close!(stmt2)
+@test length(res) == 16
+@test length(res[1]) == 4
+for i = 1:length(expected)
+    if i != 11 && i != 1
+        @test isequal(res[i], expected[i])
+    end
+end
 
-values = [(Name="John", Salary=10000.50, JoinDate=Date("2015-8-3"), LastLogin=DateTime("2015-9-5T12:31:30"), LunchTime=Dates.Time(12,00,00), OfficeNo=1, empno=1301),
-          (Name="Tom",  Salary=20000.25, JoinDate=Date("2015-8-4"), LastLogin=DateTime("2015-10-12T13:12:14"), LunchTime=Dates.Time(13,00,00), OfficeNo=12, empno=1422),
-          (Name="Jim",  Salary=30000.00, JoinDate=Date("2015-6-2"), LastLogin=DateTime("2015-9-5T10:05:10"), LunchTime=Dates.Time(12,30,00), OfficeNo=45, empno=1567),
-          (Name="Tim",  Salary=15000.50, JoinDate=Date("2015-7-25"), LastLogin=DateTime("2015-10-10T12:12:25"), LunchTime=Dates.Time(12,30,00), OfficeNo=56, empno=3200)]
+DBInterface.execute!(stmt, missing, missing, missing, missing, missing, missing, missing, missing, missing, DateTime("2015-09-05T12:31:30"), missing, missing, missing, missing, missing)
+DBInterface.close!(stmt)
 
-MySQL.execute!(values, stmt)
+stmt = DBInterface.prepare(conn, "select * from Employee")
+res = DBInterface.execute!(stmt) |> columntable
+DBInterface.close!(stmt)
+for i = 1:length(expected)
+    if i != 11 && i != 1
+        @test res[i][end] === missing
+    end
+end
 
-res = MySQL.Query(conn, "select * from Employee") |> columntable
-@test length(res) == 10
-@test length(res[1]) == 9
+# mysql_use_result
+res = DBInterface.execute!(conn, "select DeptNo, OfficeNo from Employee"; mysql_store_result=false) |> columntable
+@test length(res) == 2
+@test length(res[1]) == 5
+@test isequal(res.OfficeNo, [1, 1, 1, 1, missing])
 
-# test multi-statement execution
-MySQL.execute!(conn, """DROP DATABASE if exists mysqltest2;
-    CREATE DATABASE mysqltest2;
-    USE mysqltest2;
-    CREATE TABLE test (a varchar(20), b integer);
-    INSERT INTO test (a,b) value ("test",123);""")
+stmt = DBInterface.prepare(conn, "select DeptNo, OfficeNo from Employee")
+res = DBInterface.execute!(stmt; mysql_store_result=false) |> columntable
+DBInterface.close!(stmt)
+@test length(res) == 2
+@test length(res[1]) == 5
+@test isequal(res.OfficeNo, [1, 1, 1, 1, missing])
 
-res = MySQL.Query(conn, """select * from test;""") |> columntable
-
-@test res.a[1] == "test"
-@test res.b[1] == 123
-
-# issue #130
-MySQL.execute!(conn, """
-    CREATE TABLE issue130 (
-        f1 Int, f2 Int, f3 Int, f4 Int, f5 Int, f6 Int, f7 Int, f8 Int, f9 Int, f10 Int,
-        f11 Int, f12 Int, f13 Int, f14 Int, f15 Int, f16 Int, f17 Int, f18 Int, f19 Int, f20 Int,
-        f21 Int, f22 Int, f23 Int, f24 Int, f25 Int, f26 Int, f27 Int, f28 Int, f29 Int, f30 Int,
-        PRIMARY KEY (f1)
-    );""")
-res = MySQL.Query(conn, "select count(*) from issue130;") |> columntable
-@test res[1][1] == 0
-res = MySQL.Query(conn, "select * from issue130;") |> columntable
-@test isempty(res[1])
+stmt = DBInterface.prepare(conn, "select DeptNo, OfficeNo from Employee where OfficeNo = ?")
+res = DBInterface.execute!(stmt, 1; mysql_store_result=false) |> columntable
+DBInterface.close!(stmt)
+@test length(res) == 2
+@test length(res[1]) == 4
+@test isequal(res.OfficeNo, [1, 1, 1, 1])
