@@ -125,11 +125,11 @@ Escape an SQL statement
 
 Deprecated - see [MySQL.Query](#mysqlquery)
 
-#### MySQL.execute!
+#### MySQL.execute
 
 ```julia
-MySQL.execute!(conn::MySQL.Connection, sql::String)
-MySQL.execute!(stmt::MySQL.Stmt, params)
+MySQL.execute(conn::MySQL.Connection, sql::String)
+MySQL.execute(stmt::MySQL.Stmt, params)
 ```
 Execute an SQL statement without returning results (useful for DDL statements, update, delete, etc.)
 
@@ -158,13 +158,13 @@ MySQL.Stmt(conn::MySQL.Connection, sql::String) => MySQL.Stmt
 ```
 A prepared SQL statement that may contain `?` parameter placeholders.
 
-A `MySQL.Stmt` may then be executed by calling `MySQL.execute!(stmt, params)` where
+A `MySQL.Stmt` may then be executed by calling `MySQL.execute(stmt, params)` where
 `params` is a vector with the values to be bound to the `?` placeholders in the
 original SQL statement. Params must be provided for every `?` and will be matched in the same order they
 appeared in the original SQL statement.
 
 Alternately, a source implementing the Tables.jl interface can be streamed by executing
-`MySQL.execute!(itr, stmt)`. Each row must have a value for each param.
+`MySQL.execute(itr, stmt)`. Each row must have a value for each param.
 
 #### MySQL.Query
 
@@ -196,7 +196,7 @@ num_foo = foo[1,1]
 my_stmt = MySQL.Stmt(conn, """INSERT INTO my_second_table ('foo_id','foo_name') VALUES (?,?);""")
 
 for i = 1:num_foo
-  MySQL.execute!(my_stmt, [i, "foo_$i"])
+  MySQL.execute(my_stmt, [i, "foo_$i"])
 end
 
 MySQL.disconnect(conn)

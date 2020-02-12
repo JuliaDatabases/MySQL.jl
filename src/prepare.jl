@@ -33,7 +33,7 @@ DBInterface.close!(stmt::Statement) = finalize(stmt.stmt)
     DBInterface.prepare(conn::MySQL.Connection, sql) => MySQL.Statement
 
 Send a `sql` SQL string to the database to be prepared, returning a `MySQL.Statement` object
-that can be passed to `DBInterface.execute!(stmt, args...)` to be repeatedly executed,
+that can be passed to `DBInterface.execute(stmt, args...)` to be repeatedly executed,
 optionally passing `args` for parameters to be bound on each execution.
 
 Note that `DBInterface.close!(stmt)` should be called once statement executions are finished. Apart from
@@ -80,27 +80,23 @@ struct Cursor{buffered} <: DBInterface.Cursor
     rows::Int
 end
 
-struct Row <: AbstractVector{Any}
+struct Row <: Tables.AbstractRow
     cursor::Cursor
 end
 
 getcursor(r::Row) = getfield(r, :cursor)
 
-Base.size(r::Row) = (getcursor(r).nfields,)
-Base.IndexStyle(::Type{<:Row}) = Base.IndexLinear()
-Base.propertynames(r::Row) = getcursor(r).names
+Tables.columnnames(r::Row) = getcursor(r).names
 
-function Base.getindex(r::Row, i::Int)
+function Tables.getcolumn(r::Row, ::Type{T}, i::Int, nm::Symbol) where {T}
     cursor = getcursor(r)
-    return getvalue(cursor.stmt, cursor.valuehelpers[i], cursor.values, i, cursor.types[i])
+    return getvalue(cursor.stmt, cursor.valuehelpers[i], cursor.values, i, T)
 end
 
-Base.getindex(r::Row, nm::Symbol) = getindex(r, getcursor(r).lookup[nm])
-Base.getproperty(r::Row, nm::Symbol) = getindex(r, getcursor(r).lookup[nm])
+Tables.getcolumn(r::Row, i::Int) = Tables.getcolumn(r, getcursor(r).types[i], i, getcursor(r).names[i])
+Tables.getcolumn(r::Row, nm::Symbol) = Tables.getcolumn(r, getcursor(r).lookup[nm])
 
-Tables.istable(::Type{<:Cursor}) = true
-Tables.rowaccess(::Type{<:Cursor}) = true
-Tables.rows(q::Cursor) = q
+Tables.isrowtable(::Type{<:Cursor}) = true
 Tables.schema(c::Cursor) = Tables.Schema(c.names, c.types)
 
 Base.eltype(c::Cursor) = Row
@@ -126,27 +122,32 @@ function DBInterface.lastrowid(c::Cursor)
     return API.insertid(c.stmt)
 end
 
-@noinline kwcheck(kw) = !isempty(kw) && throw(MySQLInterfaceError("named parameters not supported by mysql; parameters must be provided in order by position; e.g. `DBInterface.execute!(stmt, param1, param2)`"))
+"""
+    DBInterface.close!(cursor)
+
+Close a cursor. No more results will be available.
+"""
+DBInterface.close!(c::Cursor) = clear!(c.conn)
+
 @noinline paramcheck(stmt, args) = length(args) == stmt.nparams || throw(MySQLInterfaceError("stmt requires $(stmt.nparams) params, only $(length(args)) provided"))
 
 """
-    DBInterface.execute!(stmt, args...; mysql_store_result=true) => MySQL.Cursor
+    DBInterface.execute(stmt, params; mysql_store_result=true) => MySQL.Cursor
 
-Execute a prepared statement, optionally passing `args` to be bound as parameters (like `?` in the sql).
+Execute a prepared statement, optionally passing `params` to be bound as parameters (like `?` in the sql).
 Returns a `Cursor` object, which iterates resultset rows and satisfies the `Tables.jl` interface, meaning
 results can be sent to any valid sink function (`DataFrame(cursor)`, `CSV.write("results.csv", cursor)`, etc.).
 Specifying `mysql_store_result=false` will avoid buffering the full resultset to the client after executing
 the query, which has memory use advantages, though ties up the database server since resultset rows must be
 fetched one at a time.
 """
-function DBInterface.execute!(stmt::Statement, args...; mysql_store_result::Bool=true, kw...)
+function DBInterface.execute(stmt::Statement, params=(); mysql_store_result::Bool=true)
     checkstmt(stmt)
-    kwcheck(kw)
-    paramcheck(stmt, args)
+    paramcheck(stmt, params)
     clear!(stmt.conn)
-    if length(args) > 0
+    if length(params) > 0
         foreach(1:stmt.nparams) do i
-            bind!(stmt.bindhelpers[i], stmt.binds, i, args[i])
+            bind!(stmt.bindhelpers[i], stmt.binds, i, params[i])
         end
         API.bindparam(stmt.stmt, stmt.binds)
     end

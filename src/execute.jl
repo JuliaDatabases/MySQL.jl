@@ -10,7 +10,7 @@ mutable struct TextCursor{buffered} <: DBInterface.Cursor
     lookup::Dict{Symbol, Int}
 end
 
-struct TextRow{buffered} <: AbstractVector{Any}
+struct TextRow{buffered} <: Tables.AbstractRow
     cursor::TextCursor{buffered}
     row::Ptr{Ptr{UInt8}}
     lengths::Vector{Culong}
@@ -20,9 +20,7 @@ getcursor(r::TextRow) = getfield(r, :cursor)
 getrow(r::TextRow) = getfield(r, :row)
 getlengths(r::TextRow) = getfield(r, :lengths)
 
-Base.size(r::TextRow) = (getcursor(r).nfields,)
-Base.IndexStyle(::Type{<:TextRow}) = Base.IndexLinear()
-Base.propertynames(r::TextRow) = getcursor(r).names
+Tables.columnnames(r::TextRow) = getcursor(r).names
 
 cast(::Type{Union{Missing, T}}, ptr, len) where {T} = ptr == C_NULL ? missing : cast(T, ptr, len)
 
@@ -67,16 +65,14 @@ function cast(::Type{DateTime}, ptr, len)
     casterror(DateTime, ptr, len)
 end
 
-function Base.getindex(r::TextRow, i::Int)
-    return cast(getcursor(r).types[i], unsafe_load(getrow(r), i), getlengths(r)[i])
+function Tables.getcolumn(r::TextRow, ::Type{T}, i::Int, nm::Symbol) where {T}
+    return cast(T, unsafe_load(getrow(r), i), getlengths(r)[i])
 end
 
-Base.getindex(r::TextRow, nm::Symbol) = getindex(r, getcursor(r).lookup[nm])
-Base.getproperty(r::TextRow, nm::Symbol) = getindex(r, getcursor(r).lookup[nm])
+Tables.getcolumn(r::TextRow, i::Int) = Tables.getcolumn(r, getcursor(r).types[i], i, getcursor(r).names[i])
+Tables.getcolumn(r::TextRow, nm::Symbol) = Tables.getcolumn(r, getcursor(r).lookup[nm])
 
-Tables.istable(::Type{<:TextCursor}) = true
-Tables.rowaccess(::Type{<:TextCursor}) = true
-Tables.rows(q::TextCursor) = q
+Tables.isrowtable(::Type{<:TextCursor}) = true
 Tables.schema(c::TextCursor) = Tables.Schema(c.names, c.types)
 
 Base.eltype(c::TextCursor) = TextRow
@@ -107,7 +103,14 @@ function DBInterface.lastrowid(c::TextCursor)
 end
 
 """
-    DBInterface.execute!(conn::MySQL.Connection, sql) => MySQL.TextCursor
+    DBInterface.close!(cursor)
+
+Close a cursor. No more results will be available.
+"""
+DBInterface.close!(c::TextCursor) = clear!(c.conn)
+
+"""
+    DBInterface.execute(conn::MySQL.Connection, sql) => MySQL.TextCursor
 
 Execute the SQL `sql` statement with the database connection `conn`. Parameter binding is
 only supported via prepared statements, see `?DBInterface.prepare(conn, sql)`.
@@ -117,8 +120,9 @@ Specifying `mysql_store_result=false` will avoid buffering the full resultset to
 the query, which has memory use advantages, though ties up the database server since resultset rows must be
 fetched one at a time.
 """
-function DBInterface.execute!(conn::Connection, sql::AbstractString, args...; mysql_store_result::Bool=true, kw...)
+function DBInterface.execute(conn::Connection, sql::AbstractString, params=(); mysql_store_result::Bool=true)
     checkconn(conn)
+    params != () && error("`DBInterface.execute(conn, sql)` does not support parameter binding; see `?DBInterface.prepare(conn, sql)`")
     clear!(conn)
     API.query(conn.mysql, sql)
 
