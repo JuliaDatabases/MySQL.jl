@@ -8,7 +8,7 @@
 DBInterface.connect
 DBInterface.close!
 MySQL.escape
-DBInterface.execute!
+DBInterface.execute
 DBInterface.prepare
 DBInterface.lastrowid
 ```

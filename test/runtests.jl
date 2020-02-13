@@ -6,10 +6,10 @@ DBInterface.close!(conn)
 # load host/user + options from file
 conn = DBInterface.connect(MySQL.Connection, "", "", ""; option_file="my.ini")
 
-DBInterface.execute!(conn, "DROP DATABASE if exists mysqltest")
-DBInterface.execute!(conn, "CREATE DATABASE mysqltest")
-DBInterface.execute!(conn, "use mysqltest")
-DBInterface.execute!(conn, """CREATE TABLE Employee
+DBInterface.execute(conn, "DROP DATABASE if exists mysqltest")
+DBInterface.execute(conn, "CREATE DATABASE mysqltest")
+DBInterface.execute(conn, "use mysqltest")
+DBInterface.execute(conn, """CREATE TABLE Employee
                  (
                      ID INT NOT NULL AUTO_INCREMENT,
                      OfficeNo TINYINT,
@@ -30,7 +30,7 @@ DBInterface.execute!(conn, """CREATE TABLE Employee
                      PRIMARY KEY (ID)
                  );""")
 
-DBInterface.execute!(conn, """INSERT INTO Employee (OfficeNo, DeptNo, EmpNo, Wage, Salary, Rate, LunchTime, JoinDate, LastLogin, LastLogin2, Initial, Name, Photo, JobType, Senior)
+DBInterface.execute(conn, """INSERT INTO Employee (OfficeNo, DeptNo, EmpNo, Wage, Salary, Rate, LunchTime, JoinDate, LastLogin, LastLogin2, Initial, Name, Photo, JobType, Senior)
                  VALUES
                  (1, 2, 1301, 3.14, 10000.50, 1.001, '12:00:00', '2015-8-3', '2015-9-5 12:31:30', '2015-9-5 12:31:30', 'A', 'John', 'abc', 'HR', b'1'),
                  (1, 2, 1422, 3.14, 20000.25, 2.002, '13:00:00', '2015-8-4', '2015-10-12 13:12:14', '2015-10-12 13:12:14', 'B', 'Tom', 'def', 'HR', b'1'),
@@ -57,7 +57,7 @@ expected = (
   Senior     = Union{Missing, MySQL.API.Bit}[MySQL.API.Bit(1), MySQL.API.Bit(1), MySQL.API.Bit(0), MySQL.API.Bit(1)],
 )
 
-cursor = DBInterface.execute!(conn, "select * from Employee")
+cursor = DBInterface.execute(conn, "select * from Employee")
 @test DBInterface.lastrowid(cursor) == 1
 @test eltype(cursor) == MySQL.TextRow
 @test Tables.istable(cursor)
@@ -75,14 +75,14 @@ for (i, prop) in enumerate(propertynames(row))
     @test getproperty(row, prop) == row[prop] == row[i] == expected[prop][1]
 end
 
-res = DBInterface.execute!(conn, "select * from Employee") |> columntable
+res = DBInterface.execute(conn, "select * from Employee") |> columntable
 @test length(res) == 16
 @test length(res[1]) == 4
 @test res == expected
 
 # as a prepared statement
 stmt = DBInterface.prepare(conn, "select * from Employee")
-cursor = DBInterface.execute!(stmt)
+cursor = DBInterface.execute(stmt)
 @test DBInterface.lastrowid(cursor) == 1
 @test eltype(cursor) == MySQL.Row
 @test Tables.istable(cursor)
@@ -100,7 +100,7 @@ for (i, prop) in enumerate(propertynames(row))
     @test getproperty(row, prop) == row[prop] == row[i] == expected[prop][1]
 end
 
-res = DBInterface.execute!(stmt) |> columntable
+res = DBInterface.execute(stmt) |> columntable
 @test length(res) == 16
 @test length(res[1]) == 4
 @test res == expected
@@ -108,7 +108,7 @@ res = DBInterface.execute!(stmt) |> columntable
 @test DBInterface.close!(stmt) === nothing
 
 # insert null row
-DBInterface.execute!(conn, "INSERT INTO Employee () VALUES ();")
+DBInterface.execute(conn, "INSERT INTO Employee () VALUES ();")
 for i = 1:length(expected)
     if i == 1
         push!(expected[i], 5)
@@ -118,7 +118,7 @@ for i = 1:length(expected)
     end
 end
 
-res = DBInterface.execute!(conn, "select * from Employee") |> columntable
+res = DBInterface.execute(conn, "select * from Employee") |> columntable
 @test length(res) == 16
 @test length(res[1]) == 5
 for i = 1:length(expected)
@@ -128,7 +128,7 @@ for i = 1:length(expected)
 end
 
 stmt = DBInterface.prepare(conn, "select * from Employee")
-res = DBInterface.execute!(stmt) |> columntable
+res = DBInterface.execute(stmt) |> columntable
 DBInterface.close!(stmt)
 @test length(res) == 16
 @test length(res[1]) == 5
@@ -139,7 +139,7 @@ for i = 1:length(expected)
 end
 
 # now test insert/parameter binding
-DBInterface.execute!(conn, "DELETE FROM Employee")
+DBInterface.execute(conn, "DELETE FROM Employee")
 for i = 1:length(expected)
     if i != 11
         pop!(expected[i])
@@ -150,10 +150,10 @@ stmt = DBInterface.prepare(conn,
     "INSERT INTO Employee (OfficeNo, DeptNo, EmpNo, Wage, Salary, Rate, LunchTime, JoinDate, LastLogin, LastLogin2, Initial, Name, Photo, JobType, Senior)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
 
-DBInterface.executemany!(stmt, Base.structdiff(expected, NamedTuple{(:ID,)})...)
+DBInterface.executemany(stmt, Base.structdiff(expected, NamedTuple{(:ID,)}))
 
 stmt2 = DBInterface.prepare(conn, "select * from Employee")
-res = DBInterface.execute!(stmt2) |> columntable
+res = DBInterface.execute(stmt2) |> columntable
 DBInterface.close!(stmt2)
 @test length(res) == 16
 @test length(res[1]) == 4
@@ -163,11 +163,11 @@ for i = 1:length(expected)
     end
 end
 
-DBInterface.execute!(stmt, missing, missing, missing, missing, missing, missing, missing, missing, missing, DateTime("2015-09-05T12:31:30"), missing, missing, missing, missing, missing)
+DBInterface.execute(stmt, [missing, missing, missing, missing, missing, missing, missing, missing, missing, DateTime("2015-09-05T12:31:30"), missing, missing, missing, missing, missing])
 DBInterface.close!(stmt)
 
 stmt = DBInterface.prepare(conn, "select * from Employee")
-res = DBInterface.execute!(stmt) |> columntable
+res = DBInterface.execute(stmt) |> columntable
 DBInterface.close!(stmt)
 for i = 1:length(expected)
     if i != 11 && i != 1
@@ -176,20 +176,20 @@ for i = 1:length(expected)
 end
 
 # mysql_use_result
-res = DBInterface.execute!(conn, "select DeptNo, OfficeNo from Employee"; mysql_store_result=false) |> columntable
+res = DBInterface.execute(conn, "select DeptNo, OfficeNo from Employee"; mysql_store_result=false) |> columntable
 @test length(res) == 2
 @test length(res[1]) == 5
 @test isequal(res.OfficeNo, [1, 1, 1, 1, missing])
 
 stmt = DBInterface.prepare(conn, "select DeptNo, OfficeNo from Employee")
-res = DBInterface.execute!(stmt; mysql_store_result=false) |> columntable
+res = DBInterface.execute(stmt; mysql_store_result=false) |> columntable
 DBInterface.close!(stmt)
 @test length(res) == 2
 @test length(res[1]) == 5
 @test isequal(res.OfficeNo, [1, 1, 1, 1, missing])
 
 stmt = DBInterface.prepare(conn, "select DeptNo, OfficeNo from Employee where OfficeNo = ?")
-res = DBInterface.execute!(stmt, 1; mysql_store_result=false) |> columntable
+res = DBInterface.execute(stmt, 1; mysql_store_result=false) |> columntable
 DBInterface.close!(stmt)
 @test length(res) == 2
 @test length(res[1]) == 4
