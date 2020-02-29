@@ -187,24 +187,24 @@ function getvalue(stmt, helper, values, i, ::Type{API.Bit})
     return API.Bit(x >> (8 * (len - 1)))
 end
 
-inithelper!(helper, x::Union{Bool, UInt8, Int8}) = helper.uint8 = UInt8[x]
+inithelper!(helper, x::Union{Bool, UInt8, Int8}) = helper.uint8 = UInt8[Core.bitcast(UInt8, x)]
 ptrhelper(helper, x::Union{Bool, UInt8, Int8}) = pointer(helper.uint8)
-sethelper!(helper, x::Union{Bool, UInt8, Int8}) = helper.uint8[1] = x
+sethelper!(helper, x::Union{Bool, UInt8, Int8}) = helper.uint8[1] = Core.bitcast(Bool, x)
 getvalue(stmt, helper, values, i, ::Type{T}) where {T <: Union{Bool, UInt8, Int8}} = Core.bitcast(T, helper.uint8[1])
 
-inithelper!(helper, x::Union{UInt16, Int16}) = helper.uint16 = UInt16[x]
+inithelper!(helper, x::Union{UInt16, Int16}) = helper.uint16 = UInt16[Core.bitcast(UInt16, x)]
 ptrhelper(helper, x::Union{UInt16, Int16}) = pointer(helper.uint16)
-sethelper!(helper, x::Union{UInt16, Int16}) = helper.uint16[1] = x
+sethelper!(helper, x::Union{UInt16, Int16}) = helper.uint16[1] = Core.bitcast(UInt16, x)
 getvalue(stmt, helper, values, i, ::Type{T}) where {T <: Union{UInt16, Int16}} = Core.bitcast(T, helper.uint16[1])
 
-inithelper!(helper, x::Union{UInt32, Int32}) = helper.uint32 = UInt32[x]
+inithelper!(helper, x::Union{UInt32, Int32}) = helper.uint32 = UInt32[Core.bitcast(UInt32, x)]
 ptrhelper(helper, x::Union{UInt32, Int32}) = pointer(helper.uint32)
-sethelper!(helper, x::Union{UInt32, Int32}) = helper.uint32[1] = x
+sethelper!(helper, x::Union{UInt32, Int32}) = helper.uint32[1] = Core.bitcast(UInt32, x)
 getvalue(stmt, helper, values, i, ::Type{T}) where {T <: Union{UInt32, Int32}} = Core.bitcast(T, helper.uint32[1])
 
-inithelper!(helper, x::Union{UInt64, Int64}) = helper.uint64 = UInt64[x]
+inithelper!(helper, x::Union{UInt64, Int64}) = helper.uint64 = UInt64[Core.bitcast(UInt64, x)]
 ptrhelper(helper, x::Union{UInt64, Int64}) = pointer(helper.uint64)
-sethelper!(helper, x::Union{UInt64, Int64}) = helper.uint64[1] = x
+sethelper!(helper, x::Union{UInt64, Int64}) = helper.uint64[1] = Core.bitcast(UInt64, x)
 getvalue(stmt, helper, values, i, ::Type{T}) where {T <: Union{UInt64, Int64}} = Core.bitcast(T, helper.uint64[1])
 
 inithelper!(helper, x::Float32) = helper.float = Float32[x]
