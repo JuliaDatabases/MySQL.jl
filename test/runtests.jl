@@ -195,3 +195,11 @@ DBInterface.close!(stmt)
 @test length(res) == 2
 @test length(res[1]) == 4
 @test isequal(res.OfficeNo, [1, 1, 1, 1])
+
+DBInterface.execute(conn, "DROP TABLE if exists negative_int")
+DBInterface.execute(conn, "CREATE TABLE negative_int (id int(11) default null)")
+stmt = DBInterface.prepare(conn, "INSERT INTO negative_int (id) VALUES (?);")
+DBInterface.execute(stmt, -1)
+res = DBInterface.execute(conn, "select id from negative_int") |> columntable
+@test length(res) == 1
+@test res[1][1] === Int32(-1)
