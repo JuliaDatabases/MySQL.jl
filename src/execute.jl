@@ -8,17 +8,20 @@ mutable struct TextCursor{buffered} <: DBInterface.Cursor
     names::Vector{Symbol}
     types::Vector{Type}
     lookup::Dict{Symbol, Int}
+    current_rownumber::Int
 end
 
 struct TextRow{buffered} <: Tables.AbstractRow
     cursor::TextCursor{buffered}
     row::Ptr{Ptr{UInt8}}
     lengths::Vector{Culong}
+    rownumber::Int
 end
 
 getcursor(r::TextRow) = getfield(r, :cursor)
 getrow(r::TextRow) = getfield(r, :row)
 getlengths(r::TextRow) = getfield(r, :lengths)
+getrownumber(r::TextRow) = getfield(r, :rownumber)
 
 Tables.columnnames(r::TextRow) = getcursor(r).names
 
@@ -65,7 +68,10 @@ function cast(::Type{DateTime}, ptr, len)
     casterror(DateTime, ptr, len)
 end
 
+@noinline wrongrow(i) = throw(ArgumentError("row $i is no longer valid; mysql results are forward-only iterators where each row is only valid when iterated"))
+
 function Tables.getcolumn(r::TextRow, ::Type{T}, i::Int, nm::Symbol) where {T}
+    getrownumber(r) == getcursor(r).current_rownumber || wrongrow(getrownumber(r))
     return cast(T, unsafe_load(getrow(r), i), getlengths(r)[i])
 end
 
@@ -89,7 +95,8 @@ function Base.iterate(cursor::TextCursor{buffered}, i=1) where {buffered}
         return nothing
     end
     lengths = API.fetchlengths(cursor.result, cursor.nfields)
-    return TextRow(cursor, rowptr, lengths), i + 1
+    cursor.current_rownumber = i
+    return TextRow(cursor, rowptr, lengths, i), i + 1
 end
 
 """
@@ -154,5 +161,5 @@ function DBInterface.execute(conn::Connection, sql::AbstractString, params=(); m
         error("error with mysql resultset columns")
     end
     lookup = Dict(x => i for (i, x) in enumerate(names))
-    return TextCursor{buffered}(conn, sql, nfields, nrows, Core.bitcast(Int64, rows_affected), result, names, types, lookup)
+    return TextCursor{buffered}(conn, sql, nfields, nrows, Core.bitcast(Int64, rows_affected), result, names, types, lookup, 0)
 end
