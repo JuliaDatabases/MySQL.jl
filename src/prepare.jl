@@ -68,7 +68,7 @@ function DBInterface.prepare(conn::Connection, sql::AbstractString)
     return Statement(conn, stmt, sql, nparams, nfields, bindhelpers, binds, names, types, valuehelpers, values)
 end
 
-struct Cursor{buffered} <: DBInterface.Cursor
+mutable struct Cursor{buffered} <: DBInterface.Cursor
     stmt::API.MYSQL_STMT
     nfields::Int
     names::Vector{Symbol}
@@ -78,18 +78,22 @@ struct Cursor{buffered} <: DBInterface.Cursor
     values::Vector{API.MYSQL_BIND}
     rows_affected::Int64
     rows::Int
+    current_rownumber::Int
 end
 
 struct Row <: Tables.AbstractRow
     cursor::Cursor
+    rownumber::Int
 end
 
 getcursor(r::Row) = getfield(r, :cursor)
+getrownumber(r::Row) = getfield(r, :rownumber)
 
 Tables.columnnames(r::Row) = getcursor(r).names
 
 function Tables.getcolumn(r::Row, ::Type{T}, i::Int, nm::Symbol) where {T}
     cursor = getcursor(r)
+    getrownumber(r) == cursor.current_rownumber || wrongrow(getrownumber(r))
     return getvalue(cursor.stmt, cursor.valuehelpers[i], cursor.values, i, T)
 end
 
@@ -109,7 +113,8 @@ function Base.iterate(cursor::Cursor, i=1)
     status = API.fetch(cursor.stmt)
     status == API.MYSQL_NO_DATA && return nothing
     status == 1 && throw(API.StmtError(cursor.stmt))
-    return Row(cursor), i + 1
+    cursor.current_rownumber = i
+    return Row(cursor, i), i + 1
 end
 
 """
@@ -161,7 +166,7 @@ function DBInterface.execute(stmt::Statement, params=(); mysql_store_result::Boo
         buffered = true
         rows = API.numrows(stmt.stmt)
     end
-    return Cursor{buffered}(stmt.stmt, stmt.nfields, stmt.names, stmt.types, stmt.lookup, stmt.valuehelpers, stmt.values, rows_affected, rows)
+    return Cursor{buffered}(stmt.stmt, stmt.nfields, stmt.names, stmt.types, stmt.lookup, stmt.valuehelpers, stmt.values, rows_affected, rows, 0)
 end
 
 inithelper!(helper, x::Missing) = nothing
