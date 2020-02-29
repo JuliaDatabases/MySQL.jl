@@ -1015,6 +1015,10 @@ function ping(mysql::MYSQL)
     return @checksuccess mysql mysql_ping(mysql.ptr)
 end
 
+function isopen(mysql::MYSQL)
+    return mysql_ping(mysql.ptr) == 0
+end
+
 #="""
 Description
 Passes an option type and value to a plugin. This function can be called multiple times to set several options. If the plugin does not have an option handler, an error occurs.
