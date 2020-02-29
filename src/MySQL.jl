@@ -257,6 +257,9 @@ function DBInterface.close!(conn::Connection)
     return
 end
 
+Base.close(conn::Connection) = DBInterface.close!(conn)
+Base.isopen(conn::Connection) = API.isopen(conn.mysql)
+
 function juliatype(field_type, notnullable, isunsigned)
     T = API.juliatype(field_type)
     T2 = isunsigned ? unsigned(T) : T

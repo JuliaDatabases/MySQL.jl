@@ -5,6 +5,7 @@ DBInterface.close!(conn)
 
 # load host/user + options from file
 conn = DBInterface.connect(MySQL.Connection, "", "", ""; option_file="my.ini")
+@test isopen(conn)
 
 DBInterface.execute(conn, "DROP DATABASE if exists mysqltest")
 DBInterface.execute(conn, "CREATE DATABASE mysqltest")
