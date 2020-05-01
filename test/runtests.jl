@@ -203,3 +203,21 @@ DBInterface.execute(stmt, -1)
 res = DBInterface.execute(conn, "select id from negative_int") |> columntable
 @test length(res) == 1
 @test res[1][1] === Int32(-1)
+
+
+DBInterface.execute(conn, "DROP TABLE if exists text_field")
+DBInterface.execute(conn, "CREATE TABLE text_field (id int(11), t text)")
+stmt = DBInterface.prepare(conn, "INSERT INTO text_field (id, t) VALUES (?, ?);")
+DBInterface.execute(stmt, [-1, "hey there sailor"])
+res = DBInterface.execute(conn, "select id, t from text_field") |> columntable
+@test length(res) == 1
+@test res[2][1] === "hey there sailor"
+
+
+DBInterface.execute(conn, "DROP TABLE if exists blob_field")
+DBInterface.execute(conn, "CREATE TABLE blob_field (id int(11), t blob)")
+stmt = DBInterface.prepare(conn, "INSERT INTO blob_field (id, t) VALUES (?, ?);")
+DBInterface.execute(stmt, [-1, "hey there sailor"])
+res = DBInterface.execute(conn, "select id, t from blob_field") |> columntable
+@test length(res) == 1
+@test res[2][1] == [0x68, 0x65, 0x79, 0x20, 0x74, 0x68, 0x65, 0x72, 0x65, 0x20, 0x73, 0x61, 0x69, 0x6c, 0x6f, 0x72]
