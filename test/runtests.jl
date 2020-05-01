@@ -221,3 +221,31 @@ DBInterface.execute(stmt, [-1, "hey there sailor"])
 res = DBInterface.execute(conn, "select id, t from blob_field") |> columntable
 @test length(res) == 2
 @test res[2][1] == [0x68, 0x65, 0x79, 0x20, 0x74, 0x68, 0x65, 0x72, 0x65, 0x20, 0x73, 0x61, 0x69, 0x6c, 0x6f, 0x72]
+
+
+DBInterface.execute(conn, """
+CREATE PROCEDURE get_employee()
+BEGIN
+   select * from Employee;
+END
+""")
+res = DBInterface.execute(conn, "call get_employee()") |> columntable
+@test length(res) > 0
+@test length(res[1]) == 5
+res = DBInterface.execute(conn, "call get_employee()") |> columntable
+@test length(res) > 0
+@test length(res[1]) == 5
+# test that we can call multiple stored procedures in a row w/o collecting results (they get cleaned up properly internally)
+res = DBInterface.execute(conn, "call get_employee()")
+res = DBInterface.execute(conn, "call get_employee()")
+
+# and for prepared statements
+stmt = DBInterface.prepare(conn, "call get_employee()")
+res = DBInterface.execute(stmt) |> columntable
+@test length(res) > 0
+@test length(res[1]) == 5
+res = DBInterface.execute(stmt) |> columntable
+@test length(res) > 0
+@test length(res[1]) == 5
+res = DBInterface.execute(stmt)
+res = DBInterface.execute(stmt)

@@ -662,7 +662,7 @@ Return Value	Description
 """=#
 function nextresult(mysql::MYSQL)
     ret = mysql_next_result(mysql.ptr)
-    return ret == -1 ? nothing : reg == 0 ? ret : throw(Error(mysql))
+    return ret == -1 ? nothing : ret == 0 ? ret : throw(Error(mysql))
 end
 
 #="""
