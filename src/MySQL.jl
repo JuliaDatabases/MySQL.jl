@@ -47,7 +47,7 @@ end
 
 function clear!(conn, result::API.MYSQL_RES)
     if result.ptr != C_NULL
-        while API.fetchrow(conn.mysql, result) != C_NULL
+        while API.fetchrow(conn.mysql, result) != C_NULL || API.nextresult(conn.mysql) !== nothing
         end
         finalize(result)
     end
@@ -56,7 +56,7 @@ end
 
 function clear!(conn, stmt::API.MYSQL_STMT)
     if stmt.ptr != C_NULL
-        while API.fetch(stmt) == 0
+        while API.fetch(stmt) == 0 || API.nextresult(stmt) !== nothing
         end
     end
     return

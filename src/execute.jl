@@ -91,8 +91,14 @@ function Base.iterate(cursor::TextCursor{buffered}, i=1) where {buffered}
     rowptr = API.fetchrow(cursor.conn.mysql, cursor.result)
     if rowptr == C_NULL
         !buffered && API.errno(cursor.conn.mysql) != 0 && throw(API.Error(cursor.conn.mysql))
-        finalize(cursor.result)
-        return nothing
+        if API.nextresult(cursor.conn.mysql) === nothing
+            finalize(cursor.result)
+            return nothing
+        else
+            # we ***ignore*** additional resultsets for now
+            clear!(cursor.conn)
+            return nothing
+        end
     end
     lengths = API.fetchlengths(cursor.result, cursor.nfields)
     cursor.current_rownumber = i

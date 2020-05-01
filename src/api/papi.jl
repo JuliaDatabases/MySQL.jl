@@ -272,7 +272,8 @@ Return Value	Description
 
 """
 function nextresult(stmt::MYSQL_STMT)
-    return mysql_stmt_next_result(stmt.ptr)
+    ret = mysql_stmt_next_result(stmt.ptr)
+    return ret == -1 ? nothing : ret == 0 ? ret : throw(StmtError(stmt))
 end
 
 """

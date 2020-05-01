@@ -41,6 +41,7 @@ freeing resources, it has been noted that too many unclosed statements and resul
 with streaming queries (i.e. `mysql_store_result=false`) has led to occasional resultset corruption.
 """
 function DBInterface.prepare(conn::Connection, sql::AbstractString)
+    clear!(conn)
     stmt = API.stmtinit(conn.mysql)
     API.prepare(stmt, sql)
     nparams = API.paramcount(stmt)
@@ -166,7 +167,29 @@ function DBInterface.execute(stmt::Statement, params=(); mysql_store_result::Boo
         buffered = true
         rows = API.numrows(stmt.stmt)
     end
-    return Cursor{buffered}(stmt.stmt, stmt.nfields, stmt.names, stmt.types, stmt.lookup, stmt.valuehelpers, stmt.values, rows_affected, rows, 0)
+    nfields = stmt.nfields
+    names = stmt.names
+    types = stmt.types
+    valuehelpers = stmt.valuehelpers
+    values = stmt.values
+    lookup = stmt.lookup
+    if stmt.nfields == 0
+        nfields = API.fieldcount(stmt.stmt)
+        result = API.resultmetadata(stmt.stmt)
+        if result.ptr != C_NULL
+            fields = API.fetchfields(result, nfields)
+            names = [ccall(:jl_symbol_n, Ref{Symbol}, (Ptr{UInt8}, Csize_t), x.name, x.name_length) for x in fields]
+            types = [juliatype(x.field_type, API.notnullable(x), API.isunsigned(x), API.isbinary(x)) for x in fields]
+            valuehelpers = [API.BindHelper() for i = 1:nfields]
+            values = [API.MYSQL_BIND(valuehelpers[i].length, valuehelpers[i].is_null) for i = 1:nfields]
+            foreach(1:nfields) do i
+                returnbind!(valuehelpers[i], values, i, fields[i].field_type, types[i])
+            end
+            API.bindresult(stmt.stmt, values)
+            lookup = Dict(x => i for (i, x) in enumerate(names))
+        end
+    end
+    return Cursor{buffered}(stmt.stmt, nfields, names, types, lookup, valuehelpers, values, rows_affected, rows, 0)
 end
 
 inithelper!(helper, x::Missing) = nothing
