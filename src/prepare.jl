@@ -51,7 +51,7 @@ function DBInterface.prepare(conn::Connection, sql::AbstractString)
     if result.ptr != C_NULL
         fields = API.fetchfields(result, nfields)
         names = [ccall(:jl_symbol_n, Ref{Symbol}, (Ptr{UInt8}, Csize_t), x.name, x.name_length) for x in fields]
-        types = [juliatype(x.field_type, API.notnullable(x), API.isunsigned(x)) for x in fields]
+        types = [juliatype(x.field_type, API.notnullable(x), API.isunsigned(x), API.isbinary(x)) for x in fields]
         valuehelpers = [API.BindHelper() for i = 1:nfields]
         values = [API.MYSQL_BIND(valuehelpers[i].length, valuehelpers[i].is_null) for i = 1:nfields]
         foreach(1:nfields) do i

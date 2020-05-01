@@ -152,7 +152,7 @@ function DBInterface.execute(conn::Connection, sql::AbstractString, params=(); m
         nfields = API.numfields(result)
         fields = API.fetchfields(result, nfields)
         names = [ccall(:jl_symbol_n, Ref{Symbol}, (Ptr{UInt8}, Csize_t), x.name, x.name_length) for x in fields]
-        types = [juliatype(x.field_type, API.notnullable(x), API.isunsigned(x)) for x in fields]
+        types = [juliatype(x.field_type, API.notnullable(x), API.isunsigned(x), API.isbinary(x)) for x in fields]
     elseif API.fieldcount(conn.mysql) == 0
         rows_affected = API.affectedrows(conn.mysql)
         names = Symbol[]

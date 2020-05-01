@@ -260,10 +260,11 @@ end
 Base.close(conn::Connection) = DBInterface.close!(conn)
 Base.isopen(conn::Connection) = API.isopen(conn.mysql)
 
-function juliatype(field_type, notnullable, isunsigned)
+function juliatype(field_type, notnullable, isunsigned, isbinary)
     T = API.juliatype(field_type)
     T2 = isunsigned ? unsigned(T) : T
-    return notnullable ? T2 : Union{Missing, T2}
+    T3 = !isbinary && T2 == Vector{UInt8} ? String : T2
+    return notnullable ? T3 : Union{Missing, T3}
 end
 
 include("execute.jl")
