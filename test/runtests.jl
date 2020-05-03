@@ -249,3 +249,22 @@ res = DBInterface.execute(stmt) |> columntable
 @test length(res[1]) == 5
 res = DBInterface.execute(stmt)
 res = DBInterface.execute(stmt)
+
+results = DBInterface.executemultiple(conn, "select * from Employee; select DeptNo, OfficeNo from Employee where OfficeNo IS NOT NULL")
+state = iterate(results)
+@test state !== nothing
+res, st = state
+@test !st
+@test length(res) == 5
+ret = columntable(res)
+@test length(ret[1]) == 5
+state = iterate(results, st)
+@test state !== nothing
+res, st = state
+@test !st
+@test length(res) == 4
+ret = columntable(res)
+@test length(ret[1]) == 4
+
+# multiple-queries not supported by mysql w/ prepared statements
+@test_throws MySQL.API.StmtError DBInterface.prepare(conn, "select * from Employee; select DeptNo, OfficeNo from Employee where OfficeNo IS NOT NULL")
