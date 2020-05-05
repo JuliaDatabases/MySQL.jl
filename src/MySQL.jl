@@ -47,7 +47,16 @@ end
 
 function clear!(conn, result::API.MYSQL_RES)
     if result.ptr != C_NULL
-        while API.fetchrow(conn.mysql, result) != C_NULL || API.nextresult(conn.mysql) !== nothing
+        while true
+            if API.fetchrow(conn.mysql, result) == C_NULL
+                if API.moreresults(conn.mysql)
+                    finalize(result)
+                    @assert API.nextresult(conn.mysql) !== nothing
+                    result = API.useresult(conn.mysql)
+                else
+                    break
+                end
+            end
         end
         finalize(result)
     end
@@ -68,7 +77,7 @@ function clientflags(;
         compress::Bool=false,
         ignore_space::Bool=false,
         local_files::Bool=false,
-        multi_statements::Bool=false,
+        multi_statements::Bool=true,
         multi_results::Bool=false,
         kw...
     )
