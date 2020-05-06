@@ -268,3 +268,8 @@ ret = columntable(res)
 
 # multiple-queries not supported by mysql w/ prepared statements
 @test_throws MySQL.API.StmtError DBInterface.prepare(conn, "select * from Employee; select DeptNo, OfficeNo from Employee where OfficeNo IS NOT NULL")
+
+# 156
+res = DBInterface.execute(conn, "select * from Employee")
+DBInterface.close!(conn)
+ret = columntable(res)

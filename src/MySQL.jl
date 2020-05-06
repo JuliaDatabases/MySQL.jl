@@ -46,7 +46,7 @@ function clear!(conn)
 end
 
 function clear!(conn, result::API.MYSQL_RES)
-    if result.ptr != C_NULL
+    if conn.mysql.ptr != C_NULL && result.ptr != C_NULL
         while true
             if API.fetchrow(conn.mysql, result) == C_NULL
                 if API.moreresults(conn.mysql)
