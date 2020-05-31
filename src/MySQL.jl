@@ -278,6 +278,7 @@ end
 
 include("execute.jl")
 include("prepare.jl")
+include("load.jl")
 
 """
     MySQL.escape(conn::MySQL.Connection, str::String) -> String

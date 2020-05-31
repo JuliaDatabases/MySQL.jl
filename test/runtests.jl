@@ -139,6 +139,16 @@ for i = 1:length(expected)
     end
 end
 
+# MySQL.load
+MySQL.load(Base.structdiff(expected, NamedTuple{(:LastLogin2, :Senior,)}), conn, "Employee_copy"; limit=4, columnsuffix=Dict(:Name=>"CHARACTER SET utf8mb4"), debug=true)
+res = DBInterface.execute(conn, "select * from Employee_copy") |> columntable
+@test length(res) == 14
+@test length(res[1]) == 4
+for nm in keys(res)
+    @test isequal(res[nm], expected[nm][1:4])
+end
+
+
 # now test insert/parameter binding
 DBInterface.execute(conn, "DELETE FROM Employee")
 for i = 1:length(expected)
