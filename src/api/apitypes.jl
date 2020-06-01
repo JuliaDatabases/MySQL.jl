@@ -89,7 +89,7 @@ struct MYSQL_FIELD
     extension::Ptr{Cvoid}
 end
 notnullable(field) = (field.flags & NOT_NULL_FLAG) > 0
-isunsigned(field) = (field.flags & UNSIGNED_FLAG) > 0
+isunsigned(field) = (field.flags & NUM_FLAG) > 0 && (field.flags & UNSIGNED_FLAG) > 0
 isbinary(field) = (field.flags & BINARY_FLAG) > 0
 
 const MYSQL_FIELD_OFFSET = Cuint
