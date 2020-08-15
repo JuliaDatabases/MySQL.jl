@@ -133,6 +133,7 @@ function setoptions!(mysql;
         option_file::Union{String, Nothing}=nothing,
         read_default_group::Union{Bool, Nothing}=nothing,
         option_group::Union{String, Nothing}=nothing,
+        enable_cleartext_plugin::Union{Bool, Nothing}=nothing,
         kw...
     )
     if init_command !== nothing
@@ -230,6 +231,9 @@ function setoptions!(mysql;
     end
     if option_group !== nothing
         API.setoption(mysql, API.MYSQL_READ_DEFAULT_GROUP, option_group)
+    end
+    if enable_cleartext_plugin !== nothing
+        API.setoption(mysql, API.MYSQL_ENABLE_CLEARTEXT_PLUGIN, enable_cleartext_plugin)
     end
     return
 end
