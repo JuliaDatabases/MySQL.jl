@@ -137,67 +137,98 @@ function setoptions!(mysql;
     )
     if init_command !== nothing
         API.setoption(mysql, API.MYSQL_INIT_COMMAND, init_command)
-    elseif connect_timeout !== nothing
+    end
+    if connect_timeout !== nothing
         API.setoption(mysql, API.MYSQL_OPT_CONNECT_TIMEOUT, connect_timeout)
-    elseif reconnect !== nothing
+    end
+    if reconnect !== nothing
         API.setoption(mysql, API.MYSQL_OPT_RECONNECT, reconnect)
-    elseif read_timeout !== nothing
+    end
+    if read_timeout !== nothing
         API.setoption(mysql, API.MYSQL_OPT_READ_TIMEOUT, read_timeout)
-    elseif write_timeout !== nothing
+    end
+    if write_timeout !== nothing
         API.setoption(mysql, API.MYSQL_OPT_WRITE_TIMEOUT, write_timeout)
-    elseif data_truncation !== nothing
+    end
+    if data_truncation !== nothing
         API.setoption(mysql, API.MYSQL_REPORT_DATA_TRUNCATION, data_truncation)
-    elseif charset_dir !== nothing
+    end
+    if charset_dir !== nothing
         API.setoption(mysql, API.MYSQL_SET_CHARSET_DIR, charset_dir)
-    elseif charset_name !== nothing
+    end
+    if charset_name !== nothing
         API.setoption(mysql, API.MYSQL_SET_CHARSET_NAME, charset_name)
-    elseif bind !== nothing
+    end
+    if bind !== nothing
         API.setoption(mysql, API.MYSQL_OPT_BIND, bind)
-    elseif max_allowed_packet !== nothing
+    end
+    if max_allowed_packet !== nothing
         API.setoption(mysql, API.MYSQL_OPT_MAX_ALLOWED_PACKET, max_allowed_packet)
-    elseif net_buffer_length !== nothing
+    end
+    if net_buffer_length !== nothing
         API.setoption(mysql, API.MYSQL_OPT_NET_BUFFER_LENGTH, net_buffer_length)
-    elseif named_pipe !== nothing
+    end
+    if named_pipe !== nothing
         API.setoption(mysql, API.MYSQL_OPT_NAMED_PIPE, named_pipe)
-    elseif protocol !== nothing
+    end
+    if protocol !== nothing
         API.setoption(mysql, API.MYSQL_OPT_PROTOCOL, protocol)
-    elseif ssl_key !== nothing
+    end
+    if ssl_key !== nothing
         API.setoption(mysql, API.MYSQL_OPT_SSL_KEY, ssl_key)
-    elseif ssl_cert !== nothing
+    end
+    if ssl_cert !== nothing
         API.setoption(mysql, API.MYSQL_OPT_SSL_CERT, ssl_cert)
-    elseif ssl_ca !== nothing
+    end
+    if ssl_ca !== nothing
         API.setoption(mysql, API.MYSQL_OPT_SSL_CA, ssl_ca)
-    elseif ssl_capath !== nothing
+    end
+    if ssl_capath !== nothing
         API.setoption(mysql, API.MYSQL_OPT_SSL_CAPATH, ssl_capath)
-    elseif ssl_cipher !== nothing
+    end
+    if ssl_cipher !== nothing
         API.setoption(mysql, API.MYSQL_OPT_SSL_CIPHER, ssl_cipher)
-    elseif ssl_crl !== nothing
+    end
+    if ssl_crl !== nothing
         API.setoption(mysql, API.MYSQL_OPT_SSL_CRL, ssl_crl)
-    elseif ssl_crlpath !== nothing
+    end
+    if ssl_crlpath !== nothing
         API.setoption(mysql, API.MYSQL_OPT_SSL_CRLPATH, ssl_crlpath)
-    elseif passphrase !== nothing
+    end
+    if passphrase !== nothing
         API.setoption(mysql, API.MARIADB_OPT_TLS_PASSPHRASE, passphrase)
-    elseif ssl_verify_server_cert !== nothing
+    end
+    if ssl_verify_server_cert !== nothing
         API.setoption(mysql, API.MYSQL_OPT_SSL_VERIFY_SERVER_CERT, ssl_verify_server_cert)
-    elseif ssl_enforce !== nothing
+    end
+    if ssl_enforce !== nothing
         API.setoption(mysql, API.MYSQL_OPT_SSL_ENFORCE, ssl_enforce)
-    elseif default_auth !== nothing
+    end
+    if default_auth !== nothing
         API.setoption(mysql, API.MYSQL_DEFAULT_AUTH, default_auth)
-    elseif connection_handler !== nothing
+    end
+    if connection_handler !== nothing
         API.setoption(mysql, API.MARIADB_OPT_CONNECTION_HANDLER, connection_handler)
-    elseif plugin_dir !== nothing
+    end
+    if plugin_dir !== nothing
         API.setoption(mysql, API.MYSQL_PLUGIN_DIR, plugin_dir)
-    elseif secure_auth !== nothing
+    end
+    if secure_auth !== nothing
         API.setoption(mysql, API.MYSQL_SECURE_AUTH, secure_auth)
-    elseif server_public_key !== nothing
+    end
+    if server_public_key !== nothing
         API.setoption(mysql, API.MYSQL_SERVER_PUBLIC_KEY, server_public_key)
-    elseif read_default_file !== nothing && read_default_file
+    end
+    if read_default_file !== nothing && read_default_file
         API.setoption(mysql, API.MYSQL_READ_DEFAULT_FILE, C_NULL)
-    elseif option_file !== nothing
+    end
+    if option_file !== nothing
         API.setoption(mysql, API.MYSQL_READ_DEFAULT_FILE, option_file)
-    elseif read_default_group !== nothing && read_default_group
+    end
+    if read_default_group !== nothing && read_default_group
         API.setoption(mysql, API.MYSQL_READ_DEFAULT_GROUP, C_NULL)
-    elseif option_group !== nothing
+    end
+    if option_group !== nothing
         API.setoption(mysql, API.MYSQL_READ_DEFAULT_GROUP, option_group)
     end
     return
