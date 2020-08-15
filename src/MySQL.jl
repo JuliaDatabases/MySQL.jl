@@ -284,6 +284,7 @@ Connect to a MySQL database with provided `host`, `user`, and `passwd` positiona
   * `option_file::String`: the argument is interpreted as a path to a custom option file, and only that option file is read.
   * `read_default_group::Bool`: only the default option groups are read from specified option file(s)
   * `option_group::String`: it is interpreted as a custom option group, and that custom option group is read in addition to the default option groups.
+  * `enable_cleartext_plugin::Bool`: This option is supported to be compatible with MySQL client libraries. MySQL client libraries use this option to determine whether the mysql_clear_password authentication plugin can be used.
 """
 DBInterface.connect(::Type{Connection}, host::String, user::String, passwd::String; db::String="", port::Integer=3306, unix_socket::String=API.MYSQL_DEFAULT_SOCKET, kw...) =
     Connection(host, user, passwd, db, port, unix_socket; kw...)
