@@ -43,8 +43,8 @@ function createtable(conn::Connection, nm::AbstractString, sch::Tables.Schema; d
 end
 
 """
-    ODBC.load(table, conn, name; append=true, quoteidentifiers=true, limit=typemax(Int64), createtableclause=nothing, columnsuffix=Dict(), debug=false)
-    table |> ODBC.load(conn, name; append=true, quoteidentifiers=true, limit=typemax(Int64), createtableclause=nothing, columnsuffix=Dict(), debug=false)
+    MySQL.load(table, conn, name; append=true, quoteidentifiers=true, limit=typemax(Int64), createtableclause=nothing, columnsuffix=Dict(), debug=false)
+    table |> MySQL.load(conn, name; append=true, quoteidentifiers=true, limit=typemax(Int64), createtableclause=nothing, columnsuffix=Dict(), debug=false)
 
 Attempts to take a Tables.jl source `table` and load into the database represented by `conn` with table name `name`.
 
@@ -60,7 +60,7 @@ by doing something like `columnsuffix=Dict(:Name => "CHARACTER SET utf8mb4")`.
 Do note that databases vary wildly in requirements for `CREATE TABLE` and column definitions
 so it can be extremely difficult to load data generically. You may just need to tweak some of the provided
 keyword arguments, but you may also need to execute the `CREATE TABLE` and `INSERT` statements
-yourself. If you run into issues, you can [open an issue](https://github.com/JuliaDatabases/ODBC.jl/issues) and
+yourself. If you run into issues, you can [open an issue](https://github.com/JuliaDatabases/MySQL.jl/issues) and
 we can see if there's something we can do to make it easier to use this function.
 """
 function load end
