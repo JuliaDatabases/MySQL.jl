@@ -282,13 +282,9 @@ ret = columntable(res)
 # GitHub issue [#173](https://github.com/JuliaDatabases/MySQL.jl/issues/173)
 DBInterface.execute(conn, "DROP TABLE if exists unsigned_float")
 DBInterface.execute(conn, "CREATE TABLE unsigned_float(x FLOAT unsigned)")
-stmt = DBInterface.prepare(conn, "INSERT INTO unsigned_float VALUES (?)")
-for val in [1.1, 1.2]
-    DBInterface.execute(stmt, val)
-end
-res = DBInterface.execute(conn, "select x from unsigned_float")
-@test length(res) == 2
-@test res[1][1] === 1.1
+DBInterface.execute(conn, "INSERT INTO unsigned_float VALUES (1.1), (1.2)")
+res = DBInterface.execute(conn, "select x from unsigned_float") |> columntable
+@test res.x == Vector{Float32}([1.1, 1.2])
 # end issue #173
 
 # 156
