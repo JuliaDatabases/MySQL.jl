@@ -48,6 +48,25 @@ end
 Base.show(io::IO, b::Bit) = print(io, "MySQL.API.Bit(\"$(string(b))\")")
 Base.unsigned(::Type{Bit}) = Bit
 
+struct DateAndTime <: Dates.AbstractDateTime
+    date::Date
+    time::Time
+end
+
+Dates.Date(x::DateAndTime) = x.date
+Dates.Time(x::DateAndTime) = x.time
+Dates.year(x::DateAndTime) = Dates.year(Date(x))
+Dates.month(x::DateAndTime) = Dates.month(Date(x))
+Dates.day(x::DateAndTime) = Dates.day(Date(x))
+Dates.hour(x::DateAndTime) = Dates.hour(Time(x))
+Dates.minute(x::DateAndTime) = Dates.minute(Time(x))
+Dates.second(x::DateAndTime) = Dates.second(Time(x))
+Dates.millisecond(x::DateAndTime) = Dates.millisecond(Time(x))
+Dates.microsecond(x::DateAndTime) = Dates.microsecond(Time(x))
+
+import Base.==
+==(a::DateAndTime, b::DateAndTime) = ==(a.date, b.date) && ==(a.time, b.time)
+
 mysqltype(::Type{Bit}) = MYSQL_TYPE_BIT
 mysqltype(::Union{Type{Cchar}, Type{Cuchar}}) = MYSQL_TYPE_TINY
 mysqltype(::Union{Type{Cshort}, Type{Cushort}}) = MYSQL_TYPE_SHORT
@@ -58,6 +77,7 @@ mysqltype(::Type{Dec64}) = MYSQL_TYPE_DECIMAL
 mysqltype(::Type{Cdouble}) = MYSQL_TYPE_DOUBLE
 mysqltype(::Type{Vector{UInt8}}) = MYSQL_TYPE_BLOB
 mysqltype(::Type{DateTime}) = MYSQL_TYPE_TIMESTAMP
+mysqltype(::Type{DateAndTime}) = MYSQL_TYPE_DATETIME
 mysqltype(::Type{Date}) = MYSQL_TYPE_DATE
 mysqltype(::Type{Time}) = MYSQL_TYPE_TIME
 mysqltype(::Type{Missing}) = MYSQL_TYPE_NULL

@@ -40,7 +40,7 @@ Note that `DBInterface.close!(stmt)` should be called once statement executions 
 freeing resources, it has been noted that too many unclosed statements and resultsets, used in conjunction
 with streaming queries (i.e. `mysql_store_result=false`) has led to occasional resultset corruption.
 """
-function DBInterface.prepare(conn::Connection, sql::AbstractString)
+function DBInterface.prepare(conn::Connection, sql::AbstractString; mysql_date_and_time::Bool=false)
     clear!(conn)
     stmt = API.stmtinit(conn.mysql)
     API.prepare(stmt, sql)
@@ -52,7 +52,7 @@ function DBInterface.prepare(conn::Connection, sql::AbstractString)
     if result.ptr != C_NULL
         fields = API.fetchfields(result, nfields)
         names = [ccall(:jl_symbol_n, Ref{Symbol}, (Ptr{UInt8}, Csize_t), x.name, x.name_length) for x in fields]
-        types = [juliatype(x.field_type, API.notnullable(x), API.isunsigned(x), API.isbinary(x)) for x in fields]
+        types = [juliatype(x.field_type, API.notnullable(x), API.isunsigned(x), API.isbinary(x), mysql_date_and_time) for x in fields]
         valuehelpers = [API.BindHelper() for i = 1:nfields]
         values = [API.MYSQL_BIND(valuehelpers[i].length, valuehelpers[i].is_null) for i = 1:nfields]
         foreach(1:nfields) do i
@@ -147,7 +147,7 @@ Specifying `mysql_store_result=false` will avoid buffering the full resultset to
 the query, which has memory use advantages, though ties up the database server since resultset rows must be
 fetched one at a time.
 """
-function DBInterface.execute(stmt::Statement, params=(); mysql_store_result::Bool=true)
+function DBInterface.execute(stmt::Statement, params=(); mysql_store_result::Bool=true, mysql_date_and_time::Bool=false)
     checkstmt(stmt)
     paramcheck(stmt, params)
     clear!(stmt.conn)
@@ -179,7 +179,7 @@ function DBInterface.execute(stmt::Statement, params=(); mysql_store_result::Boo
         if result.ptr != C_NULL
             fields = API.fetchfields(result, nfields)
             names = [ccall(:jl_symbol_n, Ref{Symbol}, (Ptr{UInt8}, Csize_t), x.name, x.name_length) for x in fields]
-            types = [juliatype(x.field_type, API.notnullable(x), API.isunsigned(x), API.isbinary(x)) for x in fields]
+            types = [juliatype(x.field_type, API.notnullable(x), API.isunsigned(x), API.isbinary(x), mysql_date_and_time) for x in fields]
             valuehelpers = [API.BindHelper() for i = 1:nfields]
             values = [API.MYSQL_BIND(valuehelpers[i].length, valuehelpers[i].is_null) for i = 1:nfields]
             foreach(1:nfields) do i
@@ -250,6 +250,7 @@ ptrhelper(helper, x::API.MYSQL_TIME) = pointer(helper.time)
 getvalue(stmt, helper, values, i, ::Type{Time}) = convert(Time, helper.time[1])
 getvalue(stmt, helper, values, i, ::Type{Date}) = convert(Date, helper.time[1])
 getvalue(stmt, helper, values, i, ::Type{DateTime}) = convert(DateTime, helper.time[1])
+getvalue(stmt, helper, values, i, ::Type{DateAndTime}) = convert(DateAndTime, helper.time[1])
 
 inithelper!(helper, x::String) = nothing
 ptrhelper(helper, x::String) = C_NULL

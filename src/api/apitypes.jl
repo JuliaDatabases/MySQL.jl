@@ -116,28 +116,44 @@ const MYSQL_TIME_FORMAT = Dates.DateFormat("HH:MM:SS.s")
 const MYSQL_DATE_FORMAT = Dates.DateFormat("yyyy-mm-dd")
 const MYSQL_DATETIME_FORMAT = Dates.DateFormat("yyyy-mm-dd HH:MM:SS.s")
 
+@noinline dateandtime_warning() = @warn """a datetime value from a column has a microsecond precision > 3,
+by default, MySQL.jl attempts to return a DateTime object, which only supports millisecond precision.
+To avoid loss in precision or InexactErrors, pass `mysql_date_and_time=true` to `DBInterface.execute(stmt, sql; mysql_date_and_time=true)` or `DBInterface.prepare(stmt, sql; mysql_date_and_time=true)`.
+This will result in a column element type of `DateAndTime`, which is a simple struct of separate Date and Time parts, accessed like `dt.date` and `dt.time`.
+"""
+
 function Base.convert(::Type{DateTime}, mtime::MYSQL_TIME)
+    millis, micros = divrem(mtime.second_part, 1000)
     if mtime.year == 0 || mtime.month == 0 || mtime.day == 0
-        DateTime(1970, 1, 1,
-                 mtime.hour, mtime.minute, mtime.second)
+        dt = DateTime(1970, 1, 1,
+                 mtime.hour, mtime.minute, mtime.second, millis)
     else
-        DateTime(mtime.year, mtime.month, mtime.day,
-                 mtime.hour, mtime.minute, mtime.second)
+        dt = DateTime(mtime.year, mtime.month, mtime.day,
+                 mtime.hour, mtime.minute, mtime.second, millis)
     end
+    micros > 0 && dateandtime_warning()
+    return dt
 end
 Base.convert(::Type{Dates.Time}, mtime::MYSQL_TIME) =
-    Dates.Time(mtime.hour, mtime.minute, mtime.second)
+    Dates.Time(mtime.hour, mtime.minute, mtime.second, divrem(mtime.second_part, 1000)...)
 Base.convert(::Type{Date}, mtime::MYSQL_TIME) =
     Date(mtime.year, mtime.month, mtime.day)
+Base.convert(::Type{DateAndTime}, mtime::MYSQL_TIME) =
+    DateAndTime(Date(mtime.year, mtime.month, mtime.day),
+                Time(mtime.hour, mtime.minute, mtime.second, divrem(mtime.second_part, 1000)...))
 
 Base.convert(::Type{MYSQL_TIME}, t::Dates.Time) =
-    MYSQL_TIME(0, 0, 0, Dates.hour(t), Dates.minute(t), Dates.second(t), 0, 0, 0)
+    MYSQL_TIME(0, 0, 0, Dates.hour(t), Dates.minute(t), Dates.second(t), Dates.millisecond(t) * 1000 + Dates.microsecond(t), 0, 0)
 Base.convert(::Type{MYSQL_TIME}, dt::Date) =
     MYSQL_TIME(Dates.year(dt), Dates.month(dt), Dates.day(dt), 0, 0, 0, 0, 0, 0)
 
 Base.convert(::Type{MYSQL_TIME}, dtime::DateTime) =
     MYSQL_TIME(Dates.year(dtime), Dates.month(dtime), Dates.day(dtime),
-               Dates.hour(dtime), Dates.minute(dtime), Dates.second(dtime), 0, 0, 0)
+               Dates.hour(dtime), Dates.minute(dtime), Dates.second(dtime), Dates.millisecond(dtime) * 1000, 0, 0)
+
+Base.convert(::Type{MYSQL_TIME}, dat::DateAndTime) =
+    MYSQL_TIME(Dates.year(dat), Dates.month(dat), Dates.day(dat),
+               Dates.hour(dat), Dates.minute(dat), Dates.second(dat), Dates.millisecond(dat) * 1000 + Dates.microsecond(dat), 0, 0)
 
 # this is a helper struct, because MYSQL_BIND needs
 # to know where the bound data should live, by using this helper

@@ -10,6 +10,7 @@ mutable struct TextCursor{buffered} <: DBInterface.Cursor
     lookup::Dict{Symbol, Int}
     current_rownumber::Int
     current_resultsetnumber::Int
+    mysql_date_and_time::Bool
 end
 
 struct TextRow{buffered} <: Tables.AbstractRow
@@ -64,11 +65,32 @@ const DATETIME_OPTIONS = Parsers.Options(dateformat=dateformat"yyyy-mm-dd HH:MM:
 
 function cast(::Type{DateTime}, ptr, len)
     buf = unsafe_wrap(Array, ptr, len)
-    x, code, pos = Parsers.typeparser(DateTime, buf, 1, len, buf[1], Int16(0), DATETIME_OPTIONS)
-    if code > 0
-        return x
+    try
+        x, code, pos = Parsers.typeparser(DateTime, buf, 1, len, buf[1], Int16(0), DATETIME_OPTIONS)
+        if code > 0
+            return x
+        end
+    catch e
+        e isa InexactError && API.dateandtime_warning()
     end
     casterror(DateTime, ptr, len)
+end
+
+const DATEANDTIME_OPTIONS = Parsers.Options(dateformat=dateformat"yyyy-mm-dd HH:MM:SS")
+
+function cast(::Type{DateAndTime}, ptr, len)
+    buf = unsafe_wrap(Array, ptr, len)
+    i = findfirst(==(UInt8('.')), buf)
+    x, code, pos = Parsers.typeparser(DateTime, buf, 1, something(i, len), buf[1], Int16(0), DATETIME_OPTIONS)
+    if code > 0
+        dt, tm = Date(x), Time(x)
+        if i !== nothing
+            y, code, pos = Parsers.typeparser(Int, buf, i + 1, len, buf[1], Int16(0), Parsers.OPTIONS)
+            tm += Dates.Microsecond(y)
+        end
+        return DateAndTime(dt, tm)
+    end
+    casterror(DateAndTime, ptr, len)
 end
 
 @noinline wrongrow(i) = throw(ArgumentError("row $i is no longer valid; mysql results are forward-only iterators where each row is only valid when iterated"))
@@ -129,7 +151,7 @@ Specifying `mysql_store_result=false` will avoid buffering the full resultset to
 the query, which has memory use advantages, though ties up the database server since resultset rows must be
 fetched one at a time.
 """
-function DBInterface.execute(conn::Connection, sql::AbstractString, params=(); mysql_store_result::Bool=true)
+function DBInterface.execute(conn::Connection, sql::AbstractString, params=(); mysql_store_result::Bool=true, mysql_date_and_time::Bool=false)
     checkconn(conn)
     params != () && error("`DBInterface.execute(conn, sql)` does not support parameter binding; see `?DBInterface.prepare(conn, sql)`")
     clear!(conn)
@@ -154,7 +176,7 @@ function DBInterface.execute(conn::Connection, sql::AbstractString, params=(); m
         nfields = API.numfields(result)
         fields = API.fetchfields(result, nfields)
         names = [ccall(:jl_symbol_n, Ref{Symbol}, (Ptr{UInt8}, Csize_t), x.name, x.name_length) for x in fields]
-        types = [juliatype(x.field_type, API.notnullable(x), API.isunsigned(x), API.isbinary(x)) for x in fields]
+        types = [juliatype(x.field_type, API.notnullable(x), API.isunsigned(x), API.isbinary(x), mysql_date_and_time) for x in fields]
     elseif API.fieldcount(conn.mysql) == 0
         rows_affected = API.affectedrows(conn.mysql)
         names = Symbol[]
@@ -163,7 +185,7 @@ function DBInterface.execute(conn::Connection, sql::AbstractString, params=(); m
         error("error with mysql resultset columns")
     end
     lookup = Dict(x => i for (i, x) in enumerate(names))
-    return TextCursor{buffered}(conn, sql, nfields, nrows, Core.bitcast(Int64, rows_affected), result, names, types, lookup, 0, 1)
+    return TextCursor{buffered}(conn, sql, nfields, nrows, Core.bitcast(Int64, rows_affected), result, names, types, lookup, 0, 1, mysql_date_and_time)
 end
 
 struct TextCursors{T}
@@ -186,7 +208,7 @@ function Base.iterate(cursor::TextCursors{buffered}, first=true) where {buffered
             cursor.cursor.nfields = API.numfields(cursor.cursor.result)
             fields = API.fetchfields(cursor.cursor.result, cursor.cursor.nfields)
             cursor.cursor.names = [ccall(:jl_symbol_n, Ref{Symbol}, (Ptr{UInt8}, Csize_t), x.name, x.name_length) for x in fields]
-            cursor.cursor.types = [juliatype(x.field_type, API.notnullable(x), API.isunsigned(x), API.isbinary(x)) for x in fields]
+            cursor.cursor.types = [juliatype(x.field_type, API.notnullable(x), API.isunsigned(x), API.isbinary(x), cursor.cursor.mysql_date_and_time) for x in fields]
         else
             return nothing
         end
