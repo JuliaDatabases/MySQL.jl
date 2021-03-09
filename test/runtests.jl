@@ -242,6 +242,19 @@ res = DBInterface.execute(resstmt) |> columntable
 @test length(res) == 2
 @test res[2][1] == DateTime(1970, 1, 1, 3)
 
+# https://github.com/JuliaDatabases/MySQL.jl/issues/165
+DBInterface.execute(conn, "DROP TABLE if exists datetime6_field")
+DBInterface.execute(conn, "CREATE TABLE datetime6_field (id int(11), t DATETIME(6))")
+stmt = DBInterface.prepare(conn, "INSERT INTO datetime6_field (id, t) VALUES (?, ?);")
+DBInterface.execute(stmt, [1, DateAndTime(Date(2021, 1, 2), Time(1, 2, 3, 456, 789))])
+resstmt = DBInterface.prepare(conn, "select id, t from datetime6_field"; mysql_date_and_time=true)
+res = DBInterface.execute(resstmt) |> columntable
+@test length(res) == 2
+@test res[2][1] == DateAndTime(Date(2021, 1, 2), Time(1, 2, 3, 456, 789))
+res = DBInterface.execute(conn, "select id, t from datetime6_field"; mysql_date_and_time=true) |> columntable
+@test length(res) == 2
+@test res[2][1] == DateAndTime(Date(2021, 1, 2), Time(1, 2, 3, 456, 789))
+
 DBInterface.execute(conn, """
 CREATE PROCEDURE get_employee()
 BEGIN

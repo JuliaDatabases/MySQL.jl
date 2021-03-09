@@ -29,6 +29,7 @@ const SQLTYPES = Dict{Type, String}(
     Date => "DATE",
     Time => "TIME",
     DateTime => "DATETIME",
+    DateAndTime => "DATETIME(6)",
 )
 
 checkdupnames(names) = length(unique(map(x->lowercase(String(x)), names))) == length(names) || error("duplicate case-insensitive column names detected; sqlite doesn't allow duplicate column names and treats them case insensitive")

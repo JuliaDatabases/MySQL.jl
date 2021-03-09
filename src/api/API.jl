@@ -2,6 +2,8 @@ module API
 
 using Dates, DecFP
 
+export DateAndTime
+
 if VERSION < v"1.3.0"
 
 # Load libmariadb from our deps.jl

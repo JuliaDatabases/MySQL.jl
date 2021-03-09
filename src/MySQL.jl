@@ -2,7 +2,7 @@ module MySQL
 
 using Dates, DBInterface, Tables, Parsers, DecFP
 
-export DBInterface
+export DBInterface, DateAndTime
 
 # For non-C-api errors that happen in MySQL.jl
 struct MySQLInterfaceError
@@ -300,11 +300,12 @@ end
 Base.close(conn::Connection) = DBInterface.close!(conn)
 Base.isopen(conn::Connection) = API.isopen(conn.mysql)
 
-function juliatype(field_type, notnullable, isunsigned, isbinary)
+function juliatype(field_type, notnullable, isunsigned, isbinary, date_and_time)
     T = API.juliatype(field_type)
     T2 = isunsigned && !(T <: AbstractFloat) ? unsigned(T) : T
     T3 = !isbinary && T2 == Vector{UInt8} ? String : T2
-    return notnullable ? T3 : Union{Missing, T3}
+    T4 = date_and_time && T3 <: DateTime ? DateAndTime : T3
+    return notnullable ? T4 : Union{Missing, T4}
 end
 
 include("execute.jl")
