@@ -135,15 +135,9 @@ Base.convert(::Type{MYSQL_TIME}, t::Dates.Time) =
 Base.convert(::Type{MYSQL_TIME}, dt::Date) =
     MYSQL_TIME(Dates.year(dt), Dates.month(dt), Dates.day(dt), 0, 0, 0, 0, 0, 0)
 
-function Base.convert(::Type{MYSQL_TIME}, dtime::DateTime)
-    if Dates.year(dtime) == 1970 && Dates.month(dtime) == 1 && Dates.day(dtime) == 1
-        MYSQL_TIME(0, 0, 0,
-                   Dates.hour(dtime), Dates.minute(dtime), Dates.second(dtime), 0, 0, 0)
-    else
-        MYSQL_TIME(Dates.year(dtime), Dates.month(dtime), Dates.day(dtime),
-                   Dates.hour(dtime), Dates.minute(dtime), Dates.second(dtime), 0, 0, 0)
-    end
-end
+Base.convert(::Type{MYSQL_TIME}, dtime::DateTime) =
+    MYSQL_TIME(Dates.year(dtime), Dates.month(dtime), Dates.day(dtime),
+               Dates.hour(dtime), Dates.minute(dtime), Dates.second(dtime), 0, 0, 0)
 
 # this is a helper struct, because MYSQL_BIND needs
 # to know where the bound data should live, by using this helper

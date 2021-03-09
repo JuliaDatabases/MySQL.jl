@@ -232,6 +232,15 @@ res = DBInterface.execute(conn, "select id, t from blob_field") |> columntable
 @test length(res) == 2
 @test res[2][1] == [0x68, 0x65, 0x79, 0x20, 0x74, 0x68, 0x65, 0x72, 0x65, 0x20, 0x73, 0x61, 0x69, 0x6c, 0x6f, 0x72]
 
+# https://github.com/JuliaDatabases/MySQL.jl/issues/175
+DBInterface.execute(conn, "DROP TABLE if exists datetime_field")
+DBInterface.execute(conn, "CREATE TABLE datetime_field (id int(11), t DATETIME)")
+stmt = DBInterface.prepare(conn, "INSERT INTO datetime_field (id, t) VALUES (?, ?);")
+DBInterface.execute(stmt, [1, DateTime(1970, 1, 1, 3)])
+resstmt = DBInterface.prepare(conn, "select id, t from datetime_field")
+res = DBInterface.execute(resstmt) |> columntable
+@test length(res) == 2
+@test res[2][1] == DateTime(1970, 1, 1, 3)
 
 DBInterface.execute(conn, """
 CREATE PROCEDURE get_employee()
