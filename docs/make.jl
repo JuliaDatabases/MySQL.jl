@@ -14,4 +14,5 @@ makedocs(;
 
 deploydocs(;
     repo="github.com/JuliaDatabases/MySQL.jl",
+    devbranch = "main"
 )
