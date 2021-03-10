@@ -21,7 +21,7 @@ mutable struct Connection <: DBInterface.Connection
     db::String
     lastexecute::Any
 
-    function Connection(host::String, user::String, passwd::String, db::String, port::Integer, unix_socket::String; kw...)
+    function Connection(host::String, user::String, passwd::Union{String, Nothing}, db::String, port::Integer, unix_socket::String; kw...)
         mysql = API.init()
         API.setoption(mysql, API.MYSQL_PLUGIN_DIR, API.PLUGIN_DIR)
         API.setoption(mysql, API.MYSQL_SET_CHARSET_NAME, "utf8mb4")
@@ -285,7 +285,7 @@ Connect to a MySQL database with provided `host`, `user`, and `passwd` positiona
   * `read_default_group::Bool`: only the default option groups are read from specified option file(s)
   * `option_group::String`: it is interpreted as a custom option group, and that custom option group is read in addition to the default option groups.
 """
-DBInterface.connect(::Type{Connection}, host::String, user::String, passwd::String; db::String="", port::Integer=3306, unix_socket::String=API.MYSQL_DEFAULT_SOCKET, kw...) =
+DBInterface.connect(::Type{Connection}, host::String, user::String, passwd::Union{String, Nothing}=nothing; db::String="", port::Integer=3306, unix_socket::String=API.MYSQL_DEFAULT_SOCKET, kw...) =
     Connection(host, user, passwd, db, port, unix_socket; kw...)
 
 """

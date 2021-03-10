@@ -4,11 +4,11 @@ conn = DBInterface.connect(MySQL.Connection, "127.0.0.1", "root", ""; port=3306)
 DBInterface.close!(conn)
 
 # https://github.com/JuliaDatabases/MySQL.jl/issues/170
-conn = DBInterface.connect(MySQL.Connection, "mysql://127.0.0.1", "root", ""; port=3306)
+conn = DBInterface.connect(MySQL.Connection, "mysql://127.0.0.1", "root"; port=3306)
 DBInterface.close!(conn)
 
 # load host/user + options from file
-conn = DBInterface.connect(MySQL.Connection, "", "", ""; option_file="my.ini")
+conn = DBInterface.connect(MySQL.Connection, "", ""; option_file=joinpath(dirname(pathof(MySQL)), "../test/", "my.ini"))
 @test isopen(conn)
 
 DBInterface.execute(conn, "DROP DATABASE if exists mysqltest")

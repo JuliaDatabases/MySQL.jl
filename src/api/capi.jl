@@ -1129,8 +1129,8 @@ If no value is found in an option file for a parameter, its default value is use
 Return Values
 A MYSQL* connection handler if the connection was successful, NULL if the connection was unsuccessful. For a successful connection, the return value is the same as the value of the first parameter.
 """=#
-function connect(mysql::MYSQL, host::String, user::String, passwd::String, db::String, port::Integer, unix_socket::String, client_flag)
-    @checknull mysql mysql_real_connect(mysql.ptr, host, user, passwd, db, port, unix_socket, client_flag)
+function connect(mysql::MYSQL, host::String, user::String, passwd::Union{String, Nothing}, db::String, port::Integer, unix_socket::String, client_flag)
+    @checknull mysql mysql_real_connect(mysql.ptr, host, user, passwd === nothing ? Ptr{UInt8}(C_NULL) : passwd, db, port, unix_socket, client_flag)
     return mysql
 end
 
