@@ -3,6 +3,10 @@ using Test, MySQL, DBInterface, Tables, Dates, DecFP
 conn = DBInterface.connect(MySQL.Connection, "127.0.0.1", "root", ""; port=3306)
 DBInterface.close!(conn)
 
+# https://github.com/JuliaDatabases/MySQL.jl/issues/170
+conn = DBInterface.connect(MySQL.Connection, "mysql://127.0.0.1", "root", ""; port=3306)
+DBInterface.close!(conn)
+
 # load host/user + options from file
 conn = DBInterface.connect(MySQL.Connection, "", "", ""; option_file="my.ini")
 @test isopen(conn)

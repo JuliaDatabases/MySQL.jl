@@ -27,6 +27,10 @@ mutable struct Connection <: DBInterface.Connection
         API.setoption(mysql, API.MYSQL_SET_CHARSET_NAME, "utf8mb4")
         client_flag = clientflags(; kw...)
         setoptions!(mysql; kw...)
+        rng = findfirst("mysql://", host)
+        if rng !== nothing
+            host = host[last(rng)+1:end]
+        end
         mysql = API.connect(mysql, host, user, passwd, db, port, unix_socket, client_flag)
         return new(mysql, host, user, string(port), db, nothing)
     end
