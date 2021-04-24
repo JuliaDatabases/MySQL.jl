@@ -28,6 +28,60 @@ Both execution methods return a `Cursor` object that supports the [Tables.jl](ht
 
 MySQL.jl attempts to provide a convenient `MySQL.load(table, conn, table_name)` function for generically loading Tables.jl-compatible sources into database tables. While the mysql API has some utilities for even making this possible, just note that it can be tricky to do generically in practice due to specific modifications needed in `CREATE TABLE` and column type statements.
 
+A simplified way to handle your Database might look like this:
+```
+module Database
+
+using MySQL, DBInterface, DataFrames
+
+const HOST = "localhost"
+const USER = "root"
+const PASS = "password"
+const DB = "databank"
+
+export DBexecute, DBexecute!
+
+function connect()
+    return DBInterface.connect(MySQL.Connection, HOST, USER, PASS, db=DB)
+end
+
+function disconnect!(conn::MySQL.Connection)
+    DBInterface.close!(conn)
+end
+
+# standard sql execution:
+#=  CREATE TABLE `data` (
+    `name` varchar(1000),
+    `use` text,
+    `image` varchar(500),
+    UNIQUE KEY `name` (`name`)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8 =#
+function DBexecute!(sql)
+    con = connect()
+    DBInterface.execute(con, sql)
+    disconnect!(con)
+end
+
+# sql execution for repeated use:
+# INSERT IGNORE INTO data (name, use, image) VALUES (?, ?, ?)
+function DBexecute(sql::String, data::Vector{String})
+    con = connect()
+    stmt = DBInterface.prepare(con, sql)
+    return DBInterface.execute(stmt, data, mysql_store_result=false)
+end
+
+# multiple dispatch for queries:
+# SELECT * FROM `data` WHERE name = '$name'
+function DBexecute(sql::String)::DataFrames.DataFrame
+    con = connect()
+    stmt = DBInterface.prepare(con, sql)
+    return DataFrame(DBInterface.execute(stmt, mysql_store_result=true))
+end
+
+end
+```
+Note that your MySQL Server has to already be setup.
+
 ## API reference
 ```@docs
 DBInterface.connect
