@@ -13,5 +13,5 @@ Package for interfacing with MySQL databases from Julia via the MariaDB C connec
 
 ### Documentation
 
-[![Stable](https://img.shields.io/badge/docs-stable-blue.svg)](https://juliadatabases.github.io/MySQL.jl/stable)
-[![Dev](https://img.shields.io/badge/docs-dev-blue.svg)](https://juliadatabases.github.io/MySQL.jl/dev)
+[![Stable](https://img.shields.io/badge/docs-stable-blue.svg)](https://mysql.juliadatabases.org/stable)
+[![Dev](https://img.shields.io/badge/docs-dev-blue.svg)](https://mysql.juliadatabases.org/dev)
