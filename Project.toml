@@ -1,7 +1,7 @@
 name = "MySQL"
 uuid = "39abe10b-433b-5dbd-92d4-e302a9df00cd"
 author = ["quinnj"]
-version = "1.2.0"
+version = "1.2.1"
 
 [deps]
 BinaryProvider = "b99e7846-7c00-51b0-8f62-c81ae34c0232"
@@ -20,7 +20,7 @@ DBInterface = "2"
 Tables = "1"
 DecFP = "0.4.9, 0.4.10, 1"
 MariaDB_Connector_C_jll = "3"
-Parsers = "0.3, 1"
+Parsers = "0.3, 1, 2"
 
 [extras]
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
