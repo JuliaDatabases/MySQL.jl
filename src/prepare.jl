@@ -22,6 +22,8 @@ end
 @noinline checkstmt(stmt::Statement) = checkstmt(stmt.stmt)
 @noinline checkstmt(stmt::API.MYSQL_STMT) = stmt.ptr == C_NULL && error("prepared mysql statement has been closed")
 
+DBInterface.getconnection(stmt::Statement) = stmt.conn
+
 """
     DBInterface.close!(stmt)
 
