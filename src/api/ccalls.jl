@@ -37,7 +37,7 @@ function mysql_autocommit(mysql::Ptr{Cvoid}, mode)
 end
 
 #bool mysql_change_user(MYSQL *mysql, const char *user, const char *password, const char *db)
-function mysql_change_user(mysql::Ptr{Cvoid}, user::String, password::String, db)
+function mysql_change_user(mysql::Ptr{Cvoid}, user::AbstractString, password::AbstractString, db)
     return @c(:mysql_change_user,
                 Bool,
                 (Ptr{Cvoid}, Ptr{UInt8}, Ptr{UInt8}, Ptr{UInt8}),
@@ -53,7 +53,7 @@ function mysql_character_set_name(mysql::Ptr{Cvoid})
 end
 
 #struct st_mysql_client_plugin *mysql_client_find_plugin(MYSQL *mysql, const char *name, int type)
-function mysql_client_find_plugin(mysql::Ptr{Cvoid}, name::String, type::Int)
+function mysql_client_find_plugin(mysql::Ptr{Cvoid}, name::AbstractString, type::Int)
     return @c(:mysql_client_find_plugin,
                 Ptr{Cvoid},
                 (Ptr{Cvoid}, Ptr{UInt8}, Cint),
@@ -477,7 +477,7 @@ function mysql_row_tell(result::Ptr{Cvoid})
 end
 
 #int mysql_select_db(MYSQL *mysql, const char *db)
-function mysql_select_db(mysql::Ptr{Cvoid}, db::String)
+function mysql_select_db(mysql::Ptr{Cvoid}, db::AbstractString)
     return @c(:mysql_select_db,
                 Cint,
                 (Ptr{Cvoid}, Ptr{UInt8}),
@@ -501,7 +501,7 @@ function mysql_session_track_get_next(mysql::Ptr{Cvoid}, type, data, len)
 end
 
 #int mysql_set_character_set(MYSQL *mysql, const char *csname)
-function mysql_set_character_set(mysql::Ptr{Cvoid}, csname::String)
+function mysql_set_character_set(mysql::Ptr{Cvoid}, csname::AbstractString)
     return @c(:mysql_set_character_set,
                 Cint,
                 (Ptr{Cvoid}, Ptr{UInt8}),

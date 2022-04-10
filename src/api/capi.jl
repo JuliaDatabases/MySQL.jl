@@ -108,7 +108,7 @@ ER_WRONG_DB_NAME
 
 The database name was too long.
 """=#
-function changeuser(mysql::MYSQL, user::String, password::String, db::String)
+function changeuser(mysql::MYSQL, user::AbstractString, password::AbstractString, db::AbstractString)
     return @checksuccess mysql mysql_change_user(mysql.ptr, user, password, isempty(db) ? C_NULL : db)
 end
 
@@ -137,7 +137,7 @@ name: The plugin name.
 
 type: The plugin type.
 """=#
-function findplugin(mysql::MYSQL, name::String, type::Integer)
+function findplugin(mysql::MYSQL, name::AbstractString, type::Integer)
     return @checknull mysql mysql_client_find_plugin(mysql.ptr, name, type)
 end
 
@@ -1034,7 +1034,7 @@ value: A pointer to the option value.
 Return Values
 Zero for success, 1 if an error occurred. If the plugin has an option handler, that handler should also return zero for success and 1 if an error occurred.
 """=#
-function pluginoption(plugin::Ptr{Cvoid}, option::String, value)
+function pluginoption(plugin::Ptr{Cvoid}, option::AbstractString, value)
     mysql_plugin_options(plugin, option, value)
 end
 
@@ -1129,7 +1129,7 @@ If no value is found in an option file for a parameter, its default value is use
 Return Values
 A MYSQL* connection handler if the connection was successful, NULL if the connection was unsuccessful. For a successful connection, the return value is the same as the value of the first parameter.
 """=#
-function connect(mysql::MYSQL, host::String, user::String, passwd::Union{String, Nothing}, db::String, port::Integer, unix_socket::String, client_flag)
+function connect(mysql::MYSQL, host::AbstractString, user::AbstractString, passwd::Union{AbstractString, Nothing}, db::AbstractString, port::Integer, unix_socket::AbstractString, client_flag)
     @checknull mysql mysql_real_connect(mysql.ptr, host, user, passwd === nothing ? Ptr{UInt8}(C_NULL) : passwd, db, port, unix_socket, client_flag)
     return mysql
 end
@@ -1145,7 +1145,7 @@ The string pointed to by from must be length bytes long. You must allocate the t
 
 If you must change the character set of the connection, use the mysql_set_character_set() function rather than executing a SET NAMES (or SET CHARACTER SET) statement. mysql_set_character_set() works like SET NAMES but also affects the character set used by mysql_real_escape_string(), which SET NAMES does not.
 """=#
-function escapestring(mysql::MYSQL, str::String)
+function escapestring(mysql::MYSQL, str::AbstractString)
     len = sizeof(str)
     to = Base.StringVector(len * 2 + 1)
     tolen = mysql_real_escape_string(mysql.ptr, to, str, len)
@@ -1198,7 +1198,7 @@ if (mysql_real_query(&mysql,query,(unsigned int) (end - query)))
 }
 The my_stpcpy() function used in the example is included in the libmysqlclient library and works like strcpy() but returns a pointer to the terminating null of the first parameter.
 """=#
-function escapestringquote(mysql::MYSQL, str::String, q::Char)
+function escapestringquote(mysql::MYSQL, str::AbstractString, q::Char)
     len = sizeof(str)
     to = Base.StringVector(len * 2 + 1)
     tolen = mysql_real_escape_string_quote(mysql.ptr, to, str, len, q)
@@ -1216,7 +1216,7 @@ If you want to know whether the statement returns a result set, you can use mysq
 Return Values
 Zero for success. Nonzero if an error occurred.
 """=#
-function query(mysql::MYSQL, sql::String)
+function query(mysql::MYSQL, sql::AbstractString)
     return @checksuccess mysql mysql_real_query(mysql.ptr, sql, sizeof(sql))
 end
 
@@ -1321,14 +1321,14 @@ Causes the database specified by db to become the default (current) database on 
 
 mysql_select_db() fails unless the connected user can be authenticated as having permission to use the database or some object within it.
 """=#
-function selectdb(mysql::MYSQL, db::String)
+function selectdb(mysql::MYSQL, db::AbstractString)
     return @checksuccess mysql mysql_select_db(mysql.ptr, db)
 end
 
 #="""
 This function is used to set the default character set for the current connection. The string csname specifies a valid character set name. The connection collation becomes the default collation of the character set. This function works like the SET NAMES statement, but also sets the value of mysql->charset, and thus affects the character set used by mysql_real_escape_string()
 """=#
-function setcharacterset(mysql::MYSQL, csname::String)
+function setcharacterset(mysql::MYSQL, csname::AbstractString)
     return @checksuccess mysql mysql_set_character_set(mysql.ptr, csname)
 end
 
@@ -1445,7 +1445,7 @@ cipher: The list of permissible ciphers for SSL encryption.
 Return Values
 This function always returns 0. If SSL setup is incorrect, a subsequent mysql_real_connect() call returns an error when you attempt to connect.
 """=#
-function sslset(mysql::MYSQL, key::String, cert::String, ca::String, capath::String, cipher::String)
+function sslset(mysql::MYSQL, key::AbstractString, cert::AbstractString, ca::AbstractString, capath::AbstractString, cipher::AbstractString)
     return mysql_ssl_set(mysql.ptr, key, cert, ca, capath, cipher)
 end
 

@@ -350,13 +350,14 @@ function bind!(helper, binds, i, x::Dates.TimeType)
 end
 
 val(x) = x
+val(x::AbstractString) = String(x)
 val(x::API.Bit) = API.bitvalue(x)
 val(x::DecFP.DecimalFloatingPoint) = string(x)
 
 len(x::String) = sizeof(x)
 len(x::Vector{UInt8}) = length(x)
 
-function bind!(helper, binds, i, x::Union{Vector{UInt8}, String, API.Bit, DecFP.DecimalFloatingPoint})
+function bind!(helper, binds, i, x::Union{Vector{UInt8}, AbstractString, API.Bit, DecFP.DecimalFloatingPoint})
     ptr = pointer(binds, i)
     y = val(x)
     if !helper.typeset

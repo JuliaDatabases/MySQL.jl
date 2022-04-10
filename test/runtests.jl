@@ -7,6 +7,10 @@ DBInterface.close!(conn)
 conn = DBInterface.connect(MySQL.Connection, "mysql://127.0.0.1", "root"; port=3306)
 DBInterface.close!(conn)
 
+# AbstractString as a connection parameter or an option
+conn = DBInterface.connect(MySQL.Connection, SubString("127.0.0.1"), SubString("root"), SubString(""); port=3306, charset_name=SubString("utf8mb4"))
+DBInterface.close!(conn)
+
 # load host/user + options from file
 conn = DBInterface.connect(MySQL.Connection, "", ""; option_file=joinpath(dirname(pathof(MySQL)), "../test/", "my.ini"))
 @test isopen(conn)
@@ -312,6 +316,20 @@ DBInterface.execute(conn, "INSERT INTO unsigned_float VALUES (1.1), (1.2)")
 res = DBInterface.execute(conn, "select x from unsigned_float") |> columntable
 @test res.x == Vector{Float32}([1.1, 1.2])
 # end issue #173
+
+# execute fails when the sql is an AbstractString, but not a String (#189)
+DBInterface.execute(conn, SubString("select * from Employee"))
+stmt = DBInterface.prepare(conn, SubString("select * from Employee"))
+DBInterface.execute(stmt)
+
+# AbstractString as an input parameter
+DBInterface.execute(conn, "DROP TABLE if exists abstract_string")
+DBInterface.execute(conn, "CREATE TABLE abstract_string(str VARCHAR(255))")
+stmt = DBInterface.prepare(conn, "INSERT INTO abstract_string (str) VALUES (?)")
+DBInterface.execute(stmt, [SubString("foo")])
+
+# escaping AbstractString
+@test MySQL.escape(conn, SubString("'); DROP TABLE Employee; --")) == "\\'); DROP TABLE Employee; --"
 
 # 156
 res = DBInterface.execute(conn, "select * from Employee")
