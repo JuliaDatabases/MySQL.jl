@@ -314,7 +314,7 @@ The parameter markers must be bound to application variables using mysql_stmt_bi
 
 Metadata changes to tables or views referred to by prepared statements are detected and cause automatic repreparation of the statement when it is next executed. For more information, see Section 8.10.3, “Caching of Prepared Statements and Stored Programs”.
 """
-function prepare(stmt::MYSQL_STMT, sql::String)
+function prepare(stmt::MYSQL_STMT, sql::AbstractString)
     return @checkstmtsuccess stmt mysql_stmt_prepare(stmt.ptr, sql, sizeof(sql))
 end
 
@@ -398,7 +398,7 @@ If you want to reset/forget the sent data, you can do it with mysql_stmt_reset()
 
 The max_allowed_packet system variable controls the maximum size of parameter values that can be sent with mysql_stmt_send_long_data().
 """
-function sendlongdata(stmt::MYSQL_STMT, parameter_number, data::Union{String, Vector{UInt8}})
+function sendlongdata(stmt::MYSQL_STMT, parameter_number, data::Union{AbstractString, Vector{UInt8}})
     return @checkstmtsuccess stmt mysql_stmt_send_long_data(stmt.ptr, parameter_number, data isa Vector ? pointer(data) : data, data isa Vector ? length(data) : sizeof(data))
 end
 

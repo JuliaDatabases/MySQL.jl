@@ -21,7 +21,7 @@ mutable struct Connection <: DBInterface.Connection
     db::String
     lastexecute::Any
 
-    function Connection(host::String, user::String, passwd::Union{String, Nothing}, db::String, port::Integer, unix_socket::String; kw...)
+    function Connection(host::AbstractString, user::AbstractString, passwd::Union{AbstractString, Nothing}, db::AbstractString, port::Integer, unix_socket::AbstractString; kw...)
         mysql = API.init()
         API.setoption(mysql, API.MYSQL_PLUGIN_DIR, API.PLUGIN_DIR)
         API.setoption(mysql, API.MYSQL_SET_CHARSET_NAME, "utf8mb4")
@@ -105,38 +105,38 @@ function clientflags(;
 end
 
 function setoptions!(mysql;
-        init_command::Union{String, Nothing}=nothing,
+        init_command::Union{AbstractString, Nothing}=nothing,
         connect_timeout::Union{Integer, Nothing}=nothing,
         reconnect::Union{Bool, Nothing}=nothing,
         read_timeout::Union{Integer, Nothing}=nothing,
         write_timeout::Union{Integer, Nothing}=nothing,
         data_truncation::Union{Bool, Nothing}=nothing,
-        charset_dir::Union{String, Nothing}=nothing,
-        charset_name::Union{String, Nothing}=nothing,
-        bind::Union{String, Nothing}=nothing,
+        charset_dir::Union{AbstractString, Nothing}=nothing,
+        charset_name::Union{AbstractString, Nothing}=nothing,
+        bind::Union{AbstractString, Nothing}=nothing,
         max_allowed_packet::Union{Integer, Nothing}=nothing,
         net_buffer_length::Union{Integer, Nothing}=nothing,
         named_pipe::Union{Bool, Nothing}=nothing,
         protocol::Union{API.mysql_protocol_type, Nothing}=nothing,
-        ssl_key::Union{String, Nothing}=nothing,
-        ssl_cert::Union{String, Nothing}=nothing,
-        ssl_ca::Union{String, Nothing}=nothing,
-        ssl_capath::Union{String, Nothing}=nothing,
-        ssl_cipher::Union{String, Nothing}=nothing,
-        ssl_crl::Union{String, Nothing}=nothing,
-        ssl_crlpath::Union{String, Nothing}=nothing,
-        passphrase::Union{String, Nothing}=nothing,
+        ssl_key::Union{AbstractString, Nothing}=nothing,
+        ssl_cert::Union{AbstractString, Nothing}=nothing,
+        ssl_ca::Union{AbstractString, Nothing}=nothing,
+        ssl_capath::Union{AbstractString, Nothing}=nothing,
+        ssl_cipher::Union{AbstractString, Nothing}=nothing,
+        ssl_crl::Union{AbstractString, Nothing}=nothing,
+        ssl_crlpath::Union{AbstractString, Nothing}=nothing,
+        passphrase::Union{AbstractString, Nothing}=nothing,
         ssl_verify_server_cert::Union{Bool, Nothing}=nothing,
         ssl_enforce::Union{Bool, Nothing}=nothing,
-        default_auth::Union{String, Nothing}=nothing,
-        connection_handler::Union{String, Nothing}=nothing,
-        plugin_dir::Union{String, Nothing}=nothing,
+        default_auth::Union{AbstractString, Nothing}=nothing,
+        connection_handler::Union{AbstractString, Nothing}=nothing,
+        plugin_dir::Union{AbstractString, Nothing}=nothing,
         secure_auth::Union{Bool, Nothing}=nothing,
-        server_public_key::Union{String, Nothing}=nothing,
+        server_public_key::Union{AbstractString, Nothing}=nothing,
         read_default_file::Union{Bool, Nothing}=nothing,
-        option_file::Union{String, Nothing}=nothing,
+        option_file::Union{AbstractString, Nothing}=nothing,
         read_default_group::Union{Bool, Nothing}=nothing,
-        option_group::Union{String, Nothing}=nothing,
+        option_group::Union{AbstractString, Nothing}=nothing,
         kw...
     )
     if init_command !== nothing
@@ -239,12 +239,12 @@ function setoptions!(mysql;
 end
 
 """
-    DBInterface.connect(MySQL.Connection, host::String, user::String, passwd::String; db::String="", port::Integer=3306, unix_socket::String=API.MYSQL_DEFAULT_SOCKET, client_flag=API.CLIENT_MULTI_STATEMENTS, opts = Dict())
+    DBInterface.connect(MySQL.Connection, host::AbstractString, user::AbstractString, passwd::AbstractString; db::AbstractString="", port::Integer=3306, unix_socket::AbstractString=API.MYSQL_DEFAULT_SOCKET, client_flag=API.CLIENT_MULTI_STATEMENTS, opts = Dict())
 
 Connect to a MySQL database with provided `host`, `user`, and `passwd` positional arguments. Supported keyword arguments include:
-  * `db::String=""`: attach to a database by default
+  * `db::AbstractString=""`: attach to a database by default
   * `port::Integer=3306`: connect to the database on a specific port
-  * `unix_socket::String`: specifies the socket or named pipe that should be used
+  * `unix_socket::AbstractString`: specifies the socket or named pipe that should be used
   * `found_rows::Bool=false`: Return the number of matched rows instead of number of changed rows
   * `no_schema::Bool=false`: Forbids the use of database.tablename.column syntax and forces the SQL parser to generate an error.
   * `compress::Bool=false`: Use compression protocol
@@ -258,34 +258,34 @@ Connect to a MySQL database with provided `host`, `user`, and `passwd` positiona
   * `read_timeout::Integer`: Specifies the timeout in seconds for reading packets from the server.
   * `write_timeout::Integer`: Specifies the timeout in seconds for reading packets from the server.
   * `data_truncation::Bool`: Enable or disable reporting data truncation errors for prepared statements
-  * `charset_dir::String`: character set files directory
-  * `charset_name::String`: Specify the default character set for the connection
-  * `bind::String`: Specify the network interface from which to connect to the database, like `"192.168.8.3"`
+  * `charset_dir::AbstractString`: character set files directory
+  * `charset_name::AbstractString`: Specify the default character set for the connection
+  * `bind::AbstractString`: Specify the network interface from which to connect to the database, like `"192.168.8.3"`
   * `max_allowed_packet::Integer`: The maximum packet length to send to or receive from server. The default is 16MB, the maximum 1GB.
   * `net_buffer_length::Integer`: The buffer size for TCP/IP and socket communication. Default is 16KB.
   * `named_pipe::Bool`: For Windows operating systems only: Use named pipes for client/server communication.
   * `protocol::MySQL.API.mysql_protocol_type`: Specify the type of client/server protocol. Possible values are: `MySQL.API.MYSQL_PROTOCOL_TCP`, `MySQL.API.MYSQL_PROTOCOL_SOCKET`, `MySQL.API.MYSQL_PROTOCOL_PIPE`, `MySQL.API.MYSQL_PROTOCOL_MEMORY`.
-  * `ssl_key::String`: Defines a path to a private key file to use for TLS. This option requires that you use the absolute path, not a relative path. If the key is protected with a passphrase, the passphrase needs to be specified with `passphrase` keyword argument.
-  * `passphrase::String`: Specify a passphrase for a passphrase-protected private key, as configured by the `ssl_key` keyword argument.
-  * `ssl_cert::String`: Defines a path to the X509 certificate file to use for TLS. This option requires that you use the absolute path, not a relative path.
-  * `ssl_ca::String`: Defines a path to a PEM file that should contain one or more X509 certificates for trusted Certificate Authorities (CAs) to use for TLS. This option requires that you use the absolute path, not a relative path.
-  * `ssl_capath::String`: Defines a path to a directory that contains one or more PEM files that should each contain one X509 certificate for a trusted Certificate Authority (CA) to use for TLS. This option requires that you use the absolute path, not a relative path. The directory specified by this option needs to be run through the openssl rehash command.
-  * `ssl_cipher::String`: Defines a list of permitted ciphers or cipher suites to use for TLS, like `"DHE-RSA-AES256-SHA"`
-  * `ssl_crl::String`: Defines a path to a PEM file that should contain one or more revoked X509 certificates to use for TLS. This option requires that you use the absolute path, not a relative path.
-  * `ssl_crlpath::String`: Defines a path to a directory that contains one or more PEM files that should each contain one revoked X509 certificate to use for TLS. This option requires that you use the absolute path, not a relative path. The directory specified by this option needs to be run through the openssl rehash command.
+  * `ssl_key::AbstractString`: Defines a path to a private key file to use for TLS. This option requires that you use the absolute path, not a relative path. If the key is protected with a passphrase, the passphrase needs to be specified with `passphrase` keyword argument.
+  * `passphrase::AbstractString`: Specify a passphrase for a passphrase-protected private key, as configured by the `ssl_key` keyword argument.
+  * `ssl_cert::AbstractString`: Defines a path to the X509 certificate file to use for TLS. This option requires that you use the absolute path, not a relative path.
+  * `ssl_ca::AbstractString`: Defines a path to a PEM file that should contain one or more X509 certificates for trusted Certificate Authorities (CAs) to use for TLS. This option requires that you use the absolute path, not a relative path.
+  * `ssl_capath::AbstractString`: Defines a path to a directory that contains one or more PEM files that should each contain one X509 certificate for a trusted Certificate Authority (CA) to use for TLS. This option requires that you use the absolute path, not a relative path. The directory specified by this option needs to be run through the openssl rehash command.
+  * `ssl_cipher::AbstractString`: Defines a list of permitted ciphers or cipher suites to use for TLS, like `"DHE-RSA-AES256-SHA"`
+  * `ssl_crl::AbstractString`: Defines a path to a PEM file that should contain one or more revoked X509 certificates to use for TLS. This option requires that you use the absolute path, not a relative path.
+  * `ssl_crlpath::AbstractString`: Defines a path to a directory that contains one or more PEM files that should each contain one revoked X509 certificate to use for TLS. This option requires that you use the absolute path, not a relative path. The directory specified by this option needs to be run through the openssl rehash command.
   * `ssl_verify_server_cert::Bool`: Enables (or disables) server certificate verification.
   * `ssl_enforce::Bool`: Whether to force TLS
-  * `default_auth::String`: Default authentication client-side plugin to use.
-  * `connection_handler::String`: Specify the name of a connection handler plugin.
-  * `plugin_dir::String`: Specify the location of client plugins. The plugin directory can also be specified with the MARIADB_PLUGIN_DIR environment variable.
+  * `default_auth::AbstractString`: Default authentication client-side plugin to use.
+  * `connection_handler::AbstractString`: Specify the name of a connection handler plugin.
+  * `plugin_dir::AbstractString`: Specify the location of client plugins. The plugin directory can also be specified with the MARIADB_PLUGIN_DIR environment variable.
   * `secure_auth::Bool`: Refuse to connect to the server if the server uses the mysql_old_password authentication plugin. This mode is off by default, which is a difference in behavior compared to MySQL 5.6 and later, where it is on by default.
-  * `server_public_key::String`: Specifies the name of the file which contains the RSA public key of the database server. The format of this file must be in PEM format. This option is used by the caching_sha2_password client authentication plugin.
+  * `server_public_key::AbstractString`: Specifies the name of the file which contains the RSA public key of the database server. The format of this file must be in PEM format. This option is used by the caching_sha2_password client authentication plugin.
   * `read_default_file::Bool`: only the default option files are read
-  * `option_file::String`: the argument is interpreted as a path to a custom option file, and only that option file is read.
+  * `option_file::AbstractString`: the argument is interpreted as a path to a custom option file, and only that option file is read.
   * `read_default_group::Bool`: only the default option groups are read from specified option file(s)
-  * `option_group::String`: it is interpreted as a custom option group, and that custom option group is read in addition to the default option groups.
+  * `option_group::AbstractString`: it is interpreted as a custom option group, and that custom option group is read in addition to the default option groups.
 """
-DBInterface.connect(::Type{Connection}, host::String, user::String, passwd::Union{String, Nothing}=nothing; db::String="", port::Integer=3306, unix_socket::String=API.MYSQL_DEFAULT_SOCKET, kw...) =
+DBInterface.connect(::Type{Connection}, host::AbstractString, user::AbstractString, passwd::Union{AbstractString, Nothing}=nothing; db::AbstractString="", port::Integer=3306, unix_socket::AbstractString=API.MYSQL_DEFAULT_SOCKET, kw...) =
     Connection(host, user, passwd, db, port, unix_socket; kw...)
 
 """
@@ -317,10 +317,10 @@ include("prepare.jl")
 include("load.jl")
 
 """
-    MySQL.escape(conn::MySQL.Connection, str::String) -> String
+    MySQL.escape(conn::MySQL.Connection, str::AbstractString) -> String
 
 Escapes a string using `mysql_real_escape_string()`, returns the escaped string.
 """
-escape(conn::Connection, sql::String) = API.escapestring(conn.mysql, sql)
+escape(conn::Connection, sql::AbstractString) = API.escapestring(conn.mysql, sql)
 
 end # module
