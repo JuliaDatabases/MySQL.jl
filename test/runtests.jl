@@ -331,7 +331,15 @@ DBInterface.execute(stmt, [SubString("foo")])
 # escaping AbstractString
 @test MySQL.escape(conn, SubString("'); DROP TABLE Employee; --")) == "\\'); DROP TABLE Employee; --"
 
+# https://github.com/JuliaDatabases/MySQL.jl/issues/194
+ct = (x = UInt8[1, 2, 3],)
+MySQL.load(ct, conn, "test194")
+ct2 = columntable(DBInterface.execute(conn, "select * from test194"))
+
 # 156
 res = DBInterface.execute(conn, "select * from Employee")
 DBInterface.close!(conn)
 ret = columntable(res)
+
+# load on closed connection should throw
+@test_throws ArgumentError MySQL.load(ct, conn, "test194")
