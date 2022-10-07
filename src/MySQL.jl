@@ -302,7 +302,7 @@ function DBInterface.close!(conn::Connection)
 end
 
 Base.close(conn::Connection) = DBInterface.close!(conn)
-Base.isopen(conn::Connection) = API.isopen(conn.mysql)
+Base.isopen(conn::Connection) = conn.mysql.ptr != C_NULL && API.isopen(conn.mysql)
 
 function juliatype(field_type, notnullable, isunsigned, isbinary, date_and_time)
     T = API.juliatype(field_type)

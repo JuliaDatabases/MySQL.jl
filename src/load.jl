@@ -69,6 +69,7 @@ function load end
 load(conn::Connection, table::AbstractString="mysql_"*Random.randstring(5); kw...) = x->load(x, conn, table; kw...)
 
 function load(itr, conn::Connection, name::AbstractString="mysql_"*Random.randstring(5); append::Bool=true, quoteidentifiers::Bool=true, debug::Bool=false, limit::Integer=typemax(Int64), kw...)
+    isopen(conn) || throw(ArgumentError("`MySQL.Connection` is closed"))
     # get data
     rows = Tables.rows(itr)
     sch = Tables.schema(rows)

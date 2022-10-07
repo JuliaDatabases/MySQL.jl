@@ -219,7 +219,7 @@ end
 
 inithelper!(helper, x::Union{Bool, UInt8, Int8}) = helper.uint8 = UInt8[Core.bitcast(UInt8, x)]
 ptrhelper(helper, x::Union{Bool, UInt8, Int8}) = pointer(helper.uint8)
-sethelper!(helper, x::Union{Bool, UInt8, Int8}) = helper.uint8[1] = Core.bitcast(Bool, x)
+sethelper!(helper, x::Union{Bool, UInt8, Int8}) = helper.uint8[1] = Core.bitcast(UInt8, x)
 getvalue(stmt, helper, values, i, ::Type{T}) where {T <: Union{Bool, UInt8, Int8}} = Core.bitcast(T, helper.uint8[1])
 
 inithelper!(helper, x::Union{UInt16, Int16}) = helper.uint16 = UInt16[Core.bitcast(UInt16, x)]
