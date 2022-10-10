@@ -62,6 +62,7 @@ function cast(::Type{T}, ptr, len) where {T}
 end
 
 const DATETIME_OPTIONS = Parsers.Options(dateformat=dateformat"yyyy-mm-dd HH:MM:SS.s")
+const ZERO_DATE = Vector{UInt8}("0000-00-00 00:00:00")
 
 function cast(::Type{DateTime}, ptr, len)
     buf = unsafe_wrap(Array, ptr, len)
@@ -69,6 +70,8 @@ function cast(::Type{DateTime}, ptr, len)
         x, code, pos = Parsers.typeparser(DateTime, buf, 1, len, buf[1], Int16(0), DATETIME_OPTIONS)
         if code > 0
             return x
+        elseif buf == ZERO_DATE
+            return DateTime(0)
         end
     catch e
         e isa InexactError && API.dateandtime_warning()
@@ -89,6 +92,8 @@ function cast(::Type{DateAndTime}, ptr, len)
             tm += Dates.Microsecond(y)
         end
         return DateAndTime(dt, tm)
+    elseif buf == ZERO_DATE
+        return DateAndTime(Date(0), Time(0))
     end
     casterror(DateAndTime, ptr, len)
 end
