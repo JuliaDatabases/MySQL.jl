@@ -336,6 +336,13 @@ ct = (x = UInt8[1, 2, 3],)
 MySQL.load(ct, conn, "test194")
 ct2 = columntable(DBInterface.execute(conn, "select * from test194"))
 
+# https://github.com/JuliaDatabases/MySQL.jl/issues/186
+DBInterface.execute(conn, "SET SESSION SQL_MODE=''")
+dt = DBInterface.execute(conn, "SELECT CAST('0000-00-00' as DATETIME) as dt ") |> Tables.columntable
+@test dt.dt[1] == DateTime(0)
+dt = DBInterface.execute(conn, "SELECT CAST('0000-00-00' as DATETIME) as dt "; mysql_date_and_time=true) |> Tables.columntable
+@test dt.dt[1].date == DateTime(0)
+
 # 156
 res = DBInterface.execute(conn, "select * from Employee")
 DBInterface.close!(conn)
