@@ -180,7 +180,7 @@ function DBInterface.execute(conn::Connection, sql::AbstractString, params=(); m
         end
         nfields = API.numfields(result)
         fields = API.fetchfields(result, nfields)
-        names = [ccall(:jl_symbol_n, Ref{Symbol}, (Ptr{UInt8}, Csize_t), x.name, x.name_length) for x in fields]
+        names = [ccall(:jl_symbol_n, Ref{Symbol}, (Cstring, Csize_t), x.name, x.name_length) for x in fields]
         types = [juliatype(x.field_type, API.notnullable(x), API.isunsigned(x), API.isbinary(x), mysql_date_and_time) for x in fields]
     elseif API.fieldcount(conn.mysql) == 0
         rows_affected = API.affectedrows(conn.mysql)
@@ -212,7 +212,7 @@ function Base.iterate(cursor::TextCursors{buffered}, first=true) where {buffered
             end
             cursor.cursor.nfields = API.numfields(cursor.cursor.result)
             fields = API.fetchfields(cursor.cursor.result, cursor.cursor.nfields)
-            cursor.cursor.names = [ccall(:jl_symbol_n, Ref{Symbol}, (Ptr{UInt8}, Csize_t), x.name, x.name_length) for x in fields]
+            cursor.cursor.names = [ccall(:jl_symbol_n, Ref{Symbol}, (Cstring, Csize_t), x.name, x.name_length) for x in fields]
             cursor.cursor.types = [juliatype(x.field_type, API.notnullable(x), API.isunsigned(x), API.isbinary(x), cursor.cursor.mysql_date_and_time) for x in fields]
         else
             return nothing

@@ -40,7 +40,7 @@ end
 function mysql_change_user(mysql::Ptr{Cvoid}, user::AbstractString, password::AbstractString, db)
     return @c(:mysql_change_user,
                 Bool,
-                (Ptr{Cvoid}, Ptr{UInt8}, Ptr{UInt8}, Ptr{UInt8}),
+                (Ptr{Cvoid}, Cstring, Cstring, Cstring),
                 mysql, user, password, db)
 end
 
@@ -56,7 +56,7 @@ end
 function mysql_client_find_plugin(mysql::Ptr{Cvoid}, name::AbstractString, type::Int)
     return @c(:mysql_client_find_plugin,
                 Ptr{Cvoid},
-                (Ptr{Cvoid}, Ptr{UInt8}, Cint),
+                (Ptr{Cvoid}, Cstring, Cint),
                 mysql, name, type)
 end
 
@@ -277,7 +277,7 @@ end
 function mysql_hex_string(to, from, length::Integer)
     return @c(:mysql_hex_string,
                 Culong,
-                (Ptr{UInt8}, Ptr{UInt8}, Culong),
+                (Cstring, Cstring, Culong),
                 to, from, length)
 end
 
@@ -386,14 +386,14 @@ end
 function mysql_plugin_options(plugin::Ptr{Cvoid}, option, value)
     return @c(:mysql_plugin_options,
                 Cint,
-                (Ptr{Cvoid}, Ptr{UInt8}, Ptr{Cvoid}),
+                (Ptr{Cvoid}, Cstring, Ptr{Cvoid}),
                 plugin, option, value)
 end
 
 function mysql_query(mysql::Ptr{Cvoid}, stmt_str)
     return @c(:mysql_query,
                  Cint,
-                 (Ptr{Cvoid}, Ptr{UInt8}),
+                 (Ptr{Cvoid}, Cstring),
                  mysql, stmt_str)
 end
 
@@ -401,7 +401,7 @@ end
 function mysql_real_connect(mysql::Ptr{Cvoid}, host, user, passwd, db, port, unix_socket, client_flag)
     return @c(:mysql_real_connect,
                 Ptr{Cvoid},
-                (Ptr{Cvoid}, Ptr{UInt8}, Ptr{UInt8}, Ptr{UInt8}, Ptr{UInt8}, Cuint, Ptr{UInt8}, Culong),
+                (Ptr{Cvoid}, Cstring, Cstring, Cstring, Cstring, Cuint, Cstring, Culong),
                 mysql, host, user, passwd, db, port, unix_socket, client_flag)
 end
 
@@ -409,7 +409,7 @@ end
 function mysql_real_escape_string(mysql::Ptr{Cvoid}, to, from, len)
     return @c(:mysql_real_escape_string,
                 Culong,
-                (Ptr{Cvoid}, Ptr{UInt8}, Ptr{UInt8}, Culong),
+                (Ptr{Cvoid}, Ptr{UInt8}, Cstring, Culong),
                 mysql, to, from, len)
 end
 
@@ -417,7 +417,7 @@ end
 function mysql_real_escape_string_quote(mysql::Ptr{Cvoid}, to, from, len, q)
     return @c(:mysql_real_escape_string_quote,
                 Culong,
-                (Ptr{Cvoid}, Ptr{UInt8}, Ptr{UInt8}, Culong, Cchar),
+                (Ptr{Cvoid}, Ptr{UInt8}, Cstring, Culong, Cchar),
                 mysql, to, from, len, q)
 end
 
@@ -425,7 +425,7 @@ end
 function mysql_real_query(mysql::Ptr{Cvoid}, stmt_str, len)
     return @c(:mysql_real_query,
                  Cint,
-                 (Ptr{Cvoid}, Ptr{UInt8}, Culong),
+                 (Ptr{Cvoid}, Cstring, Culong),
                  mysql, stmt_str, len)
 end
 
@@ -480,7 +480,7 @@ end
 function mysql_select_db(mysql::Ptr{Cvoid}, db::AbstractString)
     return @c(:mysql_select_db,
                 Cint,
-                (Ptr{Cvoid}, Ptr{UInt8}),
+                (Ptr{Cvoid}, Cstring),
                 mysql, db)
 end
 
@@ -488,7 +488,7 @@ end
 function mysql_session_track_get_first(mysql::Ptr{Cvoid}, type, data, len)
     return @c(:mysql_session_track_get_first,
                 Cint,
-                (Ptr{Cvoid}, Cint, Ptr{Ptr{UInt8}}, Ptr{Csize_t}),
+                (Ptr{Cvoid}, Cint, Ptr{Cstring}, Ptr{Csize_t}),
                 mysql, type, data, len)
 end
 
@@ -496,7 +496,7 @@ end
 function mysql_session_track_get_next(mysql::Ptr{Cvoid}, type, data, len)
     return @c(:mysql_session_track_get_next,
                 Cint,
-                (Ptr{Cvoid}, Cint, Ptr{Ptr{UInt8}}, Ptr{Csize_t}),
+                (Ptr{Cvoid}, Cint, Ptr{Cstring}, Ptr{Csize_t}),
                 mysql, type, data, len)
 end
 
@@ -504,7 +504,7 @@ end
 function mysql_set_character_set(mysql::Ptr{Cvoid}, csname::AbstractString)
     return @c(:mysql_set_character_set,
                 Cint,
-                (Ptr{Cvoid}, Ptr{UInt8}),
+                (Ptr{Cvoid}, Cstring),
                 mysql, csname)
 end
 
@@ -544,7 +544,7 @@ end
 function mysql_ssl_set(mysql::Ptr{Cvoid}, key, cert, ca, capath, cipher)
     return @c(:mysql_ssl_set,
                 Bool,
-                (Ptr{Cvoid}, Ptr{UInt8}, Ptr{UInt8}, Ptr{UInt8}, Ptr{UInt8}, Ptr{UInt8}),
+                (Ptr{Cvoid}, Cstring, Cstring, Cstring, Cstring, Cstring),
                 mysql, key, cert, ca, capath, cipher)
 end
 
@@ -748,7 +748,7 @@ end
 function mysql_stmt_prepare(stmt::Ptr{Cvoid}, stmt_str, len)
     return @c(:mysql_stmt_prepare,
                 Cint,
-                (Ptr{Cvoid}, Ptr{UInt8}, Culong),
+                (Ptr{Cvoid}, Cstring, Culong),
                 stmt, stmt_str, len)
 end
 
@@ -788,7 +788,7 @@ end
 function mysql_stmt_send_long_data(stmt::Ptr{Cvoid}, parameter_number, data, length)
     return @c(:mysql_stmt_send_long_data,
                 Bool,
-                (Ptr{Cvoid}, Cuint, Ptr{UInt8}, Culong),
+                (Ptr{Cvoid}, Cuint, Cstring, Culong),
                 stmt, parameter_number, data, length)
 end
 
