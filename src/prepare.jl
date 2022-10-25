@@ -53,7 +53,7 @@ function DBInterface.prepare(conn::Connection, sql::AbstractString; mysql_date_a
     result = API.resultmetadata(stmt)
     if result.ptr != C_NULL
         fields = API.fetchfields(result, nfields)
-        names = [ccall(:jl_symbol_n, Ref{Symbol}, (Ptr{UInt8}, Csize_t), x.name, x.name_length) for x in fields]
+        names = [ccall(:jl_symbol_n, Ref{Symbol}, (Cstring, Csize_t), x.name, x.name_length) for x in fields]
         types = [juliatype(x.field_type, API.notnullable(x), API.isunsigned(x), API.isbinary(x), mysql_date_and_time) for x in fields]
         valuehelpers = [API.BindHelper() for i = 1:nfields]
         values = [API.MYSQL_BIND(valuehelpers[i].length, valuehelpers[i].is_null) for i = 1:nfields]
@@ -180,7 +180,7 @@ function DBInterface.execute(stmt::Statement, params=(); mysql_store_result::Boo
         result = API.resultmetadata(stmt.stmt)
         if result.ptr != C_NULL
             fields = API.fetchfields(result, nfields)
-            names = [ccall(:jl_symbol_n, Ref{Symbol}, (Ptr{UInt8}, Csize_t), x.name, x.name_length) for x in fields]
+            names = [ccall(:jl_symbol_n, Ref{Symbol}, (Cstring, Csize_t), x.name, x.name_length) for x in fields]
             types = [juliatype(x.field_type, API.notnullable(x), API.isunsigned(x), API.isbinary(x), mysql_date_and_time) for x in fields]
             valuehelpers = [API.BindHelper() for i = 1:nfields]
             values = [API.MYSQL_BIND(valuehelpers[i].length, valuehelpers[i].is_null) for i = 1:nfields]
