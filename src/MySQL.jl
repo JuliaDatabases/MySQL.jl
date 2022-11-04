@@ -128,6 +128,7 @@ function setoptions!(mysql;
         passphrase::Union{AbstractString, Nothing}=nothing,
         ssl_verify_server_cert::Union{Bool, Nothing}=nothing,
         ssl_enforce::Union{Bool, Nothing}=nothing,
+        ssl_mode::Union{API.mysql_ssl_mode, Nothing}=nothing,
         default_auth::Union{AbstractString, Nothing}=nothing,
         connection_handler::Union{AbstractString, Nothing}=nothing,
         plugin_dir::Union{AbstractString, Nothing}=nothing,
@@ -198,6 +199,9 @@ function setoptions!(mysql;
     end
     if ssl_crlpath !== nothing
         API.setoption(mysql, API.MYSQL_OPT_SSL_CRLPATH, ssl_crlpath)
+    end
+    if ssl_mode !== nothing
+        API.setoption(mysql, API.MYSQL_OPT_SSL_MODE, ssl_mode)
     end
     if passphrase !== nothing
         API.setoption(mysql, API.MARIADB_OPT_TLS_PASSPHRASE, passphrase)
