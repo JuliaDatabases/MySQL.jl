@@ -312,7 +312,7 @@ function returnbind!(helper, binds, i, type, ::Type{T}) where {T}
     return
 end
 
-function bind!(helper, binds, i, x::Missing)
+function bind!(helper, binds, i, x::Union{Missing,Nothing})
     helper.is_null[1] = true
     return
 end
