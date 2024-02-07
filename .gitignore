@@ -40,3 +40,5 @@ deps/build.log
 
 # Manifest file
 Manifest.toml
+
+.vscode/

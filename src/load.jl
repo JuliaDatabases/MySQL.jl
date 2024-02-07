@@ -105,14 +105,12 @@ function load(itr, conn::Connection, name::AbstractString="mysql_"*Random.randst
 end
 
 function transaction(f::Function, conn)
-    API.autocommit(conn.mysql, false)
+    execute(conn, "START TRANSACTION")
     try
         f()
         API.commit(conn.mysql)
     catch
         API.rollback(conn.mysql)
         rethrow()
-    finally
-        API.autocommit(conn.mysql, true)
     end
 end
