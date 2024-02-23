@@ -1,6 +1,7 @@
 module MySQL
 
 using Dates, DBInterface, Tables, Parsers, DecFP
+import DBInterface: transaction
 
 export DBInterface, DateAndTime
 

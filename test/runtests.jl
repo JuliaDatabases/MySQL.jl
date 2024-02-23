@@ -352,37 +352,46 @@ ret = columntable(res)
 @test_throws ArgumentError MySQL.load(ct, conn, "test194")
 
 @testset "transactions" begin
-    DBInterface.execute(conn, "DROP TABLE IF EXISTS TransactionTest")
-    DBInterface.execute(conn, "CREATE TABLE TransactionTest (a int)")
-
-    conn2 = DBInterface.connect(MySQL.Connection, "", ""; option_file=joinpath(dirname(pathof(MySQL)), "../test/", "my.ini"))
-
+    conn = DBInterface.connect(MySQL.Connection, "127.0.0.1", "root", ""; port=3306)
     try
-        # happy path
-        DBInterface.transaction(conn) do
-            DBInterface.execute(conn, "INSERT INTO TransactionTest (a) VALUES (1)")
+        DBInterface.execute(conn, "DROP DATABASE if exists mysqltest")
+        DBInterface.execute(conn, "CREATE DATABASE mysqltest")
+        DBInterface.execute(conn, "use mysqltest")
+        DBInterface.execute(conn, "DROP TABLE IF EXISTS TransactionTest")
+        DBInterface.execute(conn, "CREATE TABLE TransactionTest (a int)")
 
-            # we can see the result inside our transaction
+        conn2 = DBInterface.connect(MySQL.Connection, "127.0.0.1", "root", ""; port=3306)
+        DBInterface.execute(conn2, "use mysqltest")
+
+        try
+            # happy path
+            DBInterface.transaction(conn) do
+                DBInterface.execute(conn, "INSERT INTO TransactionTest (a) VALUES (1)")
+
+                # we can see the result inside our transaction
+                result = DBInterface.execute(conn, "SELECT * FROM TransactionTest") |> Tables.columntable
+                @test result.a == [1]
+
+                # and can't see it outside our transaction
+                result = DBInterface.execute(conn2, "SELECT * FROM TransactionTest") |> Tables.columntable
+                @test isempty(result.a)
+            end
             result = DBInterface.execute(conn, "SELECT * FROM TransactionTest") |> Tables.columntable
             @test result.a == [1]
-
-            # and can't see it outside our transaction
             result = DBInterface.execute(conn2, "SELECT * FROM TransactionTest") |> Tables.columntable
-            @test isempty(result.a)
-        end
-        result = DBInterface.execute(conn, "SELECT * FROM TransactionTest") |> Tables.columntable
-        @test result.a == [1]
-        result = DBInterface.execute(conn2, "SELECT * FROM TransactionTest") |> Tables.columntable
-        @test result.a == [1]
+            @test result.a == [1]
 
-        # roll back due to exception
-        @test_throws ErrorException DBInterface.transaction(conn) do
-            DBInterface.execute(conn, "INSERT INTO TransactionTest (a) VALUES (2)")
-            error("force rollback")
+            # roll back due to exception
+            @test_throws ErrorException DBInterface.transaction(conn) do
+                DBInterface.execute(conn, "INSERT INTO TransactionTest (a) VALUES (2)")
+                error("force rollback")
+            end
+            result = DBInterface.execute(conn, "SELECT * FROM TransactionTest") |> Tables.columntable
+            @test result.a == [1] # the table did not change
+        finally
+            DBInterface.close!(conn2)
         end
-        result = DBInterface.execute(conn, "SELECT * FROM TransactionTest") |> Tables.columntable
-        @test result.a == [1] # the table did not change
     finally
-        close(conn2)
+        DBInterface.close!(conn)
     end
 end

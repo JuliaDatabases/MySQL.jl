@@ -91,7 +91,7 @@ function load(itr, conn::Connection, name::AbstractString="mysql_"*Random.randst
         DBInterface.execute(conn, "DELETE FROM $name")
     end
     # start a transaction for inserting rows
-    transaction(conn) do
+    DBInterface.transaction(conn) do
         params = chop(repeat("?,", length(sch.names)))
         stmt = DBInterface.prepare(conn, "INSERT INTO $name VALUES ($params)")
         for (i, row) in enumerate(rows)
@@ -104,8 +104,8 @@ function load(itr, conn::Connection, name::AbstractString="mysql_"*Random.randst
     return name
 end
 
-function transaction(f::Function, conn)
-    execute(conn, "START TRANSACTION")
+function DBInterface.transaction(f::Function, conn::Connection)
+    DBInterface.execute(conn, "START TRANSACTION")
     try
         f()
         API.commit(conn.mysql)
