@@ -11,7 +11,17 @@
 
 Package for interfacing with MySQL databases from Julia via the MariaDB C connector library, version 3.1.6.
 
-### Documentation
+## Documentation
 
 [![Stable](https://img.shields.io/badge/docs-stable-blue.svg)](https://mysql.juliadatabases.org/stable)
 [![Dev](https://img.shields.io/badge/docs-dev-blue.svg)](https://mysql.juliadatabases.org/dev)
+
+## Contributing
+
+The tests require a MySQL DB to be running, which is provided by Docker:
+
+```sh
+docker compose up -d
+julia --project -e 'using Pkg; Pkg.test()'
+docker compose down
+```
