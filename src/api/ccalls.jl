@@ -215,28 +215,28 @@ function mysql_get_host_info(mysql::Ptr{Cvoid})
 end
 
 #int mysql_get_option(MYSQL *mysql, enum mysql_option option, const void *arg)
-function mysql_get_option(mysql::Ptr{Cvoid}, option::Integer, arg::Ref{Cuint})
+function mysql_get_option_Cuint(mysql::Ptr{Cvoid}, option::Integer, arg::Ref{Cuint})
     return @c(:mysql_get_option,
                 Cint,
                 (Ptr{Cvoid}, Cint, Ref{Cuint}),
                 mysql, option, arg)
 end
 
-function mysql_get_option(mysql::Ptr{Cvoid}, option::Integer, arg::Ref{Culong})
+function mysql_get_option_Culong(mysql::Ptr{Cvoid}, option::Integer, arg::Ref{Culong})
     return @c(:mysql_get_option,
                 Cint,
                 (Ptr{Cvoid}, Cint, Ref{Culong}),
                 mysql, option, arg)
 end
 
-function mysql_get_option(mysql::Ptr{Cvoid}, option::Integer, arg::Ref{Bool})
+function mysql_get_option_Bool(mysql::Ptr{Cvoid}, option::Integer, arg::Ref{Bool})
     return @c(:mysql_get_option,
                 Cint,
                 (Ptr{Cvoid}, Cint, Ref{Bool}),
                 mysql, option, arg)
 end
 
-function mysql_get_option(mysql::Ptr{Cvoid}, option::Integer, arg::Ptr{Cvoid})
+function mysql_get_option_Cvoid(mysql::Ptr{Cvoid}, option::Integer, arg::Ptr{Cvoid})
     return @c(:mysql_get_option,
                 Cint,
                 (Ptr{Cvoid}, Cint, Ptr{Cvoid}),
