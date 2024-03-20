@@ -963,18 +963,18 @@ For more information about option files used by MySQL programs, see Section 4.2.
 function setoption(mysql::MYSQL, option::mysql_option, arg="0")
     if option in CUINTOPTS
         ref = Ref{Cuint}(Cuint(arg))
-        return @checksuccess mysql mysql_options(mysql.ptr, option, ref)
+        return @checksuccess mysql mysql_options_Cuint(mysql.ptr, option, ref)
     elseif option in CULONGOPTS
         ref = Ref{Culong}(Culong(arg))
-        return @checksuccess mysql mysql_options(mysql.ptr, option, ref)
+        return @checksuccess mysql mysql_options_Culong(mysql.ptr, option, ref)
     elseif option in BOOLOPTS
         ref = Ref{Bool}(Bool(arg))
-        return @checksuccess mysql mysql_options(mysql.ptr, option, ref)
+        return @checksuccess mysql mysql_options_Bool(mysql.ptr, option, ref)
     else
         str = arg == C_NULL ? C_NULL : String(arg)
         GC.@preserve str begin
             ref = str == C_NULL ? C_NULL : convert(Ptr{Cvoid}, pointer(str))
-            return @checksuccess mysql mysql_options(mysql.ptr, option, ref)
+            return @checksuccess mysql mysql_options_Cvoid(mysql.ptr, option, ref)
         end
     end
 end

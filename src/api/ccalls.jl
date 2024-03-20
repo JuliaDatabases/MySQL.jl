@@ -338,28 +338,28 @@ function mysql_num_rows(results::Ptr{Cvoid})
 end
 
 #int mysql_options(MYSQL *mysql, enum mysql_option option, const void *arg)
-function mysql_options(mysql::Ptr{Cvoid}, option::mysql_option, arg::Ref{Cuint})
+function mysql_options_Cuint(mysql::Ptr{Cvoid}, option::mysql_option, arg::Ref{Cuint})
     return @c(:mysql_options,
                 Cint,
                 (Ptr{Cvoid}, Cint, Ref{Cuint}),
                 mysql, option, arg)
 end
 
-function mysql_options(mysql::Ptr{Cvoid}, option::mysql_option, arg::Ref{Culong})
+function mysql_options_Culong(mysql::Ptr{Cvoid}, option::mysql_option, arg::Ref{Culong})
     return @c(:mysql_options,
                 Cint,
                 (Ptr{Cvoid}, Cint, Ref{Culong}),
                 mysql, option, arg)
 end
 
-function mysql_options(mysql::Ptr{Cvoid}, option::mysql_option, arg::Ref{Bool})
+function mysql_options_Bool(mysql::Ptr{Cvoid}, option::mysql_option, arg::Ref{Bool})
     return @c(:mysql_options,
                 Cint,
                 (Ptr{Cvoid}, Cint, Ref{Bool}),
                 mysql, option, arg)
 end
 
-function mysql_options(mysql::Ptr{Cvoid}, option::mysql_option, arg::Ptr{Cvoid})
+function mysql_options_Cvoid(mysql::Ptr{Cvoid}, option::mysql_option, arg::Ptr{Cvoid})
     return @c(:mysql_options,
                 Cint,
                 (Ptr{Cvoid}, Cint, Ptr{Cvoid}),
