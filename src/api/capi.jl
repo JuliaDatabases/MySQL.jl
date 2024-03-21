@@ -431,15 +431,14 @@ Zero for success. Nonzero if an error occurred; this occurs for option values th
 """=#
 function getoption(mysql::MYSQL, option::mysql_option)
     if option in CUINTOPTS
-        arg = Ref{Cuint}()
+        return @checksuccess mysql mysql_get_option_Cuint(mysql.ptr, option, Ref{Cuint}())
     elseif option in CULONGOPTS
-        arg = Ref{Culong}()
+        return @checksuccess mysql mysql_get_option_Culong(mysql.ptr, option, Ref{Culong}())
     elseif option in BOOLOPTS
-        arg = Ref{Bool}()
+        return @checksuccess mysql mysql_get_option_Bool(mysql.ptr, option, Ref{Bool}())
     else
-        arg = Ref{String}()
+        return @checksuccess mysql mysql_get_option_String(mysql.ptr, option, Ref{String}())
     end
-    return @checksuccess mysql mysql_get_option(mysql.ptr, option, arg)
 end
 
 #="""
@@ -964,18 +963,18 @@ For more information about option files used by MySQL programs, see Section 4.2.
 function setoption(mysql::MYSQL, option::mysql_option, arg="0")
     if option in CUINTOPTS
         ref = Ref{Cuint}(Cuint(arg))
-        return @checksuccess mysql mysql_options(mysql.ptr, option, ref)
+        return @checksuccess mysql mysql_options_Cuint(mysql.ptr, option, ref)
     elseif option in CULONGOPTS
         ref = Ref{Culong}(Culong(arg))
-        return @checksuccess mysql mysql_options(mysql.ptr, option, ref)
+        return @checksuccess mysql mysql_options_Culong(mysql.ptr, option, ref)
     elseif option in BOOLOPTS
         ref = Ref{Bool}(Bool(arg))
-        return @checksuccess mysql mysql_options(mysql.ptr, option, ref)
+        return @checksuccess mysql mysql_options_Bool(mysql.ptr, option, ref)
     else
         str = arg == C_NULL ? C_NULL : String(arg)
         GC.@preserve str begin
             ref = str == C_NULL ? C_NULL : convert(Ptr{Cvoid}, pointer(str))
-            return @checksuccess mysql mysql_options(mysql.ptr, option, ref)
+            return @checksuccess mysql mysql_options_Cvoid(mysql.ptr, option, ref)
         end
     end
 end
