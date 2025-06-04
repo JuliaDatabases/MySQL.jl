@@ -2,6 +2,7 @@ module MySQL
 
 using Dates, DBInterface, Tables, Parsers, DecFP
 import DBInterface: transaction
+import Random
 
 export DBInterface, DateAndTime
 

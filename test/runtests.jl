@@ -156,6 +156,10 @@ for nm in keys(res)
     @test isequal(res[nm], expected[nm][1:4])
 end
 
+#https://github.com/JuliaDatabases/MySQL.jl/issues/226
+ct0 = (x = UInt8[1, 22, 23],)
+MySQL.load(ct0,conn, debug=true)
+#there is no @test invocation here; but the above call failed due to Random not being imported
 
 # now test insert/parameter binding
 DBInterface.execute(conn, "DELETE FROM Employee")
