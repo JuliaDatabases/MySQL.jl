@@ -303,7 +303,7 @@ res, st = state
 ret = columntable(res)
 @test length(ret[1]) == 5
 state = iterate(results, st)
-@test state !== nothing
+@test state !== nothing 
 res, st = state
 @test !st
 @test length(res) == 4
