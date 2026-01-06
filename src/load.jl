@@ -34,13 +34,14 @@ const SQLTYPES = Dict{Type, String}(
 
 checkdupnames(names) = length(unique(map(x->lowercase(String(x)), names))) == length(names) || error("duplicate case-insensitive column names detected; sqlite doesn't allow duplicate column names and treats them case insensitive")
 
-function createtable(conn::Connection, nm::AbstractString, sch::Tables.Schema; debug::Bool=false, quoteidentifiers::Bool=true, createtableclause::AbstractString="CREATE TABLE", columnsuffix=Dict())
+function createtable(conn::Connection, nm::AbstractString, sch::Tables.Schema; debug::Bool=false, quoteidentifiers::Bool=true, createtableclause::AbstractString="CREATE TABLE", columnsuffix=Dict(), auto_increment_primary_key_name::AbstractString="")
     names = sch.names
     checkdupnames(names)
     types = [sqltype(T) for T in sch.types]
     columns = (string(quoteidentifiers ? quoteid(String(names[i])) : names[i], ' ', types[i], ' ', get(columnsuffix, names[i], "")) for i = 1:length(names))
-    debug && @info "executing create table statement: `$createtableclause $nm ($(join(columns, ", ")))`"
-    return DBInterface.execute(conn, "$createtableclause $nm ($(join(columns, ", ")))")
+    auto_increment_column = isempty(auto_increment_primary_key_name) ? "" : "$(auto_increment_primary_key_name) INT AUTO_INCREMENT PRIMARY KEY, "
+    debug && @info "executing create table statement: `$createtableclause $nm ($(auto_increment_column)$(join(columns, ", ")))`"
+    return DBInterface.execute(conn, "$createtableclause $nm ($(auto_increment_column)$(join(columns, ", ")))")
 end
 
 """
@@ -93,7 +94,7 @@ function load(itr, conn::Connection, name::AbstractString="mysql_"*Random.randst
     # start a transaction for inserting rows
     DBInterface.transaction(conn) do
         params = chop(repeat("?,", length(sch.names)))
-        stmt = DBInterface.prepare(conn, "INSERT INTO $name VALUES ($params)")
+        stmt = DBInterface.prepare(conn, "INSERT INTO $name ($(join(sch.names .|> string .|> quoteid,", "))) VALUES ($params)")
         for (i, row) in enumerate(rows)
             i > limit && break
             debug && @info "inserting row $i; $(Tables.Row(row))"
