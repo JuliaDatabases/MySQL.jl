@@ -169,7 +169,10 @@ ct225 = (
 )
 MySQL.load(ct225, conn, "test225"; coltypes=Dict(:data => "LONGBLOB"), debug=true)
 col_info = DBInterface.execute(conn, "SHOW COLUMNS FROM test225 WHERE Field = 'data'") |> columntable
-@test lowercase(col_info.Type[1]) == "longblob"
+# Type column may be returned as Vector{UInt8} or String depending on MySQL version
+col_type = col_info.Type[1]
+col_type_str = col_type isa Vector{UInt8} ? String(col_type) : col_type
+@test lowercase(col_type_str) == "longblob"
 # Also verify data roundtrips correctly
 ct225_roundtrip = DBInterface.execute(conn, "SELECT * FROM test225") |> columntable
 @test ct225_roundtrip.data == ct225.data
