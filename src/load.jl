@@ -35,7 +35,7 @@ const SQLTYPES = Dict{Type, String}(
 
 checkdupnames(names) = length(unique(map(x->lowercase(String(x)), names))) == length(names) || error("duplicate case-insensitive column names detected; sqlite doesn't allow duplicate column names and treats them case insensitive")
 
-function createtable(conn::Connection, nm::AbstractString, sch::Tables.Schema; debug::Bool=false, quoteidentifiers::Bool=true, createtableclause::AbstractString="CREATE TABLE", coltypes=Dict(), columnsuffix=Dict(), auto_increment_primary_key_name::Union{Nothing,AbstractString}=nothing
+function createtable(conn::Connection, nm::AbstractString, sch::Tables.Schema; debug::Bool=false, quoteidentifiers::Bool=true, createtableclause::AbstractString="CREATE TABLE", coltypes=Dict(), columnsuffix=Dict(), auto_increment_primary_key_name::Union{Nothing,AbstractString}=nothing)
     names = sch.names
     checkdupnames(names)
     types = [sqltype(T, coltypes, names[i]) for (i, T) in enumerate(sch.types)]
