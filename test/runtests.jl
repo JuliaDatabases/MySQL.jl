@@ -161,6 +161,19 @@ ct0 = (x = UInt8[1, 22, 23],)
 MySQL.load(ct0,conn, debug=true)
 #there is no @test invocation here; but the above call failed due to Random not being imported
 
+# https://github.com/JuliaDatabases/MySQL.jl/issues/225
+# Test that coltypes parameter allows overriding default SQL types (e.g., BLOB -> LONGBLOB)
+ct225 = (
+    id = Int32[1, 2],
+    data = [UInt8[1, 2, 3], UInt8[4, 5, 6]],
+)
+MySQL.load(ct225, conn, "test225"; coltypes=Dict(:data => "LONGBLOB"), debug=true)
+col_info = DBInterface.execute(conn, "SHOW COLUMNS FROM test225 WHERE Field = 'data'") |> columntable
+@test lowercase(col_info.Type[1]) == "longblob"
+# Also verify data roundtrips correctly
+ct225_roundtrip = DBInterface.execute(conn, "SELECT * FROM test225") |> columntable
+@test ct225_roundtrip.data == ct225.data
+
 # now test insert/parameter binding
 DBInterface.execute(conn, "DELETE FROM Employee")
 for i = 1:length(expected)
