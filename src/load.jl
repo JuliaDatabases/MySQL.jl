@@ -87,8 +87,10 @@ function load(itr, conn::Connection, name::AbstractString="mysql_"*Random.randst
     if quoteidentifiers
         name = quoteid(name)
     end
+    # Use IF NOT EXISTS when appending to avoid warnings on subsequent loads
+    createclause = append ? "CREATE TABLE IF NOT EXISTS" : "CREATE TABLE"
     try
-        createtable(conn, name, sch; quoteidentifiers=quoteidentifiers, debug=debug, kw...)
+        createtable(conn, name, sch; quoteidentifiers=quoteidentifiers, debug=debug, createtableclause=createclause, kw...)
     catch e
         @warn "error creating table" (e, catch_backtrace())
     end
