@@ -55,12 +55,13 @@ function clear!(conn, result::API.MYSQL_RES)
     if conn.mysql.ptr != C_NULL && result.ptr != C_NULL
         while true
             if API.fetchrow(conn.mysql, result) == C_NULL
-                nxt = API.nextresult(conn.mysql)
-                if nxt === nothing
+                if API.moreresults(conn.mysql)
+                    finalize(result)
+                    @assert API.nextresult(conn.mysql) !== nothing
+                    result = API.useresult(conn.mysql)
+                else
                     break
                 end
-                finalize(result)
-                result = API.useresult(conn.mysql)
             end
         end
         finalize(result)
