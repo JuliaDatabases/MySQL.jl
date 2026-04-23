@@ -204,19 +204,18 @@ function Base.iterate(cursor::TextCursors{buffered}, first=true) where {buffered
     cursor.cursor.result.ptr == C_NULL && return nothing
     if !first
         finalize(cursor.cursor.result)
-        if API.moreresults(cursor.cursor.conn.mysql)
-            @assert API.nextresult(cursor.cursor.conn.mysql) !== nothing
-            cursor.cursor.result = buffered ? API.storeresult(cursor.cursor.conn.mysql) : API.useresult(cursor.cursor.conn.mysql)
-            if buffered
-                cursor.cursor.nrows = API.numrows(cursor.cursor.result)
-            end
-            cursor.cursor.nfields = API.numfields(cursor.cursor.result)
-            fields = API.fetchfields(cursor.cursor.result, cursor.cursor.nfields)
-            cursor.cursor.names = [ccall(:jl_symbol_n, Ref{Symbol}, (Cstring, Csize_t), x.name, x.name_length) for x in fields]
-            cursor.cursor.types = [juliatype(x.field_type, API.notnullable(x), API.isunsigned(x), API.isbinary(x), cursor.cursor.mysql_date_and_time) for x in fields]
-        else
+        nxt = API.nextresult(cursor.cursor.conn.mysql)
+        if nxt === nothing
             return nothing
         end
+        cursor.cursor.result = buffered ? API.storeresult(cursor.cursor.conn.mysql) : API.useresult(cursor.cursor.conn.mysql)
+        if buffered
+            cursor.cursor.nrows = API.numrows(cursor.cursor.result)
+        end
+        cursor.cursor.nfields = API.numfields(cursor.cursor.result)
+        fields = API.fetchfields(cursor.cursor.result, cursor.cursor.nfields)
+        cursor.cursor.names = [ccall(:jl_symbol_n, Ref{Symbol}, (Cstring, Csize_t), x.name, x.name_length) for x in fields]
+        cursor.cursor.types = [juliatype(x.field_type, API.notnullable(x), API.isunsigned(x), API.isbinary(x), cursor.cursor.mysql_date_and_time) for x in fields]
     end
     return cursor.cursor, false
 end

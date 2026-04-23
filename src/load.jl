@@ -101,10 +101,14 @@ function load(itr, conn::Connection, name::AbstractString="mysql_"*Random.randst
     DBInterface.transaction(conn) do
         params = chop(repeat("?,", length(sch.names)))
         stmt = DBInterface.prepare(conn, "INSERT INTO $name ($(join(sch.names .|> string .|> quoteid,", "))) VALUES ($params)")
-        for (i, row) in enumerate(rows)
-            i > limit && break
-            debug && @info "inserting row $i; $(Tables.Row(row))"
-            DBInterface.execute(stmt, Tables.Row(row))
+        try
+            for (i, row) in enumerate(rows)
+                i > limit && break
+                debug && @info "inserting row $i; $(Tables.Row(row))"
+                DBInterface.execute(stmt, Tables.Row(row))
+            end
+        finally
+            DBInterface.close!(stmt)
         end
     end
 

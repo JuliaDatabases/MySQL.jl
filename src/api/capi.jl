@@ -431,13 +431,21 @@ Zero for success. Nonzero if an error occurred; this occurs for option values th
 """=#
 function getoption(mysql::MYSQL, option::mysql_option)
     if option in CUINTOPTS
-        return @checksuccess mysql mysql_get_option_Cuint(mysql.ptr, option, Ref{Cuint}())
+        ref = Ref{Cuint}()
+        @checksuccess mysql mysql_get_option_Cuint(mysql.ptr, Int(option), ref)
+        return ref[]
     elseif option in CULONGOPTS
-        return @checksuccess mysql mysql_get_option_Culong(mysql.ptr, option, Ref{Culong}())
+        ref = Ref{Culong}()
+        @checksuccess mysql mysql_get_option_Culong(mysql.ptr, Int(option), ref)
+        return ref[]
     elseif option in BOOLOPTS
-        return @checksuccess mysql mysql_get_option_Bool(mysql.ptr, option, Ref{Bool}())
+        ref = Ref{Bool}()
+        @checksuccess mysql mysql_get_option_Bool(mysql.ptr, Int(option), ref)
+        return ref[]
     else
-        return @checksuccess mysql mysql_get_option_String(mysql.ptr, option, Ref{String}())
+        ref = Ref{String}()
+        @checksuccess mysql mysql_get_option_String(mysql.ptr, Int(option), ref)
+        return ref[]
     end
 end
 

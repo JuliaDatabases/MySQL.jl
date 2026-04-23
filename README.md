@@ -18,10 +18,8 @@ Package for interfacing with MySQL databases from Julia via the MariaDB C connec
 
 ## Contributing
 
-The tests require a MySQL DB to be running, which is provided by Docker:
+The test suite manages its own temporary MySQL container via Harbor.jl. The only prerequisite is a working Docker daemon:
 
 ```sh
-docker compose up -d
 julia --project -e 'using Pkg; Pkg.test()'
-docker compose down
 ```
