@@ -236,6 +236,13 @@ function mysql_get_option_Bool(mysql::Ptr{Cvoid}, option::Integer, arg::Ref{Bool
                 mysql, option, arg)
 end
 
+function mysql_get_option_String(mysql::Ptr{Cvoid}, option::Integer, arg::Ref{Ptr{UInt8}})
+    return @c(:mysql_get_option,
+                Cint,
+                (Ptr{Cvoid}, Cint, Ref{Ptr{UInt8}}),
+                mysql, option, arg)
+end
+
 function mysql_get_option_Cvoid(mysql::Ptr{Cvoid}, option::Integer, arg::Ptr{Cvoid})
     return @c(:mysql_get_option,
                 Cint,

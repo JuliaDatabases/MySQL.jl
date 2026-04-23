@@ -1,18 +1,142 @@
-using Test, MySQL, DBInterface, Tables, Dates, DecFP
+using Test, MySQL, DBInterface, Tables, Dates, DecFP, Harbor, Sockets
 
-conn = DBInterface.connect(MySQL.Connection, "127.0.0.1", "root", ""; port=3306)
+const MYSQL_IMAGE_REF = get(ENV, "MYSQL_IMAGE", "mysql:8")
+const MYSQL_TEST_USER = "root"
+const MYSQL_TEST_PASSWORD = ""
+
+struct MySQLTestConfig
+    host::String
+    port::Int
+    user::String
+    password::String
+end
+
+const TEST_CONFIG = Ref{Union{Nothing, MySQLTestConfig}}(nothing)
+const TEST_OPTION_FILE = Ref{Union{Nothing, String}}(nothing)
+
+function parse_image_ref(ref::String)
+    slash = findlast('/', ref)
+    colon = findlast(':', ref)
+    if colon !== nothing && (slash === nothing || colon > slash)
+        return String(ref[begin:prevind(ref, colon)]), String(ref[nextind(ref, colon):end])
+    end
+    return ref, "latest"
+end
+
+function docker_available()
+    Sys.which("docker") === nothing && return false
+    try
+        run(pipeline(`docker info`, stdout=devnull, stderr=devnull))
+        return true
+    catch
+        return false
+    end
+end
+
+function pick_port()
+    server = Sockets.listen(Sockets.IPv4(0), 0)
+    _, port = Sockets.getsockname(server)
+    port = Int(port)
+    close(server)
+    return port
+end
+
+test_config() = something(TEST_CONFIG[])
+test_host() = test_config().host
+test_port() = test_config().port
+test_user() = test_config().user
+test_password() = test_config().password
+test_option_file() = something(TEST_OPTION_FILE[])
+
+connect_mysql(; kw...) = DBInterface.connect(MySQL.Connection, test_host(), test_user(), test_password(); port=test_port(), kw...)
+
+function wait_for_connection(cfg::MySQLTestConfig; timeout::Float64=90.0)
+    start_time = time()
+    last_err = nothing
+    while time() - start_time < timeout
+        try
+            return DBInterface.connect(MySQL.Connection, cfg.host, cfg.user, cfg.password; port=cfg.port, connect_timeout=2)
+        catch err
+            last_err = err
+            sleep(0.5)
+        end
+    end
+    last_err === nothing && error("MySQL did not become ready")
+    error("MySQL did not become ready: $(sprint(showerror, last_err))")
+end
+
+function write_option_file(dir::AbstractString, cfg::MySQLTestConfig)
+    path = joinpath(dir, "my.ini")
+    open(path, "w") do io
+        print(io, """
+[client]
+host=$(cfg.host)
+user=$(cfg.user)
+port=$(cfg.port)
+connect_timeout=30
+report-data-truncation=true
+password = $(repr(cfg.password))
+""")
+    end
+    return path
+end
+
+function with_mysql(f::Function)
+    image, tag = parse_image_ref(MYSQL_IMAGE_REF)
+    host_port = pick_port()
+    env = Dict("MYSQL_ALLOW_EMPTY_PASSWORD" => "yes")
+    return Harbor.with_container(
+        image;
+        tag=tag,
+        ports=Dict(3306 => host_port),
+        environment=env,
+        wait_strategy=(pattern="ready for connections",),
+        wait_timeout=120.0,
+    ) do _
+        cfg = MySQLTestConfig("127.0.0.1", host_port, MYSQL_TEST_USER, MYSQL_TEST_PASSWORD)
+        conn = wait_for_connection(cfg)
+        DBInterface.close!(conn)
+        return f(cfg)
+    end
+end
+
+@testset "MySQL" begin
+
+let mysql = MySQL.API.init()
+    MySQL.setoptions!(mysql)
+    @test MySQL.API.getoption(mysql, MySQL.API.MYSQL_OPT_SSL_VERIFY_SERVER_CERT) == false
+    MySQL.setoptions!(mysql; ssl_verify_server_cert=true)
+    @test MySQL.API.getoption(mysql, MySQL.API.MYSQL_OPT_SSL_VERIFY_SERVER_CERT) == true
+    MySQL.setoptions!(mysql; connect_timeout=7)
+    @test Int(MySQL.API.getoption(mysql, MySQL.API.MYSQL_OPT_CONNECT_TIMEOUT)) == 7
+    MySQL.setoptions!(mysql; max_allowed_packet=1024)
+    @test Int(MySQL.API.getoption(mysql, MySQL.API.MYSQL_OPT_MAX_ALLOWED_PACKET)) == 1024
+    MySQL.setoptions!(mysql; bind="127.0.0.1")
+    @test MySQL.API.getoption(mysql, MySQL.API.MYSQL_OPT_BIND) == "127.0.0.1"
+end
+
+if !docker_available()
+    @info "Docker not available; skipping MySQL integration tests."
+    @test true
+else
+    with_mysql() do cfg
+        TEST_CONFIG[] = cfg
+        mktempdir() do dir
+            TEST_OPTION_FILE[] = write_option_file(dir, cfg)
+
+conn = connect_mysql()
 DBInterface.close!(conn)
 
 # https://github.com/JuliaDatabases/MySQL.jl/issues/170
-conn = DBInterface.connect(MySQL.Connection, "mysql://127.0.0.1", "root"; port=3306)
+conn = DBInterface.connect(MySQL.Connection, string("mysql://", test_host()), test_user(); port=test_port())
 DBInterface.close!(conn)
 
 # AbstractString as a connection parameter or an option
-conn = DBInterface.connect(MySQL.Connection, SubString("127.0.0.1"), SubString("root"), SubString(""); port=3306, charset_name=SubString("utf8mb4"))
+conn = DBInterface.connect(MySQL.Connection, SubString(test_host()), SubString(test_user()), SubString(test_password()); port=test_port(), charset_name=SubString("utf8mb4"))
 DBInterface.close!(conn)
 
 # load host/user + options from file
-conn = DBInterface.connect(MySQL.Connection, "", ""; option_file=joinpath(dirname(pathof(MySQL)), "../test/", "my.ini"))
+conn = DBInterface.connect(MySQL.Connection, "", ""; port=0, option_file=test_option_file())
 @test isopen(conn)
 
 DBInterface.execute(conn, "DROP DATABASE if exists mysqltest")
@@ -310,7 +434,8 @@ res = DBInterface.execute(stmt) |> columntable
 res = DBInterface.execute(stmt)
 res = DBInterface.execute(stmt)
 
-results = DBInterface.executemultiple(conn, "select * from Employee; select DeptNo, OfficeNo from Employee where OfficeNo IS NOT NULL")
+multi_conn = connect_mysql(db="mysqltest")
+results = DBInterface.executemultiple(multi_conn, "select * from Employee; select DeptNo, OfficeNo from Employee where OfficeNo IS NOT NULL")
 state = iterate(results)
 @test state !== nothing
 res, st = state
@@ -325,6 +450,7 @@ res, st = state
 @test length(res) == 4
 ret = columntable(res)
 @test length(ret[1]) == 4
+DBInterface.close!(multi_conn)
 
 # multiple-queries not supported by mysql w/ prepared statements
 @test_throws MySQL.API.StmtError DBInterface.prepare(conn, "select * from Employee; select DeptNo, OfficeNo from Employee where OfficeNo IS NOT NULL")
@@ -372,7 +498,7 @@ ret = columntable(res)
 @test_throws ArgumentError MySQL.load(ct, conn, "test194")
 
 @testset "transactions" begin
-    conn = DBInterface.connect(MySQL.Connection, "127.0.0.1", "root", ""; port=3306)
+    conn = connect_mysql()
     try
         DBInterface.execute(conn, "DROP DATABASE if exists mysqltest")
         DBInterface.execute(conn, "CREATE DATABASE mysqltest")
@@ -380,7 +506,7 @@ ret = columntable(res)
         DBInterface.execute(conn, "DROP TABLE IF EXISTS TransactionTest")
         DBInterface.execute(conn, "CREATE TABLE TransactionTest (a int)")
 
-        conn2 = DBInterface.connect(MySQL.Connection, "127.0.0.1", "root", ""; port=3306)
+        conn2 = connect_mysql()
         DBInterface.execute(conn2, "use mysqltest")
 
         try
@@ -414,4 +540,8 @@ ret = columntable(res)
     finally
         DBInterface.close!(conn)
     end
+end
+        end
+    end
+end
 end

@@ -128,7 +128,7 @@ function setoptions!(mysql;
         ssl_crl::Union{AbstractString, Nothing}=nothing,
         ssl_crlpath::Union{AbstractString, Nothing}=nothing,
         passphrase::Union{AbstractString, Nothing}=nothing,
-        ssl_verify_server_cert::Union{Bool, Nothing}=nothing,
+        ssl_verify_server_cert::Union{Bool, Nothing}=false,
         ssl_enforce::Union{Bool, Nothing}=nothing,
         ssl_mode::Union{API.mysql_ssl_mode, Nothing}=nothing,
         default_auth::Union{AbstractString, Nothing}=nothing,
@@ -279,7 +279,7 @@ Connect to a MySQL database with provided `host`, `user`, and `passwd` positiona
   * `ssl_cipher::AbstractString`: Defines a list of permitted ciphers or cipher suites to use for TLS, like `"DHE-RSA-AES256-SHA"`
   * `ssl_crl::AbstractString`: Defines a path to a PEM file that should contain one or more revoked X509 certificates to use for TLS. This option requires that you use the absolute path, not a relative path.
   * `ssl_crlpath::AbstractString`: Defines a path to a directory that contains one or more PEM files that should each contain one revoked X509 certificate to use for TLS. This option requires that you use the absolute path, not a relative path. The directory specified by this option needs to be run through the openssl rehash command.
-  * `ssl_verify_server_cert::Bool`: Enables (or disables) server certificate verification.
+  * `ssl_verify_server_cert::Bool=false`: Enables (or disables) server certificate verification.
   * `ssl_enforce::Bool`: Whether to force TLS
   * `default_auth::AbstractString`: Default authentication client-side plugin to use.
   * `connection_handler::AbstractString`: Specify the name of a connection handler plugin.
