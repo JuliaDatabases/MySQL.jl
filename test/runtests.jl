@@ -108,6 +108,12 @@ let mysql = MySQL.API.init()
     @test MySQL.API.getoption(mysql, MySQL.API.MYSQL_OPT_SSL_VERIFY_SERVER_CERT) == false
     MySQL.setoptions!(mysql; ssl_verify_server_cert=true)
     @test MySQL.API.getoption(mysql, MySQL.API.MYSQL_OPT_SSL_VERIFY_SERVER_CERT) == true
+    MySQL.setoptions!(mysql; connect_timeout=7)
+    @test Int(MySQL.API.getoption(mysql, MySQL.API.MYSQL_OPT_CONNECT_TIMEOUT)) == 7
+    MySQL.setoptions!(mysql; max_allowed_packet=1024)
+    @test Int(MySQL.API.getoption(mysql, MySQL.API.MYSQL_OPT_MAX_ALLOWED_PACKET)) == 1024
+    MySQL.setoptions!(mysql; bind="127.0.0.1")
+    @test MySQL.API.getoption(mysql, MySQL.API.MYSQL_OPT_BIND) == "127.0.0.1"
 end
 
 if !docker_available()

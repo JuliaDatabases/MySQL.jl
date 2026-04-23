@@ -443,9 +443,9 @@ function getoption(mysql::MYSQL, option::mysql_option)
         @checksuccess mysql mysql_get_option_Bool(mysql.ptr, Int(option), ref)
         return ref[]
     else
-        ref = Ref{String}()
+        ref = Ref{Ptr{UInt8}}(C_NULL)
         @checksuccess mysql mysql_get_option_String(mysql.ptr, Int(option), ref)
-        return ref[]
+        return ref[] == C_NULL ? nothing : unsafe_string(ref[])
     end
 end
 
