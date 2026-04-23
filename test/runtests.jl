@@ -90,8 +90,7 @@ function with_mysql(f::Function)
         tag=tag,
         ports=Dict(3306 => host_port),
         environment=env,
-        # Harbor's port wait is enough here because we also poll for a real client connection below.
-        wait_strategy=(port=3306,),
+        wait_strategy=(pattern="ready for connections",),
         wait_timeout=120.0,
     ) do _
         cfg = MySQLTestConfig("127.0.0.1", host_port, MYSQL_TEST_USER, MYSQL_TEST_PASSWORD)
