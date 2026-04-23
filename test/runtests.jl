@@ -429,7 +429,8 @@ res = DBInterface.execute(stmt) |> columntable
 res = DBInterface.execute(stmt)
 res = DBInterface.execute(stmt)
 
-results = DBInterface.executemultiple(conn, "select * from Employee; select DeptNo, OfficeNo from Employee where OfficeNo IS NOT NULL")
+multi_conn = connect_mysql(db="mysqltest")
+results = DBInterface.executemultiple(multi_conn, "select * from Employee; select DeptNo, OfficeNo from Employee where OfficeNo IS NOT NULL")
 state = iterate(results)
 @test state !== nothing
 res, st = state
@@ -444,6 +445,7 @@ res, st = state
 @test length(res) == 4
 ret = columntable(res)
 @test length(ret[1]) == 4
+DBInterface.close!(multi_conn)
 
 # multiple-queries not supported by mysql w/ prepared statements
 @test_throws MySQL.API.StmtError DBInterface.prepare(conn, "select * from Employee; select DeptNo, OfficeNo from Employee where OfficeNo IS NOT NULL")
