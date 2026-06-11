@@ -11,7 +11,7 @@ on:
 
 jobs:
   issue236:
-    name: Windows ${{ matrix.os }} / JLL ${{ matrix.jll-version }}
+    name: Windows ${{ matrix.os }} / ${{ matrix.connector }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     strategy:
@@ -20,9 +20,10 @@ jobs:
         os:
           - windows-2022
           - windows-2025
-        jll-version:
-          - default
-          - 3.3.9
+        connector:
+          - jll-default
+          - jll-3.3.9
+          - official-3.4.9
 
     steps:
       - uses: actions/checkout@v5
@@ -39,6 +40,33 @@ jobs:
           mysql-version: "8.4"
           root-password: root
 
+      - name: Download official Connector/C
+        if: matrix.connector == 'official-3.4.9'
+        shell: pwsh
+        run: |
+          $msi = Join-Path $env:RUNNER_TEMP "mariadb-connector-c-3.4.9-win64.msi"
+          $target = Join-Path $env:RUNNER_TEMP "mariadb-connector-c-3.4.9"
+          Invoke-WebRequest `
+            -Uri "https://dlm.mariadb.com/4751028/Connectors/c/connector-c-3.4.9/mariadb-connector-c-3.4.9-win64.msi" `
+            -OutFile $msi
+          Start-Process msiexec.exe -Wait -ArgumentList @("/a", $msi, "/qn", "TARGETDIR=$target")
+
+          $dll = Get-ChildItem $target -Recurse -Filter libmariadb.dll | Select-Object -First 1
+          if ($null -eq $dll) {
+            throw "Could not find libmariadb.dll under $target"
+          }
+
+          $plugin = Get-ChildItem $target -Recurse -Directory |
+            Where-Object { Test-Path (Join-Path $_.FullName "caching_sha2_password.dll") } |
+            Select-Object -First 1
+          if ($null -eq $plugin) {
+            throw "Could not find Connector/C plugin directory under $target"
+          }
+
+          "MYSQLJL_LIBMARIADB_OVERRIDE=$($dll.FullName)" >> $env:GITHUB_ENV
+          "MYSQLJL_PLUGIN_DIR_OVERRIDE=$($plugin.FullName)" >> $env:GITHUB_ENV
+          "$($dll.DirectoryName)" >> $env:GITHUB_PATH
+
       - name: Run issue 236 diagnostic
         shell: pwsh
         env:
@@ -46,5 +74,6 @@ jobs:
           MYSQLJL_PORT: "3306"
           MYSQLJL_USER: root
           MYSQLJL_PASSWORD: root
-          MYSQLJL_JLL_VERSION: ${{ matrix.jll-version }}
+          MYSQLJL_CONNECTOR: ${{ matrix.connector }}
+          MYSQLJL_JLL_VERSION: ${{ matrix.connector == 'jll-3.3.9' && '3.3.9' || 'default' }}
         run: julia --startup-file=no test/issue236_windows.jl

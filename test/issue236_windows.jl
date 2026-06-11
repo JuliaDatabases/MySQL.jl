@@ -143,8 +143,11 @@ function main()
     logline("JULIA_VERSION ", VERSION)
     logline("OS ", Sys.KERNEL, " MACHINE ", Sys.MACHINE)
     logline("WORD_SIZE ", Sys.WORD_SIZE)
-    logline("LIBMARIADB ", MariaDB_Connector_C_jll.libmariadb)
-    logline("LIBMARIADB_HANDLE ", Libdl.dlopen_e(MariaDB_Connector_C_jll.libmariadb))
+    logline("CONNECTOR ", get(ENV, "MYSQLJL_CONNECTOR", "unknown"))
+    logline("JLL_LIBMARIADB ", MariaDB_Connector_C_jll.libmariadb)
+    logline("CCALL_LIBMARIADB ", MySQL.API.libmariadb_for_ccall)
+    logline("PLUGIN_DIR ", MySQL.API.PLUGIN_DIR)
+    logline("LIBMARIADB_HANDLE ", Libdl.dlopen_e(MySQL.API.libmariadb_for_ccall))
 
     conn = prepare_database()
     try
