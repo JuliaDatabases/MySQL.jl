@@ -1,0 +1,54 @@
+name: Issue 236 Windows diagnostics
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/issue236-windows.yml"
+      - "test/issue236_windows.jl"
+      - "src/**"
+      - "Project.toml"
+  workflow_dispatch:
+
+jobs:
+  issue236:
+    name: Windows ${{ matrix.os }} / JLL ${{ matrix.jll-version }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - windows-2022
+          - windows-2025
+        jll-version:
+          - default
+          - 3.3.9
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: "1"
+          arch: x64
+
+      - name: Start MySQL
+        id: setup-mysql
+        uses: shogo82148/actions-setup-mysql@v1.51.0
+        with:
+          mysql-version: "8.4"
+          root-password: root
+
+      - name: Check MySQL server
+        shell: pwsh
+        run: mysql -h127.0.0.1 -P3306 -uroot -proot -e "SELECT VERSION();"
+
+      - name: Run issue 236 diagnostic
+        shell: pwsh
+        env:
+          MYSQLJL_HOST: 127.0.0.1
+          MYSQLJL_PORT: "3306"
+          MYSQLJL_USER: root
+          MYSQLJL_PASSWORD: root
+          MYSQLJL_JLL_VERSION: ${{ matrix.jll-version }}
+        run: julia --startup-file=no test/issue236_windows.jl
