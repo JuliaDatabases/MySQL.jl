@@ -39,10 +39,6 @@ jobs:
           mysql-version: "8.4"
           root-password: root
 
-      - name: Check MySQL server
-        shell: pwsh
-        run: mysql -h127.0.0.1 -P3306 -uroot -proot -e "SELECT VERSION();"
-
       - name: Run issue 236 diagnostic
         shell: pwsh
         env:

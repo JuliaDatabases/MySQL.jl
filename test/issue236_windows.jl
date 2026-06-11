@@ -51,6 +51,21 @@ function connect_root(; db=nothing)
     end
 end
 
+function wait_for_connection(; db=nothing, timeout=30.0)
+    start = time()
+    last_err = nothing
+    while time() - start < timeout
+        try
+            return connect_root(; db=db)
+        catch err
+            last_err = err
+            logline("WAIT_CONNECTION db=", db, " error=", sprint(showerror, err))
+            sleep(1)
+        end
+    end
+    error("MySQL did not become ready: ", sprint(showerror, last_err))
+end
+
 function placeholders(n::Integer)
     return join(fill("?", n), ",")
 end
@@ -99,7 +114,7 @@ function run_case(conn, name::String, shape::Symbol, params; mysql_store_result:
 end
 
 function prepare_database()
-    conn = connect_root()
+    conn = wait_for_connection()
     try
         version = DBInterface.execute(conn, "SELECT VERSION() AS version") |> Tables.columntable
         logline("SERVER_VERSION ", only(version.version))
@@ -110,7 +125,7 @@ function prepare_database()
         DBInterface.close!(conn)
     end
 
-    conn = connect_root(db="issue236")
+    conn = wait_for_connection(db="issue236")
     DBInterface.execute(conn, "CREATE TABLE myTable (id BIGINT UNSIGNED NOT NULL PRIMARY KEY)")
 
     stmt = DBInterface.prepare(conn, "INSERT INTO myTable (id) VALUES (?)")
