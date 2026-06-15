@@ -38,6 +38,7 @@ jobs:
         run: |
           set -euo pipefail
           cd Yggdrasil/M/MariaDB_Connector_C
+          julia --project=../.. --startup-file=no -e 'using Pkg; Pkg.instantiate()'
           julia --project=../.. --startup-file=no build_tarballs.jl --verbose x86_64-w64-mingw32
           mkdir -p "$GITHUB_WORKSPACE/variant"
           cp products/MariaDB_Connector_C.v*.x86_64-w64-mingw32.tar.gz "$GITHUB_WORKSPACE/variant/"
