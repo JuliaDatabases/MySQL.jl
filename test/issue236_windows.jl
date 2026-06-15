@@ -38,6 +38,15 @@ function logline(xs...)
     return nothing
 end
 
+function log_mysql_bind_layout()
+    names = fieldnames(MySQL.API.MYSQL_BIND)
+    logline("MYSQL_BIND_SIZE ", sizeof(MySQL.API.MYSQL_BIND))
+    for (i, name) in pairs(names)
+        logline("MYSQL_BIND_FIELD ", name, " offset=", fieldoffset(MySQL.API.MYSQL_BIND, i))
+    end
+    return nothing
+end
+
 function connect_root(; db=nothing)
     host = get(ENV, "MYSQLJL_HOST", "127.0.0.1")
     port = parse(Int, get(ENV, "MYSQLJL_PORT", "3306"))
@@ -148,6 +157,7 @@ function main()
     logline("CCALL_LIBMARIADB ", MySQL.API.libmariadb_for_ccall)
     logline("PLUGIN_DIR ", MySQL.API.PLUGIN_DIR)
     logline("LIBMARIADB_HANDLE ", Libdl.dlopen_e(MySQL.API.libmariadb_for_ccall))
+    log_mysql_bind_layout()
 
     conn = prepare_database()
     try
