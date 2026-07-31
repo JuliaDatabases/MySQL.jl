@@ -317,6 +317,8 @@ function bind!(helper, binds, i, x::Missing)
     return
 end
 
+bind!(helper, binds, i, ::Nothing) = bind!(helper, binds, i, missing)
+
 function bind!(helper, binds, i, x::Real)
     if !helper.typeset
         inithelper!(helper, x)

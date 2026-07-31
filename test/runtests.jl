@@ -329,6 +329,15 @@ end
 DBInterface.execute(stmt, [missing, missing, missing, missing, missing, missing, missing, missing, missing, DateTime("2015-09-05T12:31:30"), missing, missing, missing, missing, missing])
 DBInterface.close!(stmt)
 
+DBInterface.execute(conn, "CREATE TABLE NullBindingTest (value INT NULL)")
+stmt = DBInterface.prepare(conn, "INSERT INTO NullBindingTest (value) VALUES (?)")
+DBInterface.execute(stmt, (nothing,))
+DBInterface.execute(stmt, (1,))
+DBInterface.execute(stmt, (missing,))
+DBInterface.close!(stmt)
+res = DBInterface.execute(conn, "SELECT value FROM NullBindingTest") |> columntable
+@test isequal(res.value, [missing, 1, missing])
+
 stmt = DBInterface.prepare(conn, "select * from Employee")
 res = DBInterface.execute(stmt) |> columntable
 DBInterface.close!(stmt)
@@ -511,7 +520,7 @@ ret = columntable(res)
 
         try
             # happy path
-            DBInterface.transaction(conn) do
+            result = DBInterface.transaction(conn) do
                 DBInterface.execute(conn, "INSERT INTO TransactionTest (a) VALUES (1)")
 
                 # we can see the result inside our transaction
@@ -521,7 +530,9 @@ ret = columntable(res)
                 # and can't see it outside our transaction
                 result = DBInterface.execute(conn2, "SELECT * FROM TransactionTest") |> Tables.columntable
                 @test isempty(result.a)
+                return 42
             end
+            @test result == 42
             result = DBInterface.execute(conn, "SELECT * FROM TransactionTest") |> Tables.columntable
             @test result.a == [1]
             result = DBInterface.execute(conn2, "SELECT * FROM TransactionTest") |> Tables.columntable
