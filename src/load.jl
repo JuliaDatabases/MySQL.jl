@@ -118,8 +118,9 @@ end
 function DBInterface.transaction(f::Function, conn::Connection)
     DBInterface.execute(conn, "START TRANSACTION")
     try
-        f()
+        result = f()
         API.commit(conn.mysql)
+        return result
     catch
         API.rollback(conn.mysql)
         rethrow()
