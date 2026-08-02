@@ -146,10 +146,11 @@ Close a cursor. No more results will be available.
 DBInterface.close!(c::TextCursor) = clear!(c.conn)
 
 """
-    DBInterface.execute(conn::MySQL.Connection, sql) => MySQL.TextCursor
+    DBInterface.execute(conn::MySQL.Connection, sql, [params]) => DBInterface.Cursor
 
-Execute the SQL `sql` statement with the database connection `conn`. Parameter binding is
-only supported via prepared statements, see `?DBInterface.prepare(conn, sql)`.
+Execute the SQL `sql` statement with the database connection `conn`, optionally passing
+`params` to bind to parameter markers. Queries with parameters are prepared for this
+execution. Use `DBInterface.prepare` directly to reuse a statement across executions.
 Returns a `Cursor` object, which iterates resultset rows and satisfies the `Tables.jl` interface, meaning
 results can be sent to any valid sink function (`DataFrame(cursor)`, `CSV.write("results.csv", cursor)`, etc.).
 Specifying `mysql_store_result=false` will avoid buffering the full resultset to the client after executing
@@ -158,7 +159,7 @@ fetched one at a time.
 """
 function DBInterface.execute(conn::Connection, sql::AbstractString, params=(); mysql_store_result::Bool=true, mysql_date_and_time::Bool=false)
     checkconn(conn)
-    params != () && error("`DBInterface.execute(conn, sql)` does not support parameter binding; see `?DBInterface.prepare(conn, sql)`")
+    params != () && return executeparams(conn, sql, params; mysql_store_result, mysql_date_and_time)
     clear!(conn)
     API.query(conn.mysql, sql)
 

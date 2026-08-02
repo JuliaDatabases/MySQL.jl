@@ -344,6 +344,26 @@ DBInterface.close!(stmt)
 res = DBInterface.execute(conn, "SELECT value FROM NullBindingTest") |> columntable
 @test isequal(res.value, [missing, 1, missing])
 
+@testset "connection-level parameter binding (#238)" begin
+    DBInterface.execute(conn, "CREATE TABLE DirectExecuteTest (id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(32), value INT NULL)")
+    cursor = DBInterface.execute(conn, "INSERT INTO DirectExecuteTest (name, value) VALUES (?, ?)", ("first", nothing))
+    @test cursor isa MySQL.Cursor
+    @test DBInterface.lastrowid(cursor) == 1
+    @test DBInterface.close!(cursor) === nothing
+
+    DBInterface.execute(conn, "INSERT INTO DirectExecuteTest (name, value) VALUES (?, ?)", ("second", 2))
+    cursor = DBInterface.execute(conn, "SELECT name, value FROM DirectExecuteTest WHERE id >= ? ORDER BY id", (1,))
+    GC.gc()
+    result = Tables.columntable(cursor)
+    @test result.name == ["first", "second"]
+    @test isequal(result.value, [missing, 2])
+
+    cursor = DBInterface.execute(conn, "SELECT name FROM DirectExecuteTest WHERE id >= ? ORDER BY id", (1,); mysql_store_result=false)
+    @test first(cursor).name == "first"
+    @test DBInterface.close!(cursor) === nothing
+    @test Tables.columntable(DBInterface.execute(conn, "SELECT COUNT(*) AS count FROM DirectExecuteTest")).count == [2]
+end
+
 stmt = DBInterface.prepare(conn, "select * from Employee")
 res = DBInterface.execute(stmt) |> columntable
 DBInterface.close!(stmt)
@@ -420,6 +440,8 @@ res = DBInterface.execute(resstmt) |> columntable
 @test res[2][1] == DateAndTime(Date(2021, 1, 2), Time(1, 2, 3, 456, 789))
 res = DBInterface.execute(conn, "select id, t from datetime6_field"; mysql_date_and_time=true) |> columntable
 @test length(res) == 2
+@test res[2][1] == DateAndTime(Date(2021, 1, 2), Time(1, 2, 3, 456, 789))
+res = DBInterface.execute(conn, "select id, t from datetime6_field where id = ?", (1,); mysql_date_and_time=true) |> columntable
 @test res[2][1] == DateAndTime(Date(2021, 1, 2), Time(1, 2, 3, 456, 789))
 
 DBInterface.execute(conn, """
