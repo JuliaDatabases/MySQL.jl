@@ -232,7 +232,7 @@ Return Values
 A pointer to a MYSQL_STMT structure in case of success. NULL if out of memory.
 """
 function stmtinit(mysql::MYSQL)
-    return MYSQL_STMT(@checknull mysql mysql_stmt_init(mysql.ptr))
+    return MYSQL_STMT((@checknull mysql mysql_stmt_init(mysql.ptr)), mysql)
 end
 
 """
@@ -356,7 +356,7 @@ Return Values
 A MYSQL_RES result structure. NULL if no meta information exists for the prepared query.
 """
 function resultmetadata(stmt::MYSQL_STMT)
-    return MYSQL_RES(mysql_stmt_result_metadata(stmt.ptr))
+    return MYSQL_RES(mysql_stmt_result_metadata(stmt.ptr), stmt.conn)
 end
 
 """

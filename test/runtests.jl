@@ -113,6 +113,12 @@ let mysql = MySQL.API.init()
     @test Int(MySQL.API.getoption(mysql, MySQL.API.MYSQL_OPT_MAX_ALLOWED_PACKET)) == 1024
     MySQL.setoptions!(mysql; bind="127.0.0.1")
     @test MySQL.API.getoption(mysql, MySQL.API.MYSQL_OPT_BIND) == "127.0.0.1"
+    # ssl_mode maps onto real Connector/C options (#240): VERIFY_* turns on
+    # server certificate verification even though the kwarg default is false
+    MySQL.setoptions!(mysql; ssl_mode=MySQL.API.SSL_MODE_VERIFY_CA)
+    @test MySQL.API.getoption(mysql, MySQL.API.MYSQL_OPT_SSL_VERIFY_SERVER_CERT) == true
+    # SSL_MODE_DISABLED cannot be honored by libmariadb 3.4+ and must say so
+    @test_logs (:warn, r"SSL_MODE_DISABLED cannot be honored") MySQL.setoptions!(mysql; ssl_mode=MySQL.API.SSL_MODE_DISABLED)
 end
 
 if !docker_available()
@@ -548,6 +554,81 @@ ret = columntable(res)
         finally
             DBInterface.close!(conn2)
         end
+    finally
+        DBInterface.close!(conn)
+    end
+end
+
+# https://github.com/JuliaDatabases/MySQL.jl/issues/220
+# Statement/result finalizers must not talk to the server; abandoned handles are
+# parked on the connection and reaped inside the next user-initiated operation.
+# (a function boundary, so the abandoned wrappers aren't kept alive by stack slots)
+abandon_stmts(conn, n) = (for _ = 1:n; DBInterface.execute(DBInterface.prepare(conn, "SELECT a FROM FinalizerReap")); end; nothing)
+@testset "no I/O in finalizers (#220)" begin
+    conn = connect_mysql()
+    try
+        DBInterface.execute(conn, "CREATE DATABASE IF NOT EXISTS mysqltest")
+        DBInterface.execute(conn, "use mysqltest")
+        DBInterface.execute(conn, "DROP TABLE IF EXISTS FinalizerReap")
+        DBInterface.execute(conn, "CREATE TABLE FinalizerReap (a INT)")
+        DBInterface.execute(conn, "INSERT INTO FinalizerReap VALUES (1)")
+        # abandon a batch of prepared statements to the GC
+        abandon_stmts(conn, 10)
+        GC.gc(); GC.gc()
+        # finalizers may only have parked the handles, never closed them directly
+        # (with the connection still open, closing would mean socket I/O from GC)
+        # and the next operation reaps them
+        result = DBInterface.execute(conn, "SELECT a FROM FinalizerReap") |> Tables.columntable
+        @test result.a == [1]
+        @test isempty(conn.mysql.stmts_to_close)
+        @test isempty(conn.mysql.results_to_free)
+        if Threads.nthreads() > 1
+            # concurrent smoke test: GC-driven statement finalizers must not
+            # corrupt a lock-serialized workload (pre-fix this aborts/errors
+            # within a few seconds when the connection uses TLS)
+            lk = ReentrantLock()
+            done = Threads.Atomic{Bool}(false)
+            err = Ref{Any}(nothing)
+            @sync begin
+                for _ = 1:4
+                    Threads.@spawn try
+                        while !done[]
+                            lock(lk) do
+                                DBInterface.execute(DBInterface.prepare(conn, "SELECT a FROM FinalizerReap"))
+                            end
+                        end
+                    catch e
+                        err[] = e
+                        done[] = true
+                    end
+                end
+                Threads.@spawn while !done[]
+                    GC.gc(false)
+                end
+                Threads.@spawn (sleep(5); done[] = true)
+            end
+            @test err[] === nothing
+        end
+    finally
+        DBInterface.close!(conn)
+    end
+    # closing the connection with parked handles still pending must be safe
+    conn = connect_mysql()
+    DBInterface.execute(conn, "use mysqltest")
+    DBInterface.execute(conn, "CREATE TABLE IF NOT EXISTS FinalizerReap (a INT)")
+    abandon_stmts(conn, 3)
+    GC.gc(); GC.gc()
+    DBInterface.close!(conn)
+    @test !isopen(conn)
+end
+
+# https://github.com/JuliaDatabases/MySQL.jl/issues/240
+@testset "ssl_mode mapping (#240)" begin
+    # SSL_MODE_REQUIRED / VERIFY_* map onto real Connector/C options and connect fine
+    conn = connect_mysql(; ssl_mode=MySQL.API.SSL_MODE_REQUIRED)
+    try
+        cipher = DBInterface.execute(conn, "SHOW STATUS LIKE 'Ssl_cipher'") |> Tables.columntable
+        @test !isempty(cipher.Value[1])   # TLS actually negotiated
     finally
         DBInterface.close!(conn)
     end

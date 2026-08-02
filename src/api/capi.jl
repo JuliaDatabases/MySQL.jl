@@ -1498,7 +1498,7 @@ Return Values
 A pointer to a MYSQL_RES result structure with the results. NULL if the statement did not return a result set or an error occurred. To determine whether an error occurred, check whether mysql_error() returns a nonempty string, mysql_errno() returns nonzero, or mysql_field_count() returns zero.
 """=#
 function storeresult(mysql::MYSQL)
-    return MYSQL_RES(mysql_store_result(mysql.ptr))
+    return MYSQL_RES(mysql_store_result(mysql.ptr), mysql)
 end
 
 """
@@ -1526,5 +1526,5 @@ Return Values
 A MYSQL_RES result structure. NULL if an error occurred.
 """=#
 function useresult(mysql::MYSQL)
-    return MYSQL_RES(mysql_use_result(mysql.ptr))
+    return MYSQL_RES(mysql_use_result(mysql.ptr), mysql)
 end
