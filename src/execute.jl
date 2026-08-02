@@ -204,7 +204,7 @@ function Base.iterate(cursor::TextCursors{buffered}, first=true) where {buffered
     cursor.cursor.result.ptr == C_NULL && return nothing
     if !first
         has_more_results = API.moreresults(cursor.cursor.conn.mysql)
-        finalize(cursor.cursor.result)
+        API.free!(cursor.cursor.result)
         if has_more_results
             @assert API.nextresult(cursor.cursor.conn.mysql) !== nothing
             cursor.cursor.result = buffered ? API.storeresult(cursor.cursor.conn.mysql) : API.useresult(cursor.cursor.conn.mysql)

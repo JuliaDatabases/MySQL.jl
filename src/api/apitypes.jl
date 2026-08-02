@@ -8,36 +8,158 @@ Base.showerror(io::IO, e::Error) = print(io, "($(e.errno)): $(e.msg)")
 # wraps a MYSQL opaque pointer
 mutable struct MYSQL
     ptr::Ptr{Cvoid}
+    # Statement/result handles whose Julia wrappers were garbage-collected before
+    # being explicitly closed. mysql_stmt_close and mysql_free_result are not
+    # client-side frees: they can write to / read from the connection's socket.
+    # Finalizers run on whatever thread happens to trigger GC — concurrently with
+    # an in-flight mysql_* call on another thread — and a MYSQL* is not
+    # thread-safe, so finalizers must never call into libmariadb on a live
+    # connection (https://github.com/JuliaDatabases/MySQL.jl/issues/220). They
+    # park raw handles here instead; reap!() closes them from inside the next
+    # user-initiated operation, which the caller already serializes with all
+    # other use of the connection.
+    reaplock::Threads.SpinLock       # guards the two vectors below and `closed`
+    stmts_to_close::Vector{Ptr{Cvoid}}
+    results_to_free::Vector{Ptr{Cvoid}}
+    closed::Bool                     # set once mysql_close has run
     function MYSQL(ptr)
         ptr == C_NULL && error("error creating API.MYSQL structure; null pointer encountered; probably insufficient memory available")
-        mysql = new(ptr)
-        finalizer(mysql) do x
-            if x.ptr != C_NULL
-                mysql_close(x.ptr)
-                x.ptr = C_NULL
-            end
-        end
+        mysql = new(ptr, Threads.SpinLock(), Ptr{Cvoid}[], Ptr{Cvoid}[], false)
+        finalizer(finalize_mysql, mysql)
         return mysql
     end
 end
 
 Error(mysql::MYSQL) = Error(mysql.ptr)
 
+# Runs with x.reaplock held. Frees parked results first (flushing an un-drained
+# result reads from the socket, which needs the connection alive), then parked
+# statements, then the connection itself.
+function _teardown(x::MYSQL)
+    if x.ptr != C_NULL
+        for p in x.results_to_free
+            mysql_free_result(p)
+        end
+        empty!(x.results_to_free)
+        for p in x.stmts_to_close
+            mysql_stmt_close(p)
+        end
+        empty!(x.stmts_to_close)
+        mysql_close(x.ptr)
+        x.ptr = C_NULL
+    end
+    x.closed = true
+    return
+end
+
+# GC finalizer for MYSQL. If the wrapper is unreachable no user call on this
+# connection can be in flight, so the teardown I/O is single-threaded and safe.
+# Finalizers may only trylock: if the lock is busy (another thread is mid-reap!),
+# re-register and retry at a later GC — the pattern from the Julia manual for
+# finalizers that need locks.
+function finalize_mysql(x::MYSQL)
+    if trylock(x.reaplock)
+        try
+            _teardown(x)
+        finally
+            unlock(x.reaplock)
+        end
+    else
+        finalizer(finalize_mysql, x)
+    end
+    return
+end
+
+# Explicit close (DBInterface.close!(conn)). Blocking on the lock is fine here:
+# finalizers only ever trylock, so there is no self-deadlock if GC runs while we
+# hold it.
+function close!(x::MYSQL)
+    lock(x.reaplock)
+    try
+        _teardown(x)
+    finally
+        unlock(x.reaplock)
+    end
+    return
+end
+
+"""
+    reap!(mysql::MYSQL)
+
+Close statement handles and free result handles that were abandoned to the
+garbage collector. Must be called from a user-initiated operation on the
+connection, i.e. in a context the caller already serializes with all other use
+of the connection — never from a finalizer.
+"""
+function reap!(x::MYSQL)
+    # unlocked fast path: a stale answer just delays the reap to the next call
+    isempty(x.stmts_to_close) && isempty(x.results_to_free) && return
+    stmts = Ptr{Cvoid}[]
+    results = Ptr{Cvoid}[]
+    lock(x.reaplock)
+    try
+        append!(results, x.results_to_free)
+        empty!(x.results_to_free)
+        append!(stmts, x.stmts_to_close)
+        empty!(x.stmts_to_close)
+    finally
+        unlock(x.reaplock)
+    end
+    # the socket-touching calls happen outside the spinlock; we're in the
+    # caller's serialized context like any other mysql_* call
+    for p in results
+        mysql_free_result(p)
+    end
+    for p in stmts
+        mysql_stmt_close(p)
+    end
+    return
+end
+
 # wraps a MYSQL_RES opaque pointer
 mutable struct MYSQL_RES
     ptr::Ptr{Cvoid}
-    function MYSQL_RES(ptr)
-        res = new(ptr)
+    conn::MYSQL
+    function MYSQL_RES(ptr, conn::MYSQL)
+        res = new(ptr, conn)
         if ptr != C_NULL
-            finalizer(res) do x
-                if x.ptr != C_NULL
-                    mysql_free_result(x.ptr)
-                    x.ptr = C_NULL
-                end
-            end
+            finalizer(finalize_result, res)
         end
         return res
     end
+end
+
+# GC finalizer for MYSQL_RES: park the handle for reap!() instead of calling
+# mysql_free_result, which may read pending rows off the shared socket.
+function finalize_result(x::MYSQL_RES)
+    x.ptr == C_NULL && return
+    conn = x.conn
+    if trylock(conn.reaplock)
+        try
+            if !conn.closed
+                push!(conn.results_to_free, x.ptr)
+            end
+            # if the connection is already closed, mysql_free_result on an
+            # un-drained result would read through the freed MYSQL* — leak the
+            # handle rather than touch freed memory
+            x.ptr = C_NULL
+        finally
+            unlock(conn.reaplock)
+        end
+    else
+        finalizer(finalize_result, x)
+    end
+    return
+end
+
+# immediate free, for explicit cleanup from user-serialized contexts; the still-
+# registered finalizer becomes a no-op once ptr is C_NULL
+function free!(x::MYSQL_RES)
+    if x.ptr != C_NULL
+        mysql_free_result(x.ptr)
+        x.ptr = C_NULL
+    end
+    return
 end
 
 struct StmtError <: Exception
@@ -50,17 +172,48 @@ Base.showerror(io::IO, e::StmtError) = print(io, "($(e.errno)): $(e.msg)")
 # wraps a MYSQL_STMT opaque pointer
 mutable struct MYSQL_STMT
     ptr::Ptr{Cvoid}
-    function MYSQL_STMT(ptr)
+    conn::MYSQL
+    function MYSQL_STMT(ptr, conn::MYSQL)
         ptr == C_NULL && error("error creating API.MYSQL_STMT structure; null pointer encountered; probably insufficient memory available")
-        stmt = new(ptr)
-        finalizer(stmt) do x
-            if x.ptr != C_NULL
-                mysql_stmt_close(x.ptr)
-                x.ptr = C_NULL
-            end
-        end
+        stmt = new(ptr, conn)
+        finalizer(finalize_stmt, stmt)
         return stmt
     end
+end
+
+# GC finalizer for MYSQL_STMT: park the handle for reap!() instead of calling
+# mysql_stmt_close, which sends COM_STMT_CLOSE over the shared socket.
+function finalize_stmt(x::MYSQL_STMT)
+    x.ptr == C_NULL && return
+    conn = x.conn
+    if trylock(conn.reaplock)
+        try
+            if conn.closed
+                # mysql_close already invalidated the statement handles, so this
+                # is a purely local free — no socket I/O
+                mysql_stmt_close(x.ptr)
+            else
+                push!(conn.stmts_to_close, x.ptr)
+            end
+            x.ptr = C_NULL
+        finally
+            unlock(conn.reaplock)
+        end
+    else
+        finalizer(finalize_stmt, x)
+    end
+    return
+end
+
+# immediate close, for explicit cleanup (DBInterface.close!(stmt)) from user-
+# serialized contexts; the still-registered finalizer becomes a no-op once ptr
+# is C_NULL
+function close!(x::MYSQL_STMT)
+    if x.ptr != C_NULL
+        mysql_stmt_close(x.ptr)
+        x.ptr = C_NULL
+    end
+    return
 end
 
 StmtError(stmt::MYSQL_STMT) = StmtError(stmt.ptr)

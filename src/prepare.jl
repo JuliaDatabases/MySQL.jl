@@ -29,7 +29,7 @@ DBInterface.getconnection(stmt::Statement) = stmt.conn
 
 Close a prepared statement and free any underlying resources. The statement should not be used in any way afterwards.
 """
-DBInterface.close!(stmt::Statement) = finalize(stmt.stmt)
+DBInterface.close!(stmt::Statement) = API.close!(stmt.stmt)
 
 """
     DBInterface.prepare(conn::MySQL.Connection, sql) => MySQL.Statement

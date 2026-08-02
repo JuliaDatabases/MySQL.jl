@@ -47,6 +47,10 @@ end
 @noinline checkconn(conn::Connection) = conn.mysql.ptr == C_NULL && error("mysql connection has been closed or disconnected")
 
 function clear!(conn)
+    # close any statement/result handles abandoned to the GC; we're in a
+    # user-initiated operation here, so this is serialized with all other use
+    # of the connection (see API.reap!)
+    API.reap!(conn.mysql)
     conn.lastexecute === nothing || clear!(conn, conn.lastexecute)
     return
 end
@@ -56,7 +60,7 @@ function clear!(conn, result::API.MYSQL_RES)
         while true
             if API.fetchrow(conn.mysql, result) == C_NULL
                 if API.moreresults(conn.mysql)
-                    finalize(result)
+                    API.free!(result)
                     @assert API.nextresult(conn.mysql) !== nothing
                     result = API.useresult(conn.mysql)
                 else
@@ -64,7 +68,7 @@ function clear!(conn, result::API.MYSQL_RES)
                 end
             end
         end
-        finalize(result)
+        API.free!(result)
     end
     return
 end
@@ -202,9 +206,6 @@ function setoptions!(mysql;
     if ssl_crlpath !== nothing
         API.setoption(mysql, API.MYSQL_OPT_SSL_CRLPATH, ssl_crlpath)
     end
-    if ssl_mode !== nothing
-        API.setoption(mysql, API.MYSQL_OPT_SSL_MODE, ssl_mode)
-    end
     if passphrase !== nothing
         API.setoption(mysql, API.MARIADB_OPT_TLS_PASSPHRASE, passphrase)
     end
@@ -213,6 +214,26 @@ function setoptions!(mysql;
     end
     if ssl_enforce !== nothing
         API.setoption(mysql, API.MYSQL_OPT_SSL_ENFORCE, ssl_enforce)
+    end
+    if ssl_mode !== nothing
+        # libmariadb has no MYSQL_OPT_SSL_MODE: the enum entry MySQL.jl used to
+        # pass for it collided with MARIADB_OPT_SKIP_READ_RESPONSE, making this
+        # kwarg a silent no-op at best (#240). Map the requested mode onto
+        # options Connector/C does understand. This block runs after the
+        # ssl_enforce / ssl_verify_server_cert blocks so an explicit mode wins.
+        if ssl_mode == API.SSL_MODE_DISABLED
+            @warn """ssl_mode=SSL_MODE_DISABLED cannot be honored: MariaDB Connector/C 3.4+ \
+            always negotiates TLS when the server supports it and offers no client-side way \
+            to disable it. The connection will use TLS whenever the server offers it, and \
+            falls back to plaintext only against a server with TLS disabled (which requires \
+            ssl_verify_server_cert=false, the default).""" maxlog=1
+        elseif ssl_mode == API.SSL_MODE_REQUIRED
+            API.setoption(mysql, API.MYSQL_OPT_SSL_ENFORCE, true)
+        elseif ssl_mode == API.SSL_MODE_VERIFY_CA || ssl_mode == API.SSL_MODE_VERIFY_IDENTITY
+            API.setoption(mysql, API.MYSQL_OPT_SSL_ENFORCE, true)
+            API.setoption(mysql, API.MYSQL_OPT_SSL_VERIFY_SERVER_CERT, true)
+        end
+        # SSL_MODE_PREFERRED is the Connector/C default; nothing to set
     end
     if default_auth !== nothing
         API.setoption(mysql, API.MYSQL_DEFAULT_AUTH, default_auth)
@@ -281,6 +302,7 @@ Connect to a MySQL database with provided `host`, `user`, and `passwd` positiona
   * `ssl_crlpath::AbstractString`: Defines a path to a directory that contains one or more PEM files that should each contain one revoked X509 certificate to use for TLS. This option requires that you use the absolute path, not a relative path. The directory specified by this option needs to be run through the openssl rehash command.
   * `ssl_verify_server_cert::Bool=false`: Enables (or disables) server certificate verification.
   * `ssl_enforce::Bool`: Whether to force TLS
+  * `ssl_mode::MySQL.API.mysql_ssl_mode`: MySQL-Connector-style TLS mode, mapped onto the options libmariadb understands: `SSL_MODE_REQUIRED` forces TLS, `SSL_MODE_VERIFY_CA`/`SSL_MODE_VERIFY_IDENTITY` force TLS with server certificate verification, `SSL_MODE_PREFERRED` is the default behavior. `SSL_MODE_DISABLED` cannot be honored (libmariadb 3.4+ always uses TLS when the server offers it) and logs a warning.
   * `default_auth::AbstractString`: Default authentication client-side plugin to use.
   * `connection_handler::AbstractString`: Specify the name of a connection handler plugin.
   * `plugin_dir::AbstractString`: Specify the location of client plugins. The plugin directory can also be specified with the MARIADB_PLUGIN_DIR environment variable.
@@ -300,10 +322,7 @@ DBInterface.connect(::Type{Connection}, host::AbstractString, user::AbstractStri
 Close a `MySQL.Connection` opened by `DBInterface.connect`.
 """
 function DBInterface.close!(conn::Connection)
-    if conn.mysql.ptr != C_NULL
-        API.mysql_close(conn.mysql.ptr)
-        conn.mysql.ptr = C_NULL
-    end
+    API.close!(conn.mysql)
     return
 end
 
