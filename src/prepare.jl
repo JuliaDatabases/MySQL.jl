@@ -72,6 +72,7 @@ function DBInterface.prepare(conn::Connection, sql::AbstractString; mysql_date_a
 end
 
 mutable struct Cursor{buffered} <: DBInterface.Cursor
+    conn::Connection
     stmt::API.MYSQL_STMT
     nfields::Int
     names::Vector{Symbol}
@@ -82,6 +83,7 @@ mutable struct Cursor{buffered} <: DBInterface.Cursor
     rows_affected::Int64
     rows::Int
     current_rownumber::Int
+    statement::Union{Nothing, Statement}
 end
 
 struct Row <: Tables.AbstractRow
@@ -135,7 +137,16 @@ end
 
 Close a cursor. No more results will be available.
 """
-DBInterface.close!(c::Cursor) = clear!(c.conn)
+function DBInterface.close!(c::Cursor)
+    if c.statement === nothing
+        c.conn.mysql.ptr == C_NULL || clear!(c.conn)
+    elseif c.stmt.ptr != C_NULL
+        c.conn.mysql.ptr == C_NULL || clear!(c.conn, c.stmt)
+        API.close!(c.stmt)
+        c.conn.lastexecute === c.stmt && (c.conn.lastexecute = nothing)
+    end
+    return
+end
 
 @noinline paramcheck(stmt, args) = length(args) == stmt.nparams || throw(MySQLInterfaceError("stmt requires $(stmt.nparams) params, only $(length(args)) provided"))
 
@@ -191,7 +202,19 @@ function DBInterface.execute(stmt::Statement, params=(); mysql_store_result::Boo
             lookup = Dict(x => i for (i, x) in enumerate(names))
         end
     end
-    return Cursor{buffered}(stmt.stmt, nfields, names, types, lookup, valuehelpers, values, rows_affected, rows, 0)
+    return Cursor{buffered}(stmt.conn, stmt.stmt, nfields, names, types, lookup, valuehelpers, values, rows_affected, rows, 0, nothing)
+end
+
+function executeparams(conn::Connection, sql::AbstractString, params; mysql_store_result::Bool, mysql_date_and_time::Bool)
+    stmt = DBInterface.prepare(conn, sql; mysql_date_and_time)
+    try
+        cursor = DBInterface.execute(stmt, params; mysql_store_result, mysql_date_and_time)
+        cursor.statement = stmt
+        return cursor
+    catch
+        DBInterface.close!(stmt)
+        rethrow()
+    end
 end
 
 inithelper!(helper, x::Missing) = nothing
