@@ -1,0 +1,200 @@
+name: Issue 236 Windows diagnostics
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/issue236-windows.yml"
+      - "test/issue236_windows.jl"
+      - "src/**"
+      - "Project.toml"
+  workflow_dispatch:
+
+jobs:
+  build-yggdrasil-variant:
+    name: Build Yggdrasil variant / ${{ matrix.variant }}
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - variant: fno-strict-aliasing
+            cflags: -fno-strict-aliasing
+          - variant: fno-tree-vectorize
+            cflags: -fno-tree-vectorize
+    steps:
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: "1.12"
+
+      - uses: actions/checkout@v5
+        with:
+          repository: JuliaPackaging/Yggdrasil
+          path: Yggdrasil
+
+      - name: Patch MariaDB Connector/C recipe
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd Yggdrasil/M/MariaDB_Connector_C
+          perl -0pi -e 's/\Q-Wno-error -Wno-incompatible-pointer-types\E/-Wno-error -Wno-incompatible-pointer-types $ENV{EXTRA_CFLAGS}/' build_tarballs.jl
+          grep -n -- "$EXTRA_CFLAGS" build_tarballs.jl
+        env:
+          EXTRA_CFLAGS: ${{ matrix.cflags }}
+
+      - name: Build Windows tarball
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd Yggdrasil/M/MariaDB_Connector_C
+          julia --project=../.. --startup-file=no -e 'using Pkg; Pkg.instantiate()'
+          julia --project=../.. --startup-file=no build_tarballs.jl --verbose x86_64-w64-mingw32
+          mkdir -p "$GITHUB_WORKSPACE/variant"
+          cp products/MariaDB_Connector_C.v*.x86_64-w64-mingw32.tar.gz "$GITHUB_WORKSPACE/variant/"
+          cp products/MariaDB_Connector_C-logs.v*.x86_64-w64-mingw32.tar.gz "$GITHUB_WORKSPACE/variant/"
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: mariadb-connector-c-${{ matrix.variant }}
+          path: variant/*.tar.gz
+
+  issue236:
+    name: Windows ${{ matrix.os }} / ${{ matrix.connector }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - windows-2022
+          - windows-2025
+        connector:
+          - jll-default
+          - jll-3.3.9
+          - official-3.4.9
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: "1"
+          arch: x64
+
+      - name: Start MySQL
+        id: setup-mysql
+        uses: shogo82148/actions-setup-mysql@v1.51.0
+        with:
+          mysql-version: "8.4"
+          root-password: root
+
+      - name: Download official Connector/C
+        if: matrix.connector == 'official-3.4.9'
+        shell: pwsh
+        run: |
+          $msi = Join-Path $env:RUNNER_TEMP "mariadb-connector-c-3.4.9-win64.msi"
+          $target = Join-Path $env:RUNNER_TEMP "mariadb-connector-c-3.4.9"
+          Invoke-WebRequest `
+            -Uri "https://dlm.mariadb.com/4751028/Connectors/c/connector-c-3.4.9/mariadb-connector-c-3.4.9-win64.msi" `
+            -OutFile $msi
+          Start-Process msiexec.exe -Wait -ArgumentList @("/a", $msi, "/qn", "TARGETDIR=$target")
+
+          $dll = Get-ChildItem $target -Recurse -Filter libmariadb.dll | Select-Object -First 1
+          if ($null -eq $dll) {
+            throw "Could not find libmariadb.dll under $target"
+          }
+
+          $plugin = Get-ChildItem $target -Recurse -Directory |
+            Where-Object { Test-Path (Join-Path $_.FullName "caching_sha2_password.dll") } |
+            Select-Object -First 1
+          if ($null -eq $plugin) {
+            throw "Could not find Connector/C plugin directory under $target"
+          }
+
+          "MYSQLJL_LIBMARIADB_OVERRIDE=$($dll.FullName)" >> $env:GITHUB_ENV
+          "MYSQLJL_PLUGIN_DIR_OVERRIDE=$($plugin.FullName)" >> $env:GITHUB_ENV
+          "$($dll.DirectoryName)" >> $env:GITHUB_PATH
+
+      - name: Run issue 236 diagnostic
+        shell: pwsh
+        env:
+          MYSQLJL_HOST: 127.0.0.1
+          MYSQLJL_PORT: "3306"
+          MYSQLJL_USER: root
+          MYSQLJL_PASSWORD: root
+          MYSQLJL_CONNECTOR: ${{ matrix.connector }}
+          MYSQLJL_JLL_VERSION: ${{ matrix.connector == 'jll-3.3.9' && '3.3.9' || 'default' }}
+        run: julia --startup-file=no test/issue236_windows.jl
+
+  issue236-yggdrasil-variant:
+    name: Windows ${{ matrix.os }} / yggdrasil-${{ matrix.variant }}
+    if: github.event_name == 'workflow_dispatch'
+    needs: build-yggdrasil-variant
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - windows-2022
+          - windows-2025
+        variant:
+          - fno-strict-aliasing
+          - fno-tree-vectorize
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: "1"
+          arch: x64
+
+      - name: Start MySQL
+        uses: shogo82148/actions-setup-mysql@v1.51.0
+        with:
+          mysql-version: "8.4"
+          root-password: root
+
+      - uses: actions/download-artifact@v5
+        with:
+          name: mariadb-connector-c-${{ matrix.variant }}
+          path: ${{ runner.temp }}/variant
+
+      - name: Use Yggdrasil variant
+        shell: pwsh
+        run: |
+          $target = Join-Path $env:RUNNER_TEMP "mariadb-connector-c-${env:MYSQLJL_CONNECTOR_VARIANT}"
+          New-Item -ItemType Directory -Force -Path $target | Out-Null
+          $tarball = Get-ChildItem (Join-Path $env:RUNNER_TEMP "variant") -Filter "MariaDB_Connector_C.v*.x86_64-w64-mingw32.tar.gz" | Select-Object -First 1
+          if ($null -eq $tarball) {
+            throw "Could not find built Connector/C tarball"
+          }
+          tar -xzf $tarball.FullName -C $target
+
+          $dll = Join-Path $target "bin/libmariadb.dll"
+          $plugin = Join-Path $target "lib/mariadb/plugin"
+          if (!(Test-Path $dll)) {
+            throw "Could not find libmariadb.dll at $dll"
+          }
+          if (!(Test-Path (Join-Path $plugin "caching_sha2_password.dll"))) {
+            throw "Could not find Connector/C plugin directory at $plugin"
+          }
+
+          "MYSQLJL_LIBMARIADB_OVERRIDE=$dll" >> $env:GITHUB_ENV
+          "MYSQLJL_PLUGIN_DIR_OVERRIDE=$plugin" >> $env:GITHUB_ENV
+          "$(Split-Path -Parent $dll)" >> $env:GITHUB_PATH
+        env:
+          MYSQLJL_CONNECTOR_VARIANT: ${{ matrix.variant }}
+
+      - name: Run issue 236 diagnostic
+        shell: pwsh
+        env:
+          MYSQLJL_HOST: 127.0.0.1
+          MYSQLJL_PORT: "3306"
+          MYSQLJL_USER: root
+          MYSQLJL_PASSWORD: root
+          MYSQLJL_CONNECTOR: yggdrasil-${{ matrix.variant }}
+          MYSQLJL_JLL_VERSION: default
+        run: julia --startup-file=no test/issue236_windows.jl

@@ -7,7 +7,7 @@ export DateAndTime
 using MariaDB_Connector_C_jll
 using OpenSSL_jll: libssl, libcrypto
 
-const PLUGIN_DIR = joinpath(MariaDB_Connector_C_jll.artifact_dir, "lib", "mariadb", "plugin")
+const PLUGIN_DIR = get(ENV, "MYSQLJL_PLUGIN_DIR_OVERRIDE", joinpath(MariaDB_Connector_C_jll.artifact_dir, "lib", "mariadb", "plugin"))
 
 # Pre-load OpenSSL libraries so they're available when MariaDB loads plugins.
 # MariaDB authentication plugins (e.g., caching_sha2_password) depend on OpenSSL,

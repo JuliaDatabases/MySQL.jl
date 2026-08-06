@@ -1,11 +1,13 @@
+const libmariadb_for_ccall = get(ENV, "MYSQLJL_LIBMARIADB_OVERRIDE", libmariadb)
+
 macro c(func, ret, args, vals...)
     if Sys.iswindows()
         esc(quote
-            ret = ccall( ($func, libmariadb), stdcall, $ret, $args, $(vals...))
+            ret = ccall( ($func, libmariadb_for_ccall), stdcall, $ret, $args, $(vals...))
         end)
     else
         esc(quote
-            ret = ccall( ($func, libmariadb),          $ret, $args, $(vals...))
+            ret = ccall( ($func, libmariadb_for_ccall),          $ret, $args, $(vals...))
         end)
     end
 end
