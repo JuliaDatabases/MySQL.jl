@@ -123,7 +123,7 @@ The utf8mb4 contract: skipped when the connect OK's session tracking reports all
 succeed. Returns whether the statement was sent.
 """
 function bootstrap_charset!(s::P.Session, ok::P.OKPacket)
-    charset_already_utf8mb4(ok) && return false
+    P.guarded(() -> charset_already_utf8mb4(ok), s) && return false
     P.query!(s, "SET NAMES utf8mb4")
     response = P.read_command_response!(s; kind=P.CMD_SIMPLE)
     if !(response isa P.OKPacket) || s.phase != P.READY

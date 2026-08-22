@@ -290,5 +290,20 @@ end
             @test err isa P.ProtocolError
             @test err isa P.ProtocolError && occursin("one final OK", err.msg)
         end
+
+        malformed_state = state_block(P.SESSION_TRACK_SYSTEM_VARIABLES, "name-without-value")
+        with_peer(conn -> begin
+            send_packet(conn, 0, greeting(; caps=MYSQL8_SERVER_CAPS & ~P.CLIENT_SSL))
+            seq, _ = read_packet(conn)
+            status = P.SERVER_STATUS_AUTOCOMMIT | P.SERVER_SESSION_STATE_CHANGED
+            send_packet(conn, seq + 1, ok_payload(; status=status, state=malformed_state, track=true))
+            await_eof(conn)
+        end) do client
+            s = P.Session(client)
+            P.read_greeting!(s)
+            ok = P.authenticate!(s, "root", "pw", P.AuthPolicy())
+            @test_throws P.ProtocolError N.bootstrap_charset!(s, ok)
+            @test s.phase == P.BROKEN && !isopen(s)
+        end
     end
 end
