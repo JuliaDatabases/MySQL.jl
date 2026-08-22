@@ -123,12 +123,6 @@ function DBInterface.execute(stmt::Statement, params=(); mysql_store_result::Boo
     lock(conn.lock) do
         stmt.closed && closed_statement()
         length(params) == stmt.nparams || paramcount_error(stmt, length(params))
-        date_and_time = isempty(stmt.columns) ? mysql_date_and_time : stmt.date_and_time
-        opts = ResultOptions(;
-            date_and_time=date_and_time,
-            zero_dates=conn.results.zero_dates,
-            time_type=conn.results.time_type,
-        )
         s = begin_command!(conn)
         stmt.generation == (@atomic conn.generation) || reprepare!(conn, s, stmt)
         token = new_token!(conn)
@@ -144,6 +138,12 @@ function DBInterface.execute(stmt::Statement, params=(); mysql_store_result::Boo
             send_execute!(s, stmt, params)
             P.read_command_response!(s)
         end
+        date_and_time = isempty(stmt.columns) ? mysql_date_and_time : stmt.date_and_time
+        opts = ResultOptions(;
+            date_and_time=date_and_time,
+            zero_dates=conn.results.zero_dates,
+            time_type=conn.results.time_type,
+        )
         return make_cursor(conn, stmt.sql, token, resp, true, mysql_store_result, opts, 1)
     end
 end

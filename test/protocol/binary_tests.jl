@@ -375,6 +375,23 @@ end
         @test stmt.statement_id == 21 && stmt.generation == (@atomic conn.generation)
         DBInterface.close!(stmt)
     end
+
+
+    dtcol = coldef("dt"; type=P.MYSQL_TYPE_DATETIME, flags=NOT_NULL)
+    with_native(c -> begin
+        expect_prepare(c)
+        send_prepare_ok(c, 1, 22, P.ColumnDef[], P.ColumnDef[])
+        expect_prepare(c)
+        send_prepare_ok(c, 1, 23, P.ColumnDef[], [dtcol])
+        expect_execute(c)
+        send_resultset(c, 1, [dtcol], Vector{UInt8}[])
+    end) do conn
+        stmt = DBInterface.prepare(conn, "CALL metadata_after_reconnect()")
+        stmt.generation -= 1
+        cur = DBInterface.execute(stmt; mysql_date_and_time=true)
+        @test Tables.schema(cur).types == (DateTime,)
+        DBInterface.close!(stmt)
+    end
 end
 
 @testset "statement close is parked and reaped on the next command" begin
