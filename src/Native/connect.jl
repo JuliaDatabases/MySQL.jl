@@ -63,15 +63,42 @@ function apply_deadline!(t::P.Transport, deadline::Int64)
     return nothing
 end
 
-function resolve_bind(bind::Union{Nothing, String})
+function resolve_bind(
+        bind::Union{Nothing, String},
+        deadline::Int64,
+        resolver::F=Reseau.HostResolvers.resolve_tcp_addr,
+    ) where {F}
     bind === nothing && return nothing
-    return Reseau.HostResolvers.resolve_tcp_addr("tcp", hostport(bind, 0))
+    address = hostport(bind, 0)
+    deadline == 0 && return resolver("tcp", address)
+    timeout_message = "connect_timeout expired while resolving bind address $bind"
+
+    result = Channel{Tuple{Bool, Any}}(1)
+    task = errormonitor(Threads.@spawn begin
+        try
+            put!(result, (true, resolver("tcp", address)))
+        catch err
+            put!(result, (false, err))
+        end
+        return nothing
+    end)
+    left = deadline - Int64(time_ns())
+    left > 0 || throw(P.TimeoutError(timeout_message))
+    seconds = left / 1_000_000_000
+    status = timedwait(() -> isready(result), seconds; pollint=min(seconds, 0.01))
+    if status === :timed_out && !isready(result)
+        throw(P.TimeoutError(timeout_message))
+    end
+    ok, value = take!(result)
+    wait(task)
+    ok || throw(value)
+    return value
 end
 
 function dial(opts::ConnectOptions, deadline::Int64)
     address = hostport(opts.host, opts.port)
     try
-        local_addr = resolve_bind(opts.bind)
+        local_addr = resolve_bind(opts.bind, deadline)
         deadline == 0 && return Reseau.TCP.connect(address; local_addr=local_addr)
         return Reseau.TCP.connect(address; timeout_ns=remaining_ns(deadline), local_addr=local_addr)
     catch err

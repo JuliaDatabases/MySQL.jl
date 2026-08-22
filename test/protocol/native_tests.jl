@@ -217,6 +217,42 @@ function abandon_handles(port, n)
 end
 
 @testset "outbound bind address" begin
+    release = Channel{Nothing}(1)
+    finished = Channel{Nothing}(1)
+    called_with = Channel{Tuple{String, String}}(2)
+    block_resolver = Ref(false)
+    resolver = function (network, address)
+        put!(called_with, (network, address))
+        if block_resolver[]
+            take!(release)
+            put!(finished, nothing)
+        end
+        return Reseau.TCP.loopback_addr(0)
+    end
+    warm_deadline = Int64(time_ns()) + 5_000_000_000
+    @test N.resolve_bind("bind.example", warm_deadline, resolver) == Reseau.TCP.loopback_addr(0)
+    @test take!(called_with) == ("tcp", "bind.example:0")
+    block_resolver[] = true
+    before = Int64(time_ns())
+    err = try
+        N.resolve_bind("bind.example", before + 50_000_000, resolver)
+        nothing
+    catch ex
+        ex
+    end
+    elapsed = Int64(time_ns()) - before
+    @test err isa P.TimeoutError
+    @test err isa P.TimeoutError && occursin("resolving bind address", err.msg)
+    @test elapsed < 500_000_000
+    called = isready(called_with) ? take!(called_with) : nothing
+    @test called == ("tcp", "bind.example:0")
+    if called !== nothing
+        put!(release, nothing)
+        finished_status = timedwait(() -> isready(finished), 1.0)
+        @test finished_status === :ok
+        finished_status === :ok && take!(finished)
+    end
+
     multi_accept_server() do port
         h = native_connect(port; ssl_mode=:disabled, bind="127.0.0.1")
         try
