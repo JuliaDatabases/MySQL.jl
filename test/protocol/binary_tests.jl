@@ -267,6 +267,55 @@ end
     end
 end
 
+@testset "prepared API compatibility checks and execute-time metadata" begin
+    dtcol = coldef("dt"; type=P.MYSQL_TYPE_DATETIME, flags=NOT_NULL)
+    with_native(c -> begin
+        expect_prepare(c)
+        send_prepare_ok(c, 1, 61, P.ColumnDef[], [dtcol])
+        expect_execute(c)
+        send_resultset(c, 1, [dtcol], Vector{UInt8}[])
+
+        expect_prepare(c)
+        send_prepare_ok(c, 1, 62, P.ColumnDef[], P.ColumnDef[])
+        expect_execute(c)
+        send_resultset(c, 1, [dtcol], Vector{UInt8}[])
+    end) do conn
+        static_stmt = DBInterface.prepare(conn, "SELECT CAST(NOW() AS DATETIME) AS dt")
+        static_cur = DBInterface.execute(static_stmt; mysql_date_and_time=true)
+        @test Tables.schema(static_cur).types == (DateTime,)
+
+        dynamic_stmt = DBInterface.prepare(conn, "CALL dynamic_metadata()")
+        dynamic_cur = DBInterface.execute(dynamic_stmt; mysql_date_and_time=true)
+        @test Tables.schema(dynamic_cur).types == (MySQL.DateAndTime,)
+        DBInterface.close!(static_stmt)
+        DBInterface.close!(dynamic_stmt)
+    end
+
+    with_native(c -> begin
+        expect_prepare(c)
+        send_prepare_ok(c, 1, 63, paramdefs(2), P.ColumnDef[])
+    end) do conn
+        stmt = DBInterface.prepare(conn, "SELECT ?, ?")
+        err = try
+            DBInterface.execute(stmt, (1,))
+            nothing
+        catch caught
+            caught
+        end
+        @test err isa MySQL.MySQLInterfaceError
+        @test sprint(showerror, err) == "stmt requires 2 params, only 1 provided"
+        DBInterface.close!(stmt)
+        closederr = try
+            DBInterface.execute(stmt, (1, 2))
+            nothing
+        catch caught
+            caught
+        end
+        @test closederr isa ErrorException
+        @test sprint(showerror, closederr) == "prepared mysql statement has been closed"
+    end
+end
+
 @testset "streaming binary cursor and the wrongrow contract" begin
     cols = [coldef("x"; type=P.MYSQL_TYPE_LONG, flags=NOT_NULL)]
     with_native(c -> begin

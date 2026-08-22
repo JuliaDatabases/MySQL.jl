@@ -105,7 +105,11 @@ function send_execute!(s::P.Session, stmt::Statement, params)
     return nothing
 end
 
-@noinline paramcount_error(stmt, n) = throw(MySQLInterfaceError("statement requires $(stmt.nparams) parameters, got $n"))
+@noinline function paramcount_error(stmt, n)
+    throw(MySQLInterfaceError("stmt requires $(stmt.nparams) params, only $n provided"))
+end
+
+@noinline closed_statement() = error("prepared mysql statement has been closed")
 
 """
     DBInterface.execute(stmt::MySQL.Native.Statement, params=(); mysql_store_result=true) -> BinaryCursor
@@ -117,9 +121,14 @@ the cursor is exhausted or closed).
 function DBInterface.execute(stmt::Statement, params=(); mysql_store_result::Bool=true, mysql_date_and_time::Bool=false)
     conn = stmt.conn
     lock(conn.lock) do
-        stmt.closed && throw(MySQLInterfaceError("prepared statement is closed"))
+        stmt.closed && closed_statement()
         length(params) == stmt.nparams || paramcount_error(stmt, length(params))
-        opts = ResultOptions(; date_and_time=(stmt.date_and_time || mysql_date_and_time), zero_dates=conn.results.zero_dates, time_type=conn.results.time_type)
+        date_and_time = isempty(stmt.columns) ? mysql_date_and_time : stmt.date_and_time
+        opts = ResultOptions(;
+            date_and_time=date_and_time,
+            zero_dates=conn.results.zero_dates,
+            time_type=conn.results.time_type,
+        )
         s = begin_command!(conn)
         stmt.generation == (@atomic conn.generation) || reprepare!(conn, s, stmt)
         token = new_token!(conn)

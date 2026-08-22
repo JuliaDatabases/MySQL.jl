@@ -189,6 +189,12 @@ const BINARY_ROW_TUPLE = (
             DBInterface.close!(stmt)
             v
         end),
+    Row("prepared execute-time mysql_date_and_time cannot override static prepare metadata", :preserve,
+        conn -> let stmt = DBInterface.prepare(conn, "SELECT CAST('2021-01-02 01:02:03' AS DATETIME) AS dt")
+            T = only(Tables.schema(DBInterface.execute(stmt; mysql_date_and_time=true)).types)
+            DBInterface.close!(stmt)
+            T
+        end),
     Row("prepared BIT(12): big-endian value of all bytes (1.x prepared read a shifted subset)", :fix,
         conn -> let stmt = DBInterface.prepare(conn, "SELECT Flags FROM manifest_employee ORDER BY ID")
             v = Tables.columntable(DBInterface.execute(stmt)).Flags
