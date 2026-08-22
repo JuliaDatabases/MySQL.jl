@@ -86,14 +86,15 @@ function guarded(f::F, s::Session) where {F}
 end
 
 """
-    readpacket!(s) -> PacketView
+    readpacket!(s; packet_limit=max_payload(s)) -> PacketView
 
 Reads one logical packet under the phase-dependent size bound; any failure faults the
-session. The view is valid until the next read.
+session. `packet_limit` can impose a smaller state-specific bound. The view is valid until
+the next read.
 """
-function readpacket!(s::Session)
+function readpacket!(s::Session; packet_limit::Int=max_payload(s))
     try
-        p = readpacket!(s.io, s.transport, max_payload(s); max_response=s.authenticated ? s.limits.max_response_bytes : nothing)
+        p = readpacket!(s.io, s.transport, min(packet_limit, max_payload(s)); max_response=s.authenticated ? s.limits.max_response_bytes : nothing)
         s.debug && @debug "MySQL.Protocol read" phase=s.phase length=payload_length(p) header=first_byte(p) seq=p.seq chunks=p.nchunks
         return p
     catch err
@@ -217,8 +218,9 @@ the optional leading `0x01` already stripped). Server ERR is thrown as `AuthErro
 """
 function read_auth_packet!(s::Session, round_number::Int, auth_bytes::Int)
     require_phase(s, AUTH)
-    round_number <= s.limits.max_auth_rounds || throw(fault!(s, ProtocolError("authentication exceeded $(s.limits.max_auth_rounds) rounds")))
-    p = readpacket!(s)
+    1 <= round_number <= s.limits.max_auth_rounds || throw(fault!(s, ProtocolError("authentication exceeded $(s.limits.max_auth_rounds) rounds")))
+    0 <= auth_bytes <= s.limits.max_auth_bytes || throw(fault!(s, ProtocolError("authentication exchange exceeded $(s.limits.max_auth_bytes) bytes")))
+    p = readpacket!(s; packet_limit=s.limits.max_auth_bytes - auth_bytes)
     auth_bytes + payload_length(p) <= s.limits.max_auth_bytes || throw(fault!(s, ProtocolError("authentication exchange exceeded $(s.limits.max_auth_bytes) bytes")))
     kind = guarded(() -> classify_auth(p, is_mariadb(s)), s)
     if kind == :ok

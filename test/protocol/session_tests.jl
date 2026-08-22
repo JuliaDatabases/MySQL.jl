@@ -228,6 +228,19 @@ end
             @test_throws P.ProtocolError P.read_auth_packet!(s, 1, 0)
             @test s.phase == P.BROKEN
         end
+        # The auth-byte bound is applied to the declared packet length before its body arrives.
+        with_peer(conn -> begin
+            send_packet(conn, 0, greeting())
+            read_packet(conn)
+            send_raw(conn, UInt8[0x20, 0x00, 0x00, 0x02])
+            await_eof(conn)
+        end) do client
+            s = P.Session(client; limits=P.Limits(; max_auth_bytes=16))
+            P.read_greeting!(s)
+            P.send_handshake_response!(s, "root", UInt8[], "caching_sha2_password")
+            @test_throws P.ProtocolError P.read_auth_packet!(s, 1, 0)
+            @test s.phase == P.BROKEN && !isopen(s)
+        end
         with_peer(conn -> begin
             send_packet(conn, 0, greeting())
             read_packet(conn)
