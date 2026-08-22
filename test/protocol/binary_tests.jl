@@ -394,6 +394,46 @@ end
     end
 end
 
+@testset "re-prepare validates refreshed parameter metadata" begin
+    with_native(c -> begin
+        expect_prepare(c)
+        send_prepare_ok(c, 1, 24, paramdefs(1), P.ColumnDef[])
+        # A reconnect refresh changes the parameter count. The old one-parameter call must
+        # stop after PREPARE_OK, before the client sends a malformed COM_STMT_EXECUTE.
+        expect_prepare(c)
+        send_prepare_ok(c, 1, 25, paramdefs(2), P.ColumnDef[])
+        payload = expect_execute(c)
+        @test execute_new_params_flag(payload, 2) == 0x01
+        send_ok(c, 1)
+    end) do conn
+        stmt = DBInterface.prepare(conn, "SELECT ?")
+        stmt.generation -= 1
+        @test_throws MySQL.MySQLInterfaceError DBInterface.execute(stmt, (1,))
+        @test stmt.nparams == 2 && stmt.statement_id == 25
+        @test DBInterface.execute(stmt, (1, 2)).rows_affected == 0
+        DBInterface.close!(stmt)
+    end
+
+    with_native(c -> begin
+        expect_prepare(c)
+        send_prepare_ok(c, 1, 30, paramdefs(1), P.ColumnDef[])
+        expect_execute(c)
+        send_err(c, 1, P.ER_NEED_REPREPARE, "Prepared statement needs re-preparing")
+        expect_prepare(c)
+        send_prepare_ok(c, 1, 31, paramdefs(2), P.ColumnDef[])
+        @test expect_stmt_close(c) == 30
+        payload = expect_execute(c)
+        @test execute_new_params_flag(payload, 2) == 0x01
+        send_ok(c, 1)
+    end) do conn
+        stmt = DBInterface.prepare(conn, "SELECT ?")
+        @test_throws MySQL.MySQLInterfaceError DBInterface.execute(stmt, (1,))
+        @test stmt.nparams == 2 && stmt.statement_id == 31
+        @test DBInterface.execute(stmt, (1, 2)).rows_affected == 0
+        DBInterface.close!(stmt)
+    end
+end
+
 @testset "statement close is parked and reaped on the next command" begin
     closed = Ref(UInt32(0))
     with_native(c -> begin

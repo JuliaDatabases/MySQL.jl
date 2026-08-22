@@ -109,6 +109,11 @@ end
     throw(MySQLInterfaceError("stmt requires $(stmt.nparams) params, only $n provided"))
 end
 
+function check_paramcount(stmt::Statement, params)
+    length(params) == stmt.nparams || paramcount_error(stmt, length(params))
+    return nothing
+end
+
 @noinline closed_statement() = error("prepared mysql statement has been closed")
 
 """
@@ -122,9 +127,12 @@ function DBInterface.execute(stmt::Statement, params=(); mysql_store_result::Boo
     conn = stmt.conn
     lock(conn.lock) do
         stmt.closed && closed_statement()
-        length(params) == stmt.nparams || paramcount_error(stmt, length(params))
+        check_paramcount(stmt, params)
         s = begin_command!(conn)
-        stmt.generation == (@atomic conn.generation) || reprepare!(conn, s, stmt)
+        if stmt.generation != (@atomic conn.generation)
+            reprepare!(conn, s, stmt)
+            check_paramcount(stmt, params)
+        end
         token = new_token!(conn)
         resp = try
             send_execute!(s, stmt, params)
@@ -134,6 +142,7 @@ function DBInterface.execute(stmt::Statement, params=(); mysql_store_result::Boo
             # once (the server's cached type signature is gone, so types are re-sent).
             (err isa P.StmtError && err.errno == P.ER_NEED_REPREPARE) || rethrow()
             reprepare!(conn, s, stmt; close_previous=true)
+            check_paramcount(stmt, params)
             token = new_token!(conn)
             send_execute!(s, stmt, params)
             P.read_command_response!(s)
