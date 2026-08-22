@@ -135,6 +135,8 @@ end
 # A deadline expiry surfaces directly on TCP and wrapped in TLSError on TLS.
 function is_deadline_error(err)
     err isa Reseau.IOPoll.DeadlineExceededError && return true
-    err isa Reseau.TLS.TLSError && return err.cause isa Reseau.IOPoll.DeadlineExceededError
+    err isa Reseau.HostResolvers.DialTimeoutError && return true
+    err isa Reseau.HostResolvers.OpError && return is_deadline_error(err.err)
+    err isa Reseau.TLS.TLSError && return is_deadline_error(err.cause)
     return false
 end

@@ -35,6 +35,9 @@
     @test N.ConnectOptions("h", "u"; attrs=["program_name" => "x"]).attrs == ["program_name" => "x"]
     @test any(p -> p.first == "_client_name", N.ConnectOptions("h", "u").attrs)
     @test N.ConnectOptions("::1", "u").host == "::1" && N.hostport("::1", 3306) == "[::1]:3306" && N.hostport("db.example", 1) == "db.example:1"
+    timeout = Reseau.HostResolvers.DialTimeoutError("db.example:3306")
+    wrapped = Reseau.HostResolvers.OpError("connect", "tcp", nothing, nothing, timeout)
+    @test P.is_deadline_error(timeout) && P.is_deadline_error(wrapped)
 end
 
 @testset "ssl conflict table" begin
