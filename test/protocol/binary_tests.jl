@@ -195,6 +195,14 @@ end
 
 @testset "parameter signature and encoding" begin
     @test N.param_signature(Any[Int32(1), missing, "s", UInt64(2)]) == UInt16[0x0003, 0x0006, 0x00fe, UInt16(P.MYSQL_TYPE_LONGLONG) | 0x8000]
+    # Preserve the effective 1.x bind types after `val`: Bit becomes bytes, and DecFP
+    # becomes a String. Bool is the one deliberate M4 deviation and uses TINY.
+    @test N.param_signature(Any[MySQL.API.Bit(0x101), d64"12.3", Dec128("4.5"), true]) == UInt16[
+        P.MYSQL_TYPE_BLOB,
+        P.MYSQL_TYPE_STRING,
+        P.MYSQL_TYPE_STRING,
+        P.MYSQL_TYPE_TINY,
+    ]
     # a NULL parameter sets its bitmap bit and contributes no value bytes
     blk = N.encode_param_block(Any[missing, Int32(7)], N.param_signature(Any[missing, Int32(7)]), true)
     @test blk[1] == 0x01                                   # null bitmap: bit 0 set for the first (missing) param

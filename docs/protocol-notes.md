@@ -185,9 +185,11 @@ source are never read.
 - **`new_params_bind_flag` / signature**: the client keeps the full last-sent `(type,
   unsigned)` signature per statement (`Statement.last_signature`) and resends the types only
   when the signature changes (a NULL parameter's slot is `MYSQL_TYPE_NULL`, so a value that
-  flips NULL↔non-NULL forces a resend). Parameter type/encoding mirrors the 1.x
-  `mysqltype`/`bind!` mapping; `Bool` maps to `TINY` (1.x left it at the `MYSQL_TYPE_STRING`
-  fallback, an untested latent bug, so this is the sole deliberate deviation).
+  flips NULL↔non-NULL forces a resend). Parameter type/encoding mirrors the effective 1.x
+  `mysqltype`/`bind!` mapping: `Bit` is converted to bytes and sent as `BLOB`, while DecFP
+  values are converted to strings and sent as `STRING`. `Bool` maps to `TINY` (1.x left it
+  at the `MYSQL_TYPE_STRING` fallback, an untested latent bug, so this is the sole deliberate
+  deviation).
 - **Cursor is shared across protocols**: `Cursor{binary, buffered}` — `TextCursor =
   Cursor{false}`, `BinaryCursor = Cursor{true}` — so the ownership tokens, row epochs,
   multi-result draining, buffered budget and LOCAL INFILE state table have a single
