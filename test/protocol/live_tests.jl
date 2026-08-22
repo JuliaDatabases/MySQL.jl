@@ -3,6 +3,7 @@
 using Harbor
 include(joinpath(@__DIR__, "..", "compat_manifest.jl"))
 using .CompatManifest
+include(joinpath(@__DIR__, "leak_soak.jl"))
 
 const LIVE_IMAGES = split(get(ENV, "MYSQL_NATIVE_IMAGES", "mysql:8.4,mariadb:11.4"), ',')
 const ROOT_PW = "native-secret"
@@ -50,7 +51,7 @@ function select_strings(h, sql)
     return rows
 end
 
-function run_live_lane(ref::String)
+function run_live_lane(ref::String; soak::Bool=false)
     image, tag = image_ref(ref)
     mysql = startswith(image, "mysql")
     port = pick_port()
@@ -130,6 +131,7 @@ function run_live_lane(ref::String)
             CompatManifest.run!(
                 (; db) -> DBInterface.connect(MySQL.Connection, "127.0.0.1", "root", ROOT_PW; port=port, db=db),
                 (; db) -> DBInterface.connect(N.Connection, "127.0.0.1", "root", ROOT_PW; port=port, db=db, connect_timeout=10))
+            soak && run_leak_soak(port)
         end
     end
     return nothing
@@ -137,8 +139,9 @@ end
 
 if docker_available()
     @testset "live lanes" begin
-        for ref in LIVE_IMAGES
-            run_live_lane(String(strip(ref)))
+        for (i, ref) in enumerate(LIVE_IMAGES)
+            # the §8.10 leak/lifecycle soak runs on the first (primary) lane only
+            run_live_lane(String(strip(ref)); soak=i == 1)
         end
     end
 else
