@@ -104,6 +104,9 @@ end
 # Native wire-protocol tests (no database server needed)
 include("protocol/runtests.jl")
 
+# Native backend against real servers (Harbor containers; skipped without Docker)
+include("protocol/live_tests.jl")
+
 let mysql = MySQL.API.init()
     MySQL.setoptions!(mysql)
     @test MySQL.API.getoption(mysql, MySQL.API.MYSQL_OPT_SSL_VERIFY_SERVER_CERT) == false

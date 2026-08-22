@@ -17,6 +17,7 @@ using .API
 
 # Native wire-protocol backend (no Connector/C); see docs/protocol-notes.md
 include("Protocol/Protocol.jl")
+include("Native/Native.jl")
 
 mutable struct Connection <: DBInterface.Connection
     mysql::API.MYSQL
