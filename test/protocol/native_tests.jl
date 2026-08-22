@@ -367,7 +367,16 @@ end
         N.reap_now!()
         yield()
     end
-    @test all(counter -> (@atomic counter.closes) == 1, counters)
+    # Exactly-once holds by construction (the :live → :pending CAS gates the single push;
+    # :pending → :closing gates the single close). This has failed rarely inside the full
+    # suite on Julia 1.12 while a 120-round standalone loop stays clean — the same region
+    # as the known non-reproducible 1.12 GC flake — so dump the evidence on any recurrence.
+    exactly_once = all(counter -> (@atomic counter.closes) == 1, counters)
+    if !exactly_once
+        bad = findall(counter -> (@atomic counter.closes) != 1, counters)
+        @warn "reaper stress anomaly" nbad=length(bad) closes=[(@atomic counters[i].closes) for i in first(bad, 5)] states=[(@atomic entries[i].state) for i in first(bad, 5)]
+    end
+    @test exactly_once
     @test all(entry -> entry.transport === nothing, entries)
     @test N.pending_reaps() == 0
     GC.gc(); GC.gc()
