@@ -65,7 +65,7 @@ function DBInterface.prepare(conn::Connection, sql::AbstractString; mysql_date_a
             UInt16[],
             mysql_date_and_time,
             false,
-            StatementReapEntry(ok.statement_id, generation, nothing),
+            StatementReapEntry(ok.statement_id, generation, nothing, false),
         )
         finalizer(finalize_statement, stmt)
         return stmt
@@ -180,7 +180,7 @@ end
 function finalize_statement(stmt::Statement)
     stmt.closed && return nothing
     conn = stmt.conn
-    conn.handle === nothing && return nothing
+    (@atomic conn.statement_reaping_open) || return nothing
     try_park_statement!(conn, stmt.reap) || finalizer(finalize_statement, stmt)
     return nothing
 end

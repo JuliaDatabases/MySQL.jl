@@ -421,6 +421,28 @@ end
         @test conn.stmts_to_close === nothing
     end
     @test closed[] == 77
+
+    with_native(c -> begin
+        expect_prepare(c)
+        send_prepare_ok(c, 1, 78, P.ColumnDef[], P.ColumnDef[])
+        expect_prepare(c)
+        send_prepare_ok(c, 1, 79, P.ColumnDef[], P.ColumnDef[])
+    end) do conn
+        first = DBInterface.prepare(conn, "SELECT 1")
+        second = DBInterface.prepare(conn, "SELECT 2")
+        DBInterface.close!(first)
+        DBInterface.close!(second)
+        @test conn.stmts_to_close === second.reap
+        @test second.reap.next === first.reap
+        DBInterface.close!(conn)
+        @test conn.stmts_to_close === nothing
+        @test first.reap.next === nothing && second.reap.next === nothing
+        @test !(@atomic conn.statement_reaping_open)
+        # A late statement finalizer cannot repopulate a closed connection's queue.
+        second.closed = false
+        N.finalize_statement(second)
+        @test conn.stmts_to_close === nothing
+    end
 end
 
 @testset "one-shot execute(conn, sql, params) prepares, executes, then reaps" begin

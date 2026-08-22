@@ -15,6 +15,7 @@ mutable struct StatementReapEntry
     statement_id::UInt32
     generation::Int
     next::Union{Nothing, StatementReapEntry}
+    parked::Bool
 end
 
 mutable struct Connection <: DBInterface.Connection
@@ -33,6 +34,7 @@ mutable struct Connection <: DBInterface.Connection
     results::ResultOptions
     reaplock::Threads.SpinLock
     stmts_to_close::Union{Nothing, StatementReapEntry}
+    @atomic statement_reaping_open::Bool
 end
 
 # Preserved 1.x quirk: a `mysql://` substring anywhere in the host is stripped.
@@ -69,6 +71,7 @@ function DBInterface.connect(::Type{Connection}, host::AbstractString, user::Abs
         results,
         Threads.SpinLock(),
         nothing,
+        true,
     )
 end
 
@@ -111,6 +114,8 @@ function DBInterface.close!(conn::Connection)
     lock(conn.lock) do
         h = conn.handle
         h === nothing && return nothing
+        @atomic conn.statement_reaping_open = false
+        discard_parked_statements!(conn)
         conn.handle = nothing
         invalidate_cursors!(conn)
         close!(h)
@@ -177,8 +182,28 @@ end
 
 # The entry is allocated with its Statement, not by its finalizer. Caller holds reaplock.
 function enqueue_statement!(conn::Connection, entry::StatementReapEntry)
+    (@atomic conn.statement_reaping_open) || return nothing
+    entry.parked && return nothing
+    entry.parked = true
     entry.next = conn.stmts_to_close
     conn.stmts_to_close = entry
+    return nothing
+end
+
+function discard_parked_statements!(conn::Connection)
+    entry = nothing
+    lock(conn.reaplock)
+    try
+        entry = conn.stmts_to_close
+        conn.stmts_to_close = nothing
+    finally
+        unlock(conn.reaplock)
+    end
+    while entry !== nothing
+        next = entry.next
+        entry.next = nothing
+        entry = next
+    end
     return nothing
 end
 
