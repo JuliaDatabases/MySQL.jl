@@ -125,7 +125,10 @@ succeed. Returns whether the statement was sent.
 function bootstrap_charset!(s::P.Session, ok::P.OKPacket)
     charset_already_utf8mb4(ok) && return false
     P.query!(s, "SET NAMES utf8mb4")
-    P.read_command_response!(s; kind=P.CMD_SIMPLE) isa P.OKPacket || P.protocol_error("SET NAMES utf8mb4 did not return OK")
+    response = P.read_command_response!(s; kind=P.CMD_SIMPLE)
+    if !(response isa P.OKPacket) || s.phase != P.READY
+        throw(P.fault!(s, P.ProtocolError("SET NAMES utf8mb4 did not return one final OK")))
+    end
     return true
 end
 

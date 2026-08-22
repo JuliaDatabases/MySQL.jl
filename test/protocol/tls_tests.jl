@@ -32,14 +32,14 @@ function utf8mb4_state()
 end
 
 # Plaintext peer that answers a non-tracking OK and then serves the SET NAMES bootstrap.
-function plain_peer_connect!(conn; caps=MYSQL8_SERVER_CAPS, expect_ssl_request::Bool=false, after=nothing)
+function plain_peer_connect!(conn; caps=MYSQL8_SERVER_CAPS, expect_ssl_request::Bool=false, bootstrap_status=P.SERVER_STATUS_AUTOCOMMIT, after=nothing)
     send_packet(conn, 0, greeting(; caps=caps))
     seq, response = read_packet(conn)
     (length(response) == 32) == expect_ssl_request || error(expect_ssl_request ? "expected an SSLRequest" : "client sent an SSLRequest in plaintext mode")
     send_packet(conn, seq + 1, ok_payload())
     seq, cmd, sql = read_command(conn)
     (cmd == P.COM_QUERY && String(sql) == "SET NAMES utf8mb4") || error("expected SET NAMES utf8mb4, got $(cmd) $(String(sql))")
-    send_packet(conn, 1, ok_payload())
+    send_packet(conn, 1, ok_payload(; status=bootstrap_status))
     after === nothing || after(conn)
     return nothing
 end
@@ -244,5 +244,19 @@ end
             N.close!(h)
         end
         @test seen == ["SET time_zone = '+00:00'"]
+    end
+
+    @testset "charset bootstrap requires one final OK" begin
+        status = P.SERVER_STATUS_AUTOCOMMIT | P.SERVER_MORE_RESULTS_EXISTS
+        with_server(conn -> plain_peer_connect!(conn; caps=MYSQL8_SERVER_CAPS & ~P.CLIENT_SSL, bootstrap_status=status)) do port
+            err = try
+                native_connect(port; ssl_mode=:disabled)
+                nothing
+            catch ex
+                ex
+            end
+            @test err isa P.ProtocolError
+            @test err isa P.ProtocolError && occursin("one final OK", err.msg)
+        end
     end
 end
