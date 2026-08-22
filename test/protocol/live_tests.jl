@@ -80,6 +80,9 @@ function run_live_lane(ref::String)
                 exec!(root, "CREATE USER IF NOT EXISTS 'plain'@'%' IDENTIFIED WITH caching_sha2_password BY 'plainpw'")
                 exec!(root, "CREATE USER IF NOT EXISTS 'nat'@'%' IDENTIFIED WITH mysql_native_password BY 'natpw'")
                 exec!(root, "CREATE USER IF NOT EXISTS 'sha'@'%' IDENTIFIED WITH sha256_password BY 'shapw'")
+                exec!(root, "CREATE USER IF NOT EXISTS 'expired'@'%' IDENTIFIED WITH caching_sha2_password BY 'expiredpw' PASSWORD EXPIRE")
+                err = try; N.connect("127.0.0.1", "expired", "expiredpw"; port=port, ssl_mode=:required, can_handle_expired_passwords=true, connect_timeout=10); nothing; catch e; e; end
+                @test err isa P.Error && err.errno == P.ER_MUST_CHANGE_PASSWORD
                 # full auth over plaintext is refused by default, then succeeds with RSA, then the cache makes it fast
                 err = try; N.connect("127.0.0.1", "plain", "plainpw"; port=port, ssl_mode=:disabled, connect_timeout=10); nothing; catch e; e; end
                 @test err isa P.AuthError
