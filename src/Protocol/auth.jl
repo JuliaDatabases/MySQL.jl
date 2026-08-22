@@ -304,7 +304,10 @@ function authenticate!(s::Session, user::AbstractString, password::Union{Nothing
                 reply === nothing || send_wiped!(s, reply)
             end
         end
-    catch
+    catch err
+        if err isa ProtocolError && !is_terminal(s.phase)
+            throw(fault!(s, err))
+        end
         is_terminal(s.phase) || close!(s)
         rethrow()
     finally

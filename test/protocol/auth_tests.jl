@@ -165,6 +165,20 @@ end
         end
     end
 
+    @testset "malformed plugin continuation faults the session" begin
+        with_peer(conn -> begin
+            send_packet(conn, 0, greeting())
+            seq, _ = read_packet(conn)
+            send_packet(conn, seq + 1, UInt8[0x01, 0x05])
+            await_eof(conn)
+        end) do client
+            s = P.Session(client)
+            P.read_greeting!(s)
+            @test_throws P.ProtocolError P.authenticate!(s, "root", "pw", POLICY_PLAIN)
+            @test s.phase == P.BROKEN && !isopen(s)
+        end
+    end
+
     @testset "caching_sha2: full auth over TLS sends the cleartext password" begin
         with_peer(conn -> peer_auth_caching_sha2!(conn, "pw"; mode=:full_tls)) do client
             s = P.Session(client)
