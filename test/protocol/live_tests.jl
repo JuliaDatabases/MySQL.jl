@@ -115,6 +115,10 @@ function run_live_lane(ref::String)
             end
             P.ping!(root.session)
             @test P.read_command_response!(root.session; kind=P.CMD_SIMPLE) isa P.OKPacket
+            P.set_option!(root.session, P.MYSQL_OPTION_MULTI_STATEMENTS_ON)
+            @test P.read_command_response!(root.session) isa Union{P.OKPacket, P.EOFPacket}
+            P.set_option!(root.session, P.MYSQL_OPTION_MULTI_STATEMENTS_OFF)
+            @test P.read_command_response!(root.session) isa Union{P.OKPacket, P.EOFPacket}
             N.close!(root)
             @test !isopen(root)
         end

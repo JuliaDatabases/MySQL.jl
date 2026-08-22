@@ -30,7 +30,7 @@ source are never read.
 
 | Topic | Oracle page | MariaDB page / server header | Decision |
 |---|---|---|---|
-| `COM_SET_OPTION` byte | `page_protocol_com_set_option` says `[0x1A]` | `my_command.h`: `COM_STMT_RESET = 26`, `COM_SET_OPTION = 27`; KB `com_set_option`: `0x1B` | `0x1B`; `constants.jl` asserts it at load time |
+| `COM_SET_OPTION` byte and response | `page_protocol_com_set_option` says `[0x1A]` and documents OK on success | `my_command.h`: `COM_STMT_RESET = 26`, `COM_SET_OPTION = 27`; KB `com_set_option`: `0x1B` and EOF on success | send `0x1B`; accept either OK or EOF for this command only; `constants.jl` asserts the byte at load time |
 | Compression activation point | "after successful authentication" (capabilities page) | "activated after the handshake-response-packet" (KB `0-packet`) | compression is not implemented; capture-gated |
 | SQLSTATE in a pre-capability ERR | connection-phase page: the first ERR "will not contain the SQL-state" | KB ERR description uses the `#` heuristic | whole remainder kept as the message, `sqlstate = ""` (`parse_initial_err`); revisit with captures |
 | `0xFE` in row state | "check whether the packet length is less than 9" (EOF page) | "packet length is less than 0xFFFFFF" (KB result-set packets) | MariaDB rule on the *first chunk length* (`is_row_terminator`): an OK-as-EOF under DEPRECATE_EOF can exceed 9 bytes, a row starting with an 8-byte lenenc is ≥ 2^24 bytes |

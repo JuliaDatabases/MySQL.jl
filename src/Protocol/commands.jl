@@ -120,6 +120,7 @@ definitions (plus the pre-DEPRECATE_EOF metadata EOF) and enters ROWS.
 """
 function read_command_response!(s::Session; kind::CommandKind=s.command_kind)
     require_phase(s, CMD_SENT)
+    s.command_kind = kind
     p = readpacket!(s)
     what = guarded(() -> classify_command_response(kind, p), s)
     (what == :ok || what == :eof || what == :column_count) && next_result_set!(s)
