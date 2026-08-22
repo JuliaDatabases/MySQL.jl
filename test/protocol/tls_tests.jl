@@ -185,10 +185,10 @@ end
         @test_throws ArgumentError N.ConnectOptions("h", "u"; ssl_cert=certfile("client.crt"))
     end
 
-    @testset "a peer that coalesces bytes after the greeting breaks the TLS handshake" begin
+    @testset "a peer that coalesces bytes after the greeting is rejected before TLS" begin
         with_server(conn -> (send_raw(conn, vcat(FakePeer.hexbytes(""), let g = greeting(); vcat(UInt8[length(g) & 0xFF, (length(g) >> 8) & 0xFF, 0x00, 0x00], g) end, codeunits("GARBAGE"))); try; read_packet(conn); catch; end; await_eof(conn))) do port
             err = try; native_connect(port; ssl_mode=:required); nothing; catch e; e; end
-            @test err isa P.TLSNegotiationError || err isa P.ProtocolError
+            @test err isa P.ProtocolError && occursin("before STARTTLS", err.msg)
         end
     end
 

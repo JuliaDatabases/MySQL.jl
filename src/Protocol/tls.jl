@@ -68,6 +68,27 @@ raw_tcp(t::Reseau.TCP.Conn) = t
 raw_tcp(t::FaultTransport) = t.inner isa Reseau.TCP.Conn ? t.inner : throw(ArgumentError("STARTTLS needs a TCP transport"))
 raw_tcp(::Reseau.TLS.Conn) = throw(ArgumentError("the session is already on TLS"))
 
+function socket_fd(tcp::Reseau.TCP.Conn)
+    raw = Reseau.TCP.rawfd(tcp)
+    @static if Sys.iswindows()
+        return reinterpret(UInt, raw)
+    else
+        return reinterpret(Cint, raw)
+    end
+end
+
+# A valid server cannot send application bytes between its greeting and the client's
+# SSLRequest. Peek without consuming so bytes from a coalescing peer never enter TLS.
+function has_pending_tcp_bytes(tcp::Reseau.TCP.Conn)
+    byte = Ref{UInt8}(0x00)
+    n = GC.@preserve tcp byte Reseau.SocketOps.recv_from!(socket_fd(tcp), Base.unsafe_convert(Ptr{UInt8}, byte), Csize_t(1), Reseau.SocketOps.MSG_PEEK)
+    n > 0 && return true
+    n == 0 && return false
+    errno = Reseau.SocketOps.last_error()
+    errno == Int32(Base.Libc.EAGAIN) && return false
+    throw(SystemError("recv(MSG_PEEK)", Int(errno)))
+end
+
 is_secure_transport(t::Reseau.TLS.Conn) = true
 is_secure_transport(t::Reseau.TCP.Conn) = false
 is_secure_transport(t::FaultTransport) = t.inner isa Reseau.TLS.Conn
@@ -92,6 +113,7 @@ function starttls!(s::Session, opts::TLSOptions, host::AbstractString; handshake
     end
     tcp = raw_tcp(s.transport)
     config = tls_config(opts, host, handshake_timeout_ns)
+    has_pending_tcp_bytes(tcp) && throw(fault!(s, ProtocolError("unexpected bytes followed the server greeting before STARTTLS")))
     send_ssl_request!(s)
     tls = nothing
     try
