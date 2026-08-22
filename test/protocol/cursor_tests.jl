@@ -172,6 +172,10 @@ const TYPED_COLS = [
     @test N.decode(Union{Missing, Int32}, UInt8[], 1, -1, N.DEFAULT_RESULT_OPTIONS) === missing
     @test_throws P.ConversionError N.decode(Int32, UInt8[], 1, -1, N.DEFAULT_RESULT_OPTIONS)
     @test_throws P.ConversionError decode_text(Int32, "1x")
+    for T in (UInt8, UInt16, UInt32, UInt64)
+        @test_throws P.ConversionError decode_text(T, "-1")
+        @test_throws P.ConversionError decode_text(T, "-0")
+    end
 end
 
 @testset "text cursor: values, NULLs and the row-validity contract" begin

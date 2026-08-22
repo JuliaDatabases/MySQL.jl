@@ -105,6 +105,7 @@ end
 
 function decode_value(::Type{T}, buf::Vector{UInt8}, pos::Int, len::Int, ::ResultOptions) where {T <: Union{Integer, AbstractFloat}}
     len == 0 && conversion_error(T, buf, pos, len)
+    (T <: Unsigned && buf[pos] == UInt8('-')) && conversion_error(T, buf, pos, len)
     x, code, _ = Parsers.typeparser(T, buf, pos, pos + len - 1, buf[pos], Int16(0), Parsers.OPTIONS)
     (Parsers.ok(code) && Parsers.eof(code)) || conversion_error(T, buf, pos, len)
     return x
