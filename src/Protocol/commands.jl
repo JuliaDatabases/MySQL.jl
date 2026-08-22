@@ -40,18 +40,19 @@ function check_command_size!(s::Session, payload::AbstractVector{UInt8})
 end
 
 """
-    send_command!(s, command, payload=UInt8[])
+    send_command!(s, command, payload=UInt8[]; kind=CMD_QUERY)
 
 Writes a command that expects a response (READY → CMD_SENT). The sequence counter restarts
 at 0 and per-command accounting is reset.
 """
-function send_command!(s::Session, command::UInt8, payload::AbstractVector{UInt8}=UInt8[])
+function send_command!(s::Session, command::UInt8, payload::AbstractVector{UInt8}=UInt8[]; kind::CommandKind=CMD_QUERY)
     require_phase(s, READY)
     check_command_size!(s, payload)
     newcommand!(s.io)
     s.result_sets = 0
     s.metadata_bytes = 0
     sendpacket!(s, command_payload(command, payload))
+    s.command_kind = kind
     transition!(s, :send_command, CMD_SENT)
     return nothing
 end
@@ -71,15 +72,15 @@ function send_noresponse!(s::Session, command::UInt8, payload::AbstractVector{UI
     return nothing
 end
 
-query!(s::Session, sql::AbstractString) = send_command!(s, COM_QUERY, codeunits(sql))
-ping!(s::Session) = send_command!(s, COM_PING)
-init_db!(s::Session, db::AbstractString) = send_command!(s, COM_INIT_DB, codeunits(db))
-reset_connection!(s::Session) = send_command!(s, COM_RESET_CONNECTION)
+query!(s::Session, sql::AbstractString) = send_command!(s, COM_QUERY, codeunits(sql); kind=CMD_QUERY)
+ping!(s::Session) = send_command!(s, COM_PING; kind=CMD_SIMPLE)
+init_db!(s::Session, db::AbstractString) = send_command!(s, COM_INIT_DB, codeunits(db); kind=CMD_SIMPLE)
+reset_connection!(s::Session) = send_command!(s, COM_RESET_CONNECTION; kind=CMD_SIMPLE)
 
 function set_option!(s::Session, option::Integer)
     buf = UInt8[]
     write_u16!(buf, option)
-    return send_command!(s, COM_SET_OPTION, buf)
+    return send_command!(s, COM_SET_OPTION, buf; kind=CMD_SET_OPTION)
 end
 
 function stmt_close!(s::Session, statement_id::Integer)
@@ -117,7 +118,7 @@ Reads the first packet of a command response and advances the phase: an OK retur
 `Error`, a LOCAL INFILE request enters LOCAL_INFILE, and a column count reads the column
 definitions (plus the pre-DEPRECATE_EOF metadata EOF) and enters ROWS.
 """
-function read_command_response!(s::Session; kind::CommandKind=CMD_QUERY)
+function read_command_response!(s::Session; kind::CommandKind=s.command_kind)
     require_phase(s, CMD_SENT)
     p = readpacket!(s)
     what = guarded(() -> classify_command_response(kind, p), s)
@@ -203,7 +204,7 @@ Reads the next row packet (returned as a view valid until the next read) or the 
 terminator. A server ERR in row state ends the result set, returns the session to READY, and
 is thrown as `Error`.
 """
-function read_row!(s::Session; binary::Bool=false)
+function read_row!(s::Session; binary::Bool=s.command_kind == CMD_STMT_EXECUTE)
     require_phase(s, ROWS)
     p = readpacket!(s)
     what = guarded(() -> classify_row(p, binary), s)
@@ -239,7 +240,7 @@ end
 Advances from RESULT_END to the next result of a multi-result response (the sequence counter
 continues; nothing is sent).
 """
-function next_result!(s::Session; kind::CommandKind=CMD_QUERY)
+function next_result!(s::Session; kind::CommandKind=s.command_kind)
     require_phase(s, RESULT_END)
     s.result_sets < s.limits.max_result_sets || throw(fault!(s, ProtocolError("command produced more than $(s.limits.max_result_sets) result sets")))
     transition!(s, :next_result, CMD_SENT)
@@ -308,6 +309,7 @@ function send_local_infile!(s::Session, source::Union{Nothing, IO}; max_bytes::U
         end
     end
     sendpacket!(s, UInt8[])
+    s.command_kind = CMD_SIMPLE
     transition!(s, :upload_done, CMD_SENT)
     return sent
 end

@@ -328,19 +328,25 @@ end
         seen = Tuple{UInt8, Vector{UInt8}}[]
         with_peer(conn -> begin
             server_handshake!(conn)
-            _, command, data = read_command(conn)
-            push!(seen, (command, data))
-            send_packet(conn, 1, UInt8[0xFE, 0x00, 0x00, 0x02, 0x00])
+            for _ in 1:2
+                _, command, data = read_command(conn)
+                push!(seen, (command, data))
+                send_packet(conn, 1, UInt8[0xFE, 0x00, 0x00, 0x02, 0x00])
+            end
         end) do client
             s = P.Session(client; capabilities=CAPS_NO_DEPRECATE_EOF)
             client_handshake!(s)
             P.set_option!(s, P.MYSQL_OPTION_MULTI_STATEMENTS_ON)
-            response = P.read_command_response!(s; kind=P.CMD_SET_OPTION)
+            @test s.command_kind == P.CMD_SET_OPTION
+            response = P.read_command_response!(s)
             @test response isa P.EOFPacket
             @test response.status == P.SERVER_STATUS_AUTOCOMMIT
             @test s.phase == P.READY && s.result_sets == 1
+            P.set_option!(s, P.MYSQL_OPTION_MULTI_STATEMENTS_OFF)
+            P.drain!(s)
+            @test s.phase == P.READY
         end
-        @test seen == [(P.COM_SET_OPTION, UInt8[0x00, 0x00])]
+        @test seen == [(P.COM_SET_OPTION, UInt8[0x00, 0x00]), (P.COM_SET_OPTION, UInt8[0x01, 0x00])]
     end
 
     @testset "server ERR keeps the connection usable" begin

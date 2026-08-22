@@ -20,6 +20,7 @@ mutable struct Session
     status::UInt16
     generation::Int
     authenticated::Bool
+    command_kind::CommandKind
     result_sets::Int
     metadata_bytes::Int
     transition_log::Union{Nothing, Vector{Tuple{Phase, Symbol, Phase}}}
@@ -27,7 +28,7 @@ end
 
 function Session(transport::Transport; limits::Limits=Limits(), capabilities::UInt64=DEFAULT_CLIENT_CAPABILITIES, debug::Bool=false, log_transitions::Bool=false)
     log = log_transitions ? Tuple{Phase, Symbol, Phase}[] : nothing
-    return Session(transport, PacketIO(), limits, CONNECTING, debug, capabilities, capabilities, nothing, 0x0000, 1, false, 0, 0, log)
+    return Session(transport, PacketIO(), limits, CONNECTING, debug, capabilities, capabilities, nothing, 0x0000, 1, false, CMD_QUERY, 0, 0, log)
 end
 
 has_capability(s::Session, flag::UInt64) = has_capability(s.capabilities, flag)
