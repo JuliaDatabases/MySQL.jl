@@ -12,6 +12,15 @@ end
 
 PacketCursor(buf::Vector{UInt8}) = PacketCursor(buf, 1, length(buf))
 
+# Rebinds a reusable cursor (a fresh `PacketCursor` is a heap allocation; the per-row scan
+# paths reuse one per result cursor, §8.9).
+function reset!(c::PacketCursor, buf::Vector{UInt8}, lo::Int, hi::Int)
+    c.buf = buf
+    c.pos = lo
+    c.stop = hi
+    return c
+end
+
 remaining(c::PacketCursor) = c.stop - c.pos + 1
 atend(c::PacketCursor) = c.pos > c.stop
 

@@ -47,6 +47,17 @@ function transition!(s::Session, event::Symbol, to::Phase)
     return nothing
 end
 
+# The per-row `(ROWS, :row, ROWS)` self-transition is statically legal (the caller already
+# required phase ROWS), so the hot path skips the `TRANSITIONS` set lookup — it cost ~15%
+# of a 1M-row scan (§8.9) — while preserving coverage recording and the transition log.
+@inline function row_transition!(s::Session)
+    t = (ROWS, :row, ROWS)
+    COVERAGE_ENABLED[] && record_coverage(t)
+    s.transition_log === nothing || push!(s.transition_log, t)
+    s.debug && @debug "MySQL.Protocol transition" from=ROWS event=:row to=ROWS
+    return nothing
+end
+
 @noinline wrong_phase(s::Session, expected) = error("internal error: operation requires phase $expected, session is $(s.phase)")
 
 @inline function require_phase(s::Session, expected::Phase)

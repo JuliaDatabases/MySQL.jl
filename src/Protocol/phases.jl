@@ -73,8 +73,11 @@ const COVERAGE_LOCK = ReentrantLock()
 
 function record_coverage(t::Tuple{Phase, Symbol, Phase})
     COVERAGE_ENABLED[] || return nothing
-    lock(COVERAGE_LOCK) do
+    lock(COVERAGE_LOCK)
+    try
         push!(COVERAGE, t)
+    finally
+        unlock(COVERAGE_LOCK)
     end
     return nothing
 end

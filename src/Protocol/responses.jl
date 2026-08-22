@@ -297,10 +297,12 @@ Splits a text row into per-column windows of the packet buffer: `offsets[i]`/`le
 describe column `i`; NULL columns get `lengths[i] == -1`. Both vectors are resized to the
 number of columns found and reused across rows.
 """
-function scan_text_row!(p::PacketView, ncols::Int, offsets::Vector{Int}, lengths::Vector{Int})
+scan_text_row!(p::PacketView, ncols::Int, offsets::Vector{Int}, lengths::Vector{Int}) =
+    scan_text_row!(PacketCursor(p), ncols, offsets, lengths)
+
+function scan_text_row!(c::PacketCursor, ncols::Int, offsets::Vector{Int}, lengths::Vector{Int})
     resize!(offsets, ncols)
     resize!(lengths, ncols)
-    c = PacketCursor(p)
     for i in 1:ncols
         if peek_u8(c) == NULL_VALUE
             skip!(c, 1, "NULL marker")
@@ -384,19 +386,22 @@ just like `scan_text_row!` does for text rows: `offsets[i]`/`lengths[i]` describ
 offset 2). `coltypes` supplies each column's wire type so the self-describing temporal and
 fixed-width values can be measured. Both vectors are resized to the column count and reused.
 """
-function scan_binary_row!(coltypes::Vector{UInt8}, p::PacketView, offsets::Vector{Int}, lengths::Vector{Int})
+scan_binary_row!(coltypes::Vector{UInt8}, p::PacketView, offsets::Vector{Int}, lengths::Vector{Int}) =
+    scan_binary_row!(PacketCursor(p), coltypes, offsets, lengths)
+
+function scan_binary_row!(c::PacketCursor, coltypes::Vector{UInt8}, offsets::Vector{Int}, lengths::Vector{Int})
     ncols = length(coltypes)
     resize!(offsets, ncols)
     resize!(lengths, ncols)
-    c = PacketCursor(p)
     read_u8!(c) == OK_HEADER || protocol_error("malformed binary row: header byte is not 0x00")
     nullbytes = (ncols + 7 + 2) >> 3
     need!(c, nullbytes, "binary row NULL bitmap")
     nullmap_pos = c.pos
     c.pos += nullbytes
+    buf = c.buf
     for i in 1:ncols
         bit = i - 1 + 2
-        isnull = (@inbounds p.buf[nullmap_pos + (bit >> 3)] >> (bit & 7)) & 0x01 != 0
+        isnull = (@inbounds buf[nullmap_pos + (bit >> 3)] >> (bit & 7)) & 0x01 != 0
         if isnull
             offsets[i] = c.pos
             lengths[i] = -1

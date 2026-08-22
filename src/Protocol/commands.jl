@@ -213,18 +213,33 @@ that buffer) or the result-set terminator. A server ERR in row state ends the re
 returns the session to READY. It is thrown as `StmtError` for a binary prepared response and
 as `Error` for a text response.
 """
-function read_row!(s::Session; binary::Bool=s.command_kind == CMD_STMT_EXECUTE, dest::Vector{UInt8}=s.io.inbuf)
+# Function-call guard: a closure passed to `guarded` would allocate on every row, and a
+# `try` in `read_row!` itself would make it uninlinable (§8.9).
+function classify_row_guarded(s::Session, p::PacketView, binary::Bool)
+    try
+        return classify_row(p, binary)
+    catch err
+        throw(fault!(s, err))
+    end
+end
+
+@noinline function throw_row_err(s::Session, p::PacketView, binary::Bool)
+    e = guarded(() -> parse_err(p, s.capabilities), s)
+    transition!(s, :err, READY)
+    throw(binary ? StmtError(e) : Error(e))
+end
+
+# `@inline` so the `Union{PacketView, ResultEnd}` return is split at the call site instead
+# of boxing the row's `PacketView` on every iteration (§8.9).
+@inline function read_row!(s::Session; binary::Bool=s.command_kind == CMD_STMT_EXECUTE, dest::Vector{UInt8}=s.io.inbuf)
     require_phase(s, ROWS)
     p = readpacket!(s; dest=dest)
-    what = guarded(() -> classify_row(p, binary), s)
+    what = classify_row_guarded(s, p, binary)
     if what == :row
-        transition!(s, :row, ROWS)
+        row_transition!(s)
         return p
-    elseif what == :err
-        e = guarded(() -> parse_err(p, s.capabilities), s)
-        transition!(s, :err, READY)
-        throw(binary ? StmtError(e) : Error(e))
     end
+    what == :err && throw_row_err(s, p, binary)
     return finish_result!(s, p)
 end
 

@@ -37,6 +37,7 @@ mutable struct Cursor{binary, buffered} <: DBInterface.Cursor
     rowstarts::Vector{Int}
     offsets::Vector{Int}
     lengths::Vector{Int}
+    scratch::P.PacketCursor
     @atomic epoch::Int
     current_rownumber::Int
     current_resultsetnumber::Int
@@ -77,9 +78,10 @@ end
 check_active(::Cursor{B, true}) where {B} = nothing
 
 # Scanning one row into per-column windows and decoding one value are the only two points
-# where the two protocols differ.
-scan_row!(c::Cursor{false}, p::P.PacketView) = P.scan_text_row!(p, c.nfields, c.offsets, c.lengths)
-scan_row!(c::Cursor{true}, p::P.PacketView) = P.scan_binary_row!(c.coltypes, p, c.offsets, c.lengths)
+# where the two protocols differ. The cursor-owned scratch `PacketCursor` is rebound per
+# row (a fresh one is a heap allocation, §8.9).
+scan_row!(c::Cursor{false}, p::P.PacketView) = P.scan_text_row!(P.reset!(c.scratch, p.buf, p.lo, p.hi), c.nfields, c.offsets, c.lengths)
+scan_row!(c::Cursor{true}, p::P.PacketView) = P.scan_binary_row!(P.reset!(c.scratch, p.buf, p.lo, p.hi), c.coltypes, c.offsets, c.lengths)
 
 decode_column(c::Cursor{false}, ::Type{T}, i::Int) where {T} = decode(T, c.buf, c.offsets[i], c.lengths[i], c.opts)
 decode_column(c::Cursor{true}, ::Type{T}, i::Int) where {T} = decode_binary(T, c.buf, c.offsets[i], c.lengths[i], c.opts)
@@ -110,7 +112,7 @@ Base.length(c::Cursor) = c.nrows
 # ---- construction from a command response ----
 
 function empty_cursor(conn::Connection, sql::String, token::Int, ok::P.OKPacket, binary::Bool, buffered::Bool, opts::ResultOptions, number::Int)
-    c = Cursor{binary, buffered}(conn, sql, token, @atomic(conn.generation), Symbol[], Type[], Dict{Symbol, Int}(), UInt8[], 0, -1, Core.bitcast(Int64, ok.affected_rows), ok, ok.status, ok.warnings, UInt8[], UInt8[], Int[], Int[], Int[], 0, 0, number, true, false, opts)
+    c = Cursor{binary, buffered}(conn, sql, token, @atomic(conn.generation), Symbol[], Type[], Dict{Symbol, Int}(), UInt8[], 0, -1, Core.bitcast(Int64, ok.affected_rows), ok, ok.status, ok.warnings, UInt8[], UInt8[], Int[], Int[], Int[], P.PacketCursor(UInt8[]), 0, 0, number, true, false, opts)
     P.more_results(ok) || release_token!(c)
     return c
 end
@@ -126,7 +128,7 @@ function result_cursor(conn::Connection, sql::String, token::Int, header::P.Resu
     types = Type[juliatype(col, opts) for col in header.columns]
     lookup = Dict{Symbol, Int}(nm => i for (i, nm) in enumerate(names))
     coltypes = binary ? UInt8[col.type for col in header.columns] : UInt8[]
-    c = Cursor{binary, buffered}(conn, sql, token, @atomic(conn.generation), names, types, lookup, coltypes, n, buffered ? 0 : -1, Int64(0), nothing, UInt16(0), UInt16(0), UInt8[], UInt8[], Int[], Vector{Int}(undef, n), Vector{Int}(undef, n), 0, 0, number, false, false, opts)
+    c = Cursor{binary, buffered}(conn, sql, token, @atomic(conn.generation), names, types, lookup, coltypes, n, buffered ? 0 : -1, Int64(0), nothing, UInt16(0), UInt16(0), UInt8[], UInt8[], Int[], Vector{Int}(undef, n), Vector{Int}(undef, n), P.PacketCursor(UInt8[]), 0, 0, number, false, false, opts)
     buffered && buffer_rows!(c, s)
     return c
 end
@@ -175,7 +177,7 @@ function buffer_rows!(c::Cursor{binary, true}, s::P.Session) where {binary}
                 finish!(c, r)
                 break
             end
-            P.guarded(() -> scan_row!(c, r), s)
+            scan_row_guarded!(c, r, s)
             n = P.payload_length(r)
             charge_buffered!(conn, s, n + sizeof(Int))
             push!(c.rowstarts, length(c.buf) + 1)
@@ -207,12 +209,19 @@ end
 
 # ---- iteration ----
 
-function scan_current!(c::Cursor, p::P.PacketView, i::Int, s::Union{Nothing, P.Session}=nothing)
-    if s === nothing
+# Per-row guard without a closure (the closure passed to `P.guarded` allocated on every
+# streaming row; §8.9 requires allocations per row ≤ String/Vector columns + 1).
+@inline function scan_row_guarded!(c::Cursor, p::P.PacketView, s::P.Session)
+    try
         scan_row!(c, p)
-    else
-        P.guarded(() -> scan_row!(c, p), s)
+    catch err
+        throw(P.fault!(s, err))
     end
+    return nothing
+end
+
+function scan_current!(c::Cursor, p::P.PacketView, i::Int, s::Union{Nothing, P.Session}=nothing)
+    s === nothing ? scan_row!(c, p) : scan_row_guarded!(c, p, s)
     c.current_rownumber = i
     return nothing
 end
@@ -227,10 +236,15 @@ function Base.iterate(c::Cursor{binary, true}, i::Int=1) where {binary}
     return (Row{binary, true}(c, i, @atomic(c.epoch)), i + 1)
 end
 
-function Base.iterate(c::Cursor{binary, false}, i::Int=1) where {binary}
+# All streaming-row work, under the lock (explicit lock/unlock: a `lock(l) do` closure
+# would allocate per row). Returns whether a new current row exists. Kept out of `iterate`
+# so the thin wrapper inlines into user loops and the `Union{Nothing, Tuple}` iteration
+# protocol return does not heap-allocate on every row (§8.9).
+function stream_advance!(c::Cursor{binary, false}, i::Int) where {binary}
     conn = c.conn
-    lock(conn.lock) do
-        (c.closed || c.finished) && return nothing
+    lock(conn.lock)
+    try
+        (c.closed || c.finished) && return false
         check_active(c)
         s = session(conn)
         r = try
@@ -241,7 +255,7 @@ function Base.iterate(c::Cursor{binary, false}, i::Int=1) where {binary}
         end
         if r isa P.ResultEnd
             finish!(c, r)
-            return nothing
+            return false
         end
         # Stale the old row before replacing any state that it can observe. If scanning the
         # new row fails, the old row must not decode with partially replaced offsets.
@@ -253,8 +267,15 @@ function Base.iterate(c::Cursor{binary, false}, i::Int=1) where {binary}
             c.finished = true
             rethrow()
         end
-        return (Row{binary, false}(c, i, @atomic(c.epoch)), i + 1)
+        return true
+    finally
+        unlock(conn.lock)
     end
+end
+
+@inline function Base.iterate(c::Cursor{binary, false}, i::Int=1) where {binary}
+    stream_advance!(c, i) || return nothing
+    return (Row{binary, false}(c, i, @atomic(c.epoch)), i + 1)
 end
 
 """
