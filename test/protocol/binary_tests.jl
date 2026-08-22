@@ -66,6 +66,22 @@ function execute_new_params_flag(payload, nparams)
     return payload[4 + 1 + 4 + nb + 1]
 end
 
+@testset "COM_STMT_PREPARE_OK header shape" begin
+    header = UInt8[0x00]
+    P.write_u32!(header, 0x01020304)
+    P.write_u16!(header, 2)
+    P.write_u16!(header, 3)
+    P.write_u8!(header, 0)
+    @test P.parse_prepare_ok_header(pv(copy(header))) == (UInt32(0x01020304), 2, 3, UInt16(0))
+    P.write_u16!(header, 7)
+    @test P.parse_prepare_ok_header(pv(copy(header))) == (UInt32(0x01020304), 2, 3, UInt16(7))
+    @test_throws P.ProtocolError P.parse_prepare_ok_header(pv(vcat(header, 0x01)))
+    @test_throws P.ProtocolError P.parse_prepare_ok_header(pv(header[1:11]))
+    bad_reserved = copy(header)
+    bad_reserved[10] = 0x01
+    @test_throws P.ProtocolError P.parse_prepare_ok_header(pv(bad_reserved))
+end
+
 @testset "binary value decoder: fixed, float, string, temporal" begin
     o = N.DEFAULT_RESULT_OPTIONS
     # signed and unsigned integers at every width, boundaries included

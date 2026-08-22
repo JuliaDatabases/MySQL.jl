@@ -82,8 +82,15 @@ function parse_prepare_ok_header(p::PacketView)
     statement_id = read_u32!(c)
     ncols = Int(read_u16!(c))
     nparams = Int(read_u16!(c))
-    skip!(c, 1, "COM_STMT_PREPARE_OK reserved byte")
-    warnings = remaining(c) >= 2 ? read_u16!(c) : UInt16(0)
+    read_u8!(c) == 0x00 || protocol_error("malformed COM_STMT_PREPARE_OK reserved byte")
+    warnings = if atend(c)
+        UInt16(0)
+    elseif remaining(c) == 2
+        read_u16!(c)
+    else
+        protocol_error("malformed COM_STMT_PREPARE_OK header: expected a 10- or 12-byte payload, got $(payload_length(p)) bytes")
+    end
+    atend(c) || protocol_error("malformed COM_STMT_PREPARE_OK header: $(remaining(c)) trailing bytes")
     return (statement_id, ncols, nparams, warnings)
 end
 
