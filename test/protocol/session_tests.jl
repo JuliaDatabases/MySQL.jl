@@ -324,27 +324,31 @@ end
         end
     end
 
-    @testset "MariaDB COM_SET_OPTION EOF response" begin
+    @testset "COM_SET_OPTION vendor responses" begin
         seen = Tuple{UInt8, Vector{UInt8}}[]
-        with_peer(conn -> begin
-            server_handshake!(conn)
-            for _ in 1:2
+        cases = (
+            (P.MYSQL_OPTION_MULTI_STATEMENTS_ON, UInt8[0xFE, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00], P.DEFAULT_CLIENT_CAPABILITIES, true),
+            (P.MYSQL_OPTION_MULTI_STATEMENTS_OFF, UInt8[0xFE, 0x00, 0x00, 0x02, 0x00], CAPS_NO_DEPRECATE_EOF, false),
+        )
+        for (option, reply, caps, expect_ok) in cases
+            with_peer(conn -> begin
+                server_handshake!(conn)
                 _, command, data = read_command(conn)
                 push!(seen, (command, data))
-                send_packet(conn, 1, UInt8[0xFE, 0x00, 0x00, 0x02, 0x00])
+                send_packet(conn, 1, reply)
+            end) do client
+                s = P.Session(client; capabilities=caps)
+                client_handshake!(s)
+                P.set_option!(s, option)
+                @test s.command_kind == P.CMD_SET_OPTION
+                response = P.read_command_response!(s)
+                @test (response isa P.OKPacket) == expect_ok
+                if response isa P.OKPacket
+                    @test response.is_eof
+                end
+                @test response.status == P.SERVER_STATUS_AUTOCOMMIT
+                @test s.phase == P.READY && s.result_sets == 1
             end
-        end) do client
-            s = P.Session(client; capabilities=CAPS_NO_DEPRECATE_EOF)
-            client_handshake!(s)
-            P.set_option!(s, P.MYSQL_OPTION_MULTI_STATEMENTS_ON)
-            @test s.command_kind == P.CMD_SET_OPTION
-            response = P.read_command_response!(s)
-            @test response isa P.EOFPacket
-            @test response.status == P.SERVER_STATUS_AUTOCOMMIT
-            @test s.phase == P.READY && s.result_sets == 1
-            P.set_option!(s, P.MYSQL_OPTION_MULTI_STATEMENTS_OFF)
-            P.drain!(s)
-            @test s.phase == P.READY
         end
         @test seen == [(P.COM_SET_OPTION, UInt8[0x00, 0x00]), (P.COM_SET_OPTION, UInt8[0x01, 0x00])]
     end

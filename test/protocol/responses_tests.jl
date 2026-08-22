@@ -104,6 +104,8 @@ end
         @test P.more_results(P.EOFPacket(0, P.SERVER_MORE_RESULTS_EXISTS | P.SERVER_STATUS_AUTOCOMMIT))
         @test_throws P.ProtocolError P.parse_eof(pv(UInt8[0xFE, 0x00]), CAPS41)
         @test_throws P.ProtocolError P.parse_eof(pv(vcat(Vectors.payload(Vectors.EOF_EXAMPLE), 0x00)), CAPS41)
+        @test P.parse_eof(pv(UInt8[0xFE]), UInt64(0)) == P.EOFPacket(0, 0)
+        @test_throws P.ProtocolError P.parse_eof(pv(UInt8[0xFE, 0x00]), UInt64(0))
     end
 
     @testset "column definitions (vendor vectors)" begin
@@ -157,6 +159,7 @@ end
         @test_throws P.ProtocolError P.classify_command_response(P.CMD_SIMPLE, pv(UInt8[]))
         @test P.classify_command_response(P.CMD_SET_OPTION, pv(UInt8[0x00])) == :ok
         @test P.classify_command_response(P.CMD_SET_OPTION, pv(UInt8[0xFE, 0x00, 0x00, 0x02, 0x00])) == :eof
+        @test P.classify_command_response(P.CMD_SET_OPTION, pv(UInt8[0xFE, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00])) == :ok
         @test P.classify_command_response(P.CMD_QUERY, pv(UInt8[0xFB, 0x2F])) == :local_infile
         @test P.classify_command_response(P.CMD_QUERY, pv(UInt8[0x03])) == :column_count
         @test P.classify_command_response(P.CMD_QUERY, pv(UInt8[0xFC, 0x00, 0x01])) == :column_count

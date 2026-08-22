@@ -148,7 +148,10 @@ end
 function parse_eof(p::PacketView, caps::UInt64)
     c = PacketCursor(p)
     read_u8!(c) == EOF_HEADER || protocol_error("expected EOF packet")
-    has_capability(caps, CLIENT_PROTOCOL_41) || return EOFPacket(0x0000, 0x0000)
+    if !has_capability(caps, CLIENT_PROTOCOL_41)
+        atend(c) || protocol_error("malformed EOF packet: $(remaining(c)) trailing bytes")
+        return EOFPacket(0x0000, 0x0000)
+    end
     warnings = read_u16!(c)
     status = read_u16!(c)
     atend(c) || protocol_error("malformed EOF packet: $(remaining(c)) trailing bytes")
@@ -250,7 +253,11 @@ function classify_command_response(kind::CommandKind, p::PacketView)
         return unexpected_packet(CMD_SENT, p)
     elseif kind == CMD_SET_OPTION
         b == OK_HEADER && return :ok
-        is_eof_packet(p) && return :eof
+        if b == EOF_HEADER
+            n = payload_length(p)
+            (n == 1 || n == 5) && return :eof
+            return :ok
+        end
         return unexpected_packet(CMD_SENT, p)
     elseif kind == CMD_STMT_PREPARE
         b == OK_HEADER && return :prepare_ok
