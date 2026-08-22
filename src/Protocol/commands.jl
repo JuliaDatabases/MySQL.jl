@@ -145,6 +145,7 @@ end
 function finish_ok!(s::Session, p::PacketView)
     ok = guarded(() -> parse_ok(p, s.capabilities, s.limits), s)
     s.status = ok.status
+    s.command_kind == CMD_LOCAL_INFILE && (s.command_kind = CMD_QUERY)
     if more_results(ok)
         transition!(s, :ok_more, RESULT_END)
     else
@@ -313,7 +314,7 @@ function send_local_infile!(s::Session, source::Union{Nothing, IO}; max_bytes::U
         end
     end
     sendpacket!(s, UInt8[])
-    s.command_kind = CMD_SIMPLE
+    s.command_kind = CMD_LOCAL_INFILE
     transition!(s, :upload_done, CMD_SENT)
     return sent
 end

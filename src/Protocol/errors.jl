@@ -75,7 +75,10 @@ end
 struct LocalInfileRefused <: MySQLError
     filename::String
     msg::String
+    cause::Union{Nothing, ServerError}
 end
+
+LocalInfileRefused(filename::AbstractString, msg::AbstractString) = LocalInfileRefused(String(filename), String(msg), nothing)
 
 function Base.showerror(io::IO, e::Union{ProtocolError, AuthError, TimeoutError, ConversionError, TLSNegotiationError})
     print(io, nameof(typeof(e)), ": ", e.msg)

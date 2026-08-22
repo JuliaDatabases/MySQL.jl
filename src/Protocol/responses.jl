@@ -199,8 +199,9 @@ end
 # ---- classification ----
 
 @enum CommandKind begin
-    CMD_SIMPLE        # COM_PING, COM_INIT_DB, COM_SET_OPTION, COM_RESET_CONNECTION, COM_STMT_RESET, upload responses
+    CMD_SIMPLE        # COM_PING, COM_INIT_DB, COM_SET_OPTION, COM_RESET_CONNECTION, COM_STMT_RESET
     CMD_QUERY         # COM_QUERY: OK | ERR | LOCAL INFILE | text result set
+    CMD_LOCAL_INFILE  # upload response: OK | ERR; restores CMD_QUERY before later results
     CMD_STMT_PREPARE  # COM_STMT_PREPARE: PREPARE_OK | ERR
     CMD_STMT_EXECUTE  # COM_STMT_EXECUTE: OK | ERR | binary result set
     CMD_SET_OPTION    # COM_SET_OPTION: MySQL OK | MariaDB EOF | ERR
@@ -248,7 +249,7 @@ function classify_command_response(kind::CommandKind, p::PacketView)
     b = first_byte(p)
     b === nothing && return unexpected_packet(CMD_SENT, p)
     b == ERR_HEADER && return :err
-    if kind == CMD_SIMPLE
+    if kind == CMD_SIMPLE || kind == CMD_LOCAL_INFILE
         b == OK_HEADER && return :ok
         return unexpected_packet(CMD_SENT, p)
     elseif kind == CMD_SET_OPTION

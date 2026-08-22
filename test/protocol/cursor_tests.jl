@@ -31,6 +31,21 @@ function decode_text(T, value; opts=N.DEFAULT_RESULT_OPTIONS)
     return N.decode(T, buf, 1, length(buf), opts)
 end
 
+struct FailBeforeData <: IO end
+Base.eof(::FailBeforeData) = false
+Base.readbytes!(::FailBeforeData, ::Vector{UInt8}, ::Integer) = error("source failed before data")
+
+mutable struct FailAfterData <: IO
+    first::Bool
+end
+Base.eof(::FailAfterData) = false
+function Base.readbytes!(io::FailAfterData, buf::Vector{UInt8}, ::Integer)
+    io.first || error("source failed after data")
+    io.first = false
+    buf[1] = UInt8('x')
+    return 1
+end
+
 # Sends a complete text result set: column count, definitions, rows, OK terminator.
 function send_resultset(conn, seq, cols::Vector{Vector{UInt8}}, rows::Vector{Vector{UInt8}}; status=P.SERVER_STATUS_AUTOCOMMIT, more::Bool=false, terminator=nothing)
     send_packet(conn, seq, column_count(length(cols)))
@@ -416,7 +431,7 @@ end
         err = try; DBInterface.execute(conn, "load data local infile 'refuse'"); nothing; catch e; e; end
         @test err isa P.LocalInfileRefused && err.filename == "refuse" && occursin("accepted the empty upload", err.msg)
         err = try; DBInterface.execute(conn, "load data local infile 'refuse'"); nothing; catch e; e; end
-        @test err isa P.LocalInfileRefused && occursin("(1148)", err.msg)
+        @test err isa P.LocalInfileRefused && occursin("(1148)", err.msg) && err.cause isa P.Error && err.cause.errno == 1148
         err = try; DBInterface.execute(conn, "load data local infile 'boom'"); nothing; catch e; e; end
         @test err isa ErrorException && err.msg == "handler exploded"
         @test DBInterface.execute(conn, "ok").rows_affected == 9
@@ -424,6 +439,50 @@ end
     end
     @test uploads[1] == [Vector{UInt8}(codeunits("line1\nline2\n"))] && uploads[2] == [] && uploads[3] == [] && uploads[4] == [] && uploads[5] == []
     @test handler_calls == ["data.csv", "empty", "refuse", "refuse", "boom"]
+    # an IO failure before its first byte follows the same recoverable refusal path
+    with_native(c -> begin
+        expect_query(c); seq = infile_request(c, 1, "before"); seq, chunks = read_upload(c); @test isempty(chunks); send_ok(c, seq + 1)
+        expect_query(c); send_ok(c, 1; affected=3)
+    end; connect_kw=(; local_files=true, local_infile_handler=name -> FailBeforeData())) do conn
+        err = try; DBInterface.execute(conn, "load data local infile 'before'"); nothing; catch e; e; end
+        @test err isa ErrorException && err.msg == "source failed before data"
+        @test DBInterface.execute(conn, "ok").rows_affected == 3 && isopen(conn)
+    end
+    # an invalid handler return is also known to precede all upload bytes and is recoverable
+    with_native(c -> begin
+        expect_query(c); seq = infile_request(c, 1, "invalid"); seq, chunks = read_upload(c); @test isempty(chunks); send_ok(c, seq + 1)
+        expect_query(c); send_ok(c, 1)
+    end; connect_kw=(; local_files=true, local_infile_handler=name -> 7)) do conn
+        @test_throws ArgumentError DBInterface.execute(conn, "load data local infile 'invalid'")
+        @test DBInterface.execute(conn, "ok").rows_affected == 0 && isopen(conn)
+    end
+    # once a data packet was sent, the same source failure makes the stream ambiguous
+    with_native(c -> begin
+        expect_query(c); infile_request(c, 1, "after"); try; read_upload(c); catch; end
+    end; connect_kw=(; local_files=true, local_infile_handler=name -> FailAfterData(true))) do conn
+        err = try; DBInterface.execute(conn, "load data local infile 'after'"); nothing; catch e; e; end
+        @test err isa ErrorException && err.msg == "source failed after data"
+        @test !isopen(conn)
+    end
+    # a later statement can request an upload, and a following result remains a query result
+    cols = [coldef("x"; type=P.MYSQL_TYPE_LONG, flags=NOT_NULL)]
+    later_uploads = Vector{UInt8}[]
+    with_native(c -> begin
+        expect_query(c)
+        seq = send_resultset(c, 1, cols, [text_row("1")]; more=true)
+        infile_request(c, seq, "later")
+        upload_seq, chunks = read_upload(c)
+        append!(later_uploads, chunks)
+        seq = send_ok(c, upload_seq + 1; affected=2, more=true)
+        send_resultset(c, seq, cols, [text_row("3")])
+    end; connect_kw=(; multi_statements=true, local_files=true, local_infile_handler=name -> IOBuffer("payload"))) do conn
+        results = collect(DBInterface.executemultiple(conn, "select; load data local; select"))
+        @test length(results) == 3
+        @test Tables.columntable(results[1]).x == [1]
+        @test results[2].rows_affected == 2
+        @test Tables.columntable(results[3]).x == [3]
+    end
+    @test later_uploads == [Vector{UInt8}(codeunits("payload"))]
     # size limit crossed after data was sent: the connection is closed
     with_native(c -> (expect_query(c); infile_request(c, 1, "big"); try; read_upload(c); catch; end); connect_kw=(; local_files=true, local_infile_handler=name -> IOBuffer(repeat("z", 5000)), max_local_infile_bytes=4096)) do conn
         @test_throws P.ProtocolError DBInterface.execute(conn, "load data local infile 'big'")

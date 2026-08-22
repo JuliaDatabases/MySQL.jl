@@ -155,8 +155,9 @@ source are never read.
   treated the digits as an unscaled microsecond count, which was correct only at precision 6).
 - **LOCAL INFILE** follows the plan's state table: refusal (`nothing`) always raises
   `LocalInfileRefused` even when the server accepts the empty upload; a handler error before
-  any data is re-raised after resynchronizing; an error, size-limit crossing or write fault
-  after data closes the connection; an unsolicited `0xFB` is a `ProtocolError`.
+  any data (including the source's first read) is re-raised after resynchronizing; an error,
+  size-limit crossing or write fault after data closes the connection; an unsolicited `0xFB`
+  is a `ProtocolError`. Later results of the same COM_QUERY can request another upload.
 - **Reconnect** is narrow: only before a send, only when the session is known closed or
   broken, never inside a transaction; it bumps the generation so older cursors invalidate.
   `transaction` holds the connection lock across `f`.

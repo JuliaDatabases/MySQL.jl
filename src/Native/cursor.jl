@@ -247,39 +247,49 @@ end
 # ---- execute ----
 
 # LOCAL INFILE state table (docs/protocol-notes.md, plan §5.6).
+function resync_local_infile!(s::P.Session)
+    P.send_local_infile!(s, nothing)
+    try
+        return P.read_command_response!(s)
+    catch server_err
+        server_err isa P.ServerError || rethrow()
+        return server_err
+    end
+end
+
 function handle_local_infile!(conn::Connection, s::P.Session, req::P.LocalInfileRequest)
     handler = conn.options.local_infile_handler
     handler === nothing && throw(P.fault!(s, P.ProtocolError("the server requested a LOCAL INFILE upload but no local_infile_handler is configured")))
     filename = req.filename isa AbstractString ? String(req.filename) : String(copy(req.filename))
     source = try
         handler(filename)
-    catch err
+    catch
         # nothing sent yet: resynchronize with the empty packet, then raise the handler error
-        P.send_local_infile!(s, nothing)
-        try
-            P.read_command_response!(s)
-        catch server_err
-            server_err isa P.ServerError || rethrow()
-            @debug "LOCAL INFILE refused after a handler error" filename=filename server=server_err
-        end
+        reply = resync_local_infile!(s)
+        reply isa P.ServerError && @debug "LOCAL INFILE refused after a handler error" filename=filename server=reply
         rethrow()
     end
     if source === nothing
-        P.send_local_infile!(s, nothing)
-        detail = try
-            P.read_command_response!(s)
+        reply = resync_local_infile!(s)
+        detail = if reply isa P.ServerError
+            "the server replied: $(sprint(showerror, reply))"
+        else
             "the server accepted the empty upload"
-        catch server_err
-            server_err isa P.ServerError || rethrow()
-            "the server replied: $(sprint(showerror, server_err))"
         end
-        throw(P.LocalInfileRefused(filename, "the LOCAL INFILE upload of \"$filename\" was refused by local_infile_handler; $detail"))
+        cause = reply isa P.ServerError ? reply : nothing
+        throw(P.LocalInfileRefused(filename, "the LOCAL INFILE upload of \"$filename\" was refused by local_infile_handler; $detail", cause))
     end
-    source isa IO || throw(P.fault!(s, ArgumentError("local_infile_handler must return an IO or nothing, got $(typeof(source))")))
+    if !(source isa IO)
+        err = ArgumentError("local_infile_handler must return an IO or nothing, got $(typeof(source))")
+        resync_local_infile!(s)
+        throw(err)
+    end
     try
         P.send_local_infile!(s, source; max_bytes=conn.options.max_local_infile_bytes)
     catch err
-        P.is_terminal(s.phase) || throw(P.fault!(s, err))
+        if !P.is_terminal(s.phase)
+            resync_local_infile!(s)
+        end
         rethrow()
     end
     return P.read_command_response!(s)
@@ -355,6 +365,9 @@ function Base.iterate(tc::TextCursors{buffered}, first::Bool=true) where {buffer
         s = session(conn)
         s.phase == P.RESULT_END || return nothing
         resp = P.next_result!(s)
+        while resp isa P.LocalInfileRequest
+            resp = handle_local_infile!(conn, s, resp)
+        end
         tc.current = make_cursor(conn, tc.sql, cur.token, resp, buffered, tc.opts, cur.current_resultsetnumber + 1)
         return (tc.current, false)
     end
