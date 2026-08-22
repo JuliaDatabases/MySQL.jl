@@ -76,6 +76,8 @@ function execute_new_params_flag(payload, nparams)
     return payload[4 + 1 + 4 + nb + 1]
 end
 
+execute_null_bitmap(payload, nparams) = payload[10:(9 + ((nparams + 7) >> 3))]
+
 @testset "COM_STMT_PREPARE_OK header shape" begin
     header = UInt8[0x00]
     P.write_u32!(header, 0x01020304)
@@ -90,6 +92,50 @@ end
     bad_reserved = copy(header)
     bad_reserved[10] = 0x01
     @test_throws P.ProtocolError P.parse_prepare_ok_header(pv(bad_reserved))
+end
+
+@testset "COM_STMT_PREPARE errors and metadata limits" begin
+    with_native(c -> begin
+        expect_prepare(c)
+        send_err(c, 1, 1064, "bad prepared SQL"; sqlstate="42000")
+        @test expect_query(c) == "SELECT 1"
+        send_ok(c, 1)
+    end) do conn
+        err = try
+            DBInterface.prepare(conn, "bad SQL")
+            nothing
+        catch caught
+            caught
+        end
+        @test err isa P.StmtError && err.errno == 1064 && err.sqlstate == "42000"
+        @test DBInterface.execute(conn, "SELECT 1").rows_affected == 0
+    end
+
+    with_native(c -> begin
+        expect_prepare(c)
+        header = UInt8[0x00]
+        P.write_u32!(header, 1)
+        P.write_u16!(header, 2)
+        P.write_u16!(header, 0)
+        P.write_u8!(header, 0)
+        P.write_u16!(header, 0)
+        send_packet(c, 1, header)
+    end; connect_kw=(; max_columns=1)) do conn
+        @test_throws P.ProtocolError DBInterface.prepare(conn, "SELECT 1, 2")
+        @test !isopen(conn)
+    end
+
+    def = coldef("parameter_name"; type=P.MYSQL_TYPE_VAR_STRING)
+    with_native(c -> begin
+        expect_prepare(c)
+        try
+            send_prepare_ok(c, 1, 2, [def], P.ColumnDef[])
+        catch
+        end
+    end; connect_kw=(; max_metadata_bytes=length(def) - 1)) do conn
+        @test_throws P.ProtocolError DBInterface.prepare(conn, "SELECT ?")
+        @test !isopen(conn)
+    end
 end
 
 @testset "binary row spans and NULL bitmap boundaries" begin
@@ -154,6 +200,8 @@ end
     @test N.decode_binary(Vector{UInt8}, UInt8[0x00, 0xff], 1, 2, o) == UInt8[0x00, 0xff]
     @test N.decode_binary(Dec64, Vector{UInt8}(codeunits("12.345")), 1, 6, o) == d64"12.345"
     @test N.decode_binary(MySQL.API.Bit, UInt8[0x01, 0x02], 1, 2, o) == MySQL.API.Bit(0x0102)
+    @test N.decode_binary(MySQL.API.Bit, fill(0xff, 8), 1, 8, o) == MySQL.API.Bit(typemax(UInt64))
+    @test_throws P.ConversionError N.decode_binary(MySQL.API.Bit, fill(0xff, 9), 1, 9, o)
     # DATE (len 4), DATETIME (len 7 and 11), TIMESTAMP is the same as DATETIME
     date4 = UInt8[0xe8, 0x07, 0x02, 0x1d]                                   # 2024-02-29
     @test N.decode_binary(Date, date4, 1, 4, o) == Date(2024, 2, 29)
@@ -226,6 +274,27 @@ end
     @test blk[2] == 0x01                                      # new_params_bind_flag
     @test blk[3:end] == vcat(reinterpret(UInt8, sig), reinterpret(UInt8, Int32[9]))  # types, then only param 2's value
     @test isempty(N.encode_param_block((), UInt16[], true))
+
+    # The execute NULL bitmap uses bit offset 0 at every byte boundary.
+    for n in (1, 7, 8, 9, 64)
+        values = Any[Int8(1) for _ in 1:n]
+        values[end] = missing
+        block = N.encode_param_block(values, N.param_signature(values), true)
+        nullbytes = (n + 7) >> 3
+        expected = zeros(UInt8, nullbytes)
+        bit = n - 1
+        expected[(bit >> 3) + 1] |= UInt8(1) << (bit & 7)
+        @test block[1:nullbytes] == expected
+    end
+
+    # Parameter Bit bytes preserve the effective 1.x bind conversion. The big-endian Fix is
+    # for result decoding, not for parameter binding.
+    bit = MySQL.API.Bit(0x0102)
+    bitbuf = UInt8[]
+    N.encode_param_value!(bitbuf, bit)
+    c = P.PacketCursor(bitbuf)
+    off, len = P.read_lenenc_window_len!(c, "Bit parameter")
+    @test bitbuf[off:(off + len - 1)] == MySQL.API.bitvalue(bit)
 end
 
 @testset "prepare then execute: binary result set round trip" begin
@@ -251,6 +320,27 @@ end
         @test Tables.columntable(DBInterface.execute(stmt, (5,))).i == Int32[7]
         DBInterface.close!(stmt)
     end
+end
+
+@testset "parameter signature cache follows NULL type changes" begin
+    payloads = Vector{UInt8}[]
+    with_native(c -> begin
+        expect_prepare(c)
+        send_prepare_ok(c, 1, 4, paramdefs(1), P.ColumnDef[])
+        for _ in 1:4
+            push!(payloads, expect_execute(c))
+            send_ok(c, 1)
+        end
+    end) do conn
+        stmt = DBInterface.prepare(conn, "DO ?")
+        DBInterface.execute(stmt, (Int32(1),))
+        DBInterface.execute(stmt, (missing,))
+        DBInterface.execute(stmt, (nothing,))
+        DBInterface.execute(stmt, (Int32(2),))
+        DBInterface.close!(stmt)
+    end
+    @test execute_new_params_flag.(payloads, 1) == UInt8[0x01, 0x01, 0x00, 0x01]
+    @test [only(execute_null_bitmap(p, 1)) for p in payloads] == UInt8[0x00, 0x01, 0x01, 0x00]
 end
 
 @testset "prepared DML: OK result, rows_affected, lastrowid, empty schema" begin
@@ -316,22 +406,71 @@ end
     end
 end
 
-@testset "streaming binary cursor and the wrongrow contract" begin
+@testset "binary cursor wrongrow contract in both storage modes" begin
     cols = [coldef("x"; type=P.MYSQL_TYPE_LONG, flags=NOT_NULL)]
+    for buffered in (true, false)
+        with_native(c -> begin
+            expect_prepare(c); send_prepare_ok(c, 1, 3, P.ColumnDef[], cols)
+            expect_execute(c); send_resultset(c, 1, cols, [binary_row(Int32(1)), binary_row(Int32(2))])
+        end) do conn
+            stmt = DBInterface.prepare(conn, "SELECT x FROM t")
+            cur = DBInterface.execute(stmt; mysql_store_result=buffered)
+            expected_size = buffered ? Base.HasLength() : Base.SizeUnknown()
+            @test Base.IteratorSize(typeof(cur)) == expected_size
+            r1, st = iterate(cur)
+            @test r1.x == 1
+            r2, st = iterate(cur, st)
+            @test r2.x == 2
+            @test_throws ArgumentError r1.x           # forward-only: the old row is stale
+            @test iterate(cur, st) === nothing
+            DBInterface.close!(stmt)
+        end
+    end
+end
+
+@testset "binary NULL and zero-date schema contracts" begin
+    notnull = [coldef("x"; type=P.MYSQL_TYPE_LONG, flags=NOT_NULL)]
     with_native(c -> begin
-        expect_prepare(c); send_prepare_ok(c, 1, 3, P.ColumnDef[], cols)
-        expect_execute(c); send_resultset(c, 1, cols, [binary_row(Int32(1)), binary_row(Int32(2))])
+        expect_prepare(c); send_prepare_ok(c, 1, 5, P.ColumnDef[], notnull)
+        expect_execute(c); send_resultset(c, 1, notnull, [binary_row(missing)])
     end) do conn
         stmt = DBInterface.prepare(conn, "SELECT x FROM t")
-        cur = DBInterface.execute(stmt; mysql_store_result=false)
-        @test Base.IteratorSize(typeof(cur)) == Base.SizeUnknown()
-        r1, st = iterate(cur)
-        @test r1.x == 1
-        r2, st = iterate(cur, st)
-        @test r2.x == 2
-        @test_throws ArgumentError r1.x               # forward-only: the old row is stale
-        @test iterate(cur, st) === nothing
+        row = only(DBInterface.execute(stmt))
+        @test_throws P.ConversionError row.x
         DBInterface.close!(stmt)
+    end
+
+    dates = [
+        coldef("d"; type=P.MYSQL_TYPE_DATE, flags=NOT_NULL),
+        coldef("dt"; type=P.MYSQL_TYPE_DATETIME, flags=NOT_NULL),
+    ]
+    zero_and_partial = UInt8[0x00, 0x00, 0x00, 0x04, 0xe8, 0x07, 0x00, 0x01]
+    with_native(c -> begin
+        expect_prepare(c); send_prepare_ok(c, 1, 6, P.ColumnDef[], dates)
+        expect_execute(c); send_resultset(c, 1, dates, [zero_and_partial])
+    end; connect_kw=(; zero_dates=:missing)) do conn
+        stmt = DBInterface.prepare(conn, "SELECT d, dt FROM t")
+        cur = DBInterface.execute(stmt)
+        @test Tables.schema(cur).types == (Union{Missing, Date}, Union{Missing, DateTime})
+        row = only(cur)
+        @test row.d === missing && row.dt === missing
+        DBInterface.close!(stmt)
+    end
+end
+
+@testset "malformed binary rows fault before retention" begin
+    cols = [coldef("x"; type=P.MYSQL_TYPE_LONG, flags=NOT_NULL)]
+    with_native(c -> begin
+        expect_prepare(c); send_prepare_ok(c, 1, 7, P.ColumnDef[], cols)
+        expect_execute(c)
+        try
+            send_resultset(c, 1, cols, [UInt8[0x00, 0x00, 0x01]])
+        catch
+        end
+    end) do conn
+        stmt = DBInterface.prepare(conn, "SELECT x FROM t")
+        @test_throws P.ProtocolError DBInterface.execute(stmt)
+        @test !isopen(conn)
     end
 end
 
@@ -497,6 +636,17 @@ end
         @test cur isa N.BinaryCursor && Tables.columntable(cur).x == Int32[2, 4]
         @test DBInterface.execute(conn, "SELECT 1").rows_affected == 1
     end
+
+    with_native(c -> begin
+        expect_prepare(c); send_prepare_ok(c, 1, 92, paramdefs(1), cols)
+        expect_execute(c); send_resultset(c, 1, cols, [binary_row(Int32(2)), binary_row(Int32(4))])
+        @test expect_stmt_close(c) == 92
+        expect_query(c); send_ok(c, 1; affected=1)
+    end) do conn
+        DBInterface.execute(conn, "SELECT x FROM t WHERE x >= ?", (1,); mysql_store_result=false)
+        # begin_command! must drain the unread binary rows before it reaps the one-shot id.
+        @test DBInterface.execute(conn, "SELECT 1").rows_affected == 1
+    end
 end
 
 @testset "executemany binds each row in a transaction" begin
@@ -539,6 +689,32 @@ end
     end
 end
 
+@testset "a later prepared result error remains a StmtError" begin
+    cols = [coldef("x"; type=P.MYSQL_TYPE_LONG, flags=NOT_NULL)]
+    with_native(c -> begin
+        expect_prepare(c); send_prepare_ok(c, 1, 32, P.ColumnDef[], cols)
+        expect_execute(c)
+        seq = send_resultset(c, 1, cols, [binary_row(Int32(1))]; more=true)
+        send_err(c, seq, P.ER_QUERY_INTERRUPTED, "later result failed")
+        @test expect_query(c) == "SELECT 1"
+        send_ok(c, 1)
+    end) do conn
+        stmt = DBInterface.prepare(conn, "CALL p()")
+        results = DBInterface.executemultiple(stmt)
+        first, state = iterate(results)
+        @test Tables.columntable(first).x == Int32[1]
+        err = try
+            iterate(results, state)
+            nothing
+        catch caught
+            caught
+        end
+        @test err isa P.StmtError && err.errno == P.ER_QUERY_INTERRUPTED
+        @test DBInterface.execute(conn, "SELECT 1").rows_affected == 0
+        DBInterface.close!(stmt)
+    end
+end
+
 @testset "parameter types round-trip through encode and the binary decoders" begin
     o = N.DEFAULT_RESULT_OPTIONS
     roundtrip(T, x) = begin
@@ -556,6 +732,12 @@ end
         end
     end
     @test roundtrip(Int8, Int8(-5)) === Int8(-5)
+    @test roundtrip(UInt8, typemax(UInt8)) === typemax(UInt8)
+    @test roundtrip(Int16, typemin(Int16)) === typemin(Int16)
+    @test roundtrip(UInt16, typemax(UInt16)) === typemax(UInt16)
+    @test roundtrip(Int32, typemin(Int32)) === typemin(Int32)
+    @test roundtrip(UInt32, typemax(UInt32)) === typemax(UInt32)
+    @test roundtrip(Int64, typemin(Int64)) === typemin(Int64)
     @test roundtrip(UInt64, UInt64(9)) === UInt64(9)
     @test roundtrip(Float32, 1.5f0) === 1.5f0
     @test roundtrip(Float64, -2.5) === -2.5
@@ -567,6 +749,14 @@ end
     @test roundtrip(DateTime, DateTime(2024, 2, 29, 13, 14, 15, 250)) == DateTime(2024, 2, 29, 13, 14, 15, 250)
     @test roundtrip(MySQL.DateAndTime, MySQL.DateAndTime(Date(2024, 1, 2), Time(1, 2, 3, 456, 789))) == MySQL.DateAndTime(Date(2024, 1, 2), Time(1, 2, 3, 456, 789))
     @test roundtrip(Time, Time(13, 14, 15)) == Time(13, 14, 15)
+    @test roundtrip(Time, Time(13, 14, 15, 250, 500)) == Time(13, 14, 15, 250, 500)
+
+    decimal = Dec128("12345678901234567890123456789.123456")
+    encoded_decimal = UInt8[]
+    N.encode_param_value!(encoded_decimal, decimal)
+    c = P.PacketCursor(encoded_decimal)
+    @test P.read_lenenc_string!(c, "Dec128 parameter") == string(decimal)
+    @test P.atend(c)
 end
 
 @testset "COM_STMT_SEND_LONG_DATA framing" begin
