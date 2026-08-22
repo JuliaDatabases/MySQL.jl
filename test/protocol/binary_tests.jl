@@ -372,24 +372,33 @@ end
 
 @testset "prepared API compatibility checks and execute-time metadata" begin
     dtcol = coldef("dt"; type=P.MYSQL_TYPE_DATETIME, flags=NOT_NULL)
+    changedcol = coldef("changed"; type=P.MYSQL_TYPE_VAR_STRING, flags=NOT_NULL)
     with_native(c -> begin
         expect_prepare(c)
         send_prepare_ok(c, 1, 61, P.ColumnDef[], [dtcol])
         expect_execute(c)
-        send_resultset(c, 1, [dtcol], Vector{UInt8}[])
+        send_resultset(c, 1, [changedcol], Vector{UInt8}[];
+            status=P.SERVER_STATUS_AUTOCOMMIT | P.SERVER_STATUS_METADATA_CHANGED)
 
         expect_prepare(c)
         send_prepare_ok(c, 1, 62, P.ColumnDef[], P.ColumnDef[])
         expect_execute(c)
         send_resultset(c, 1, [dtcol], Vector{UInt8}[])
+        expect_execute(c)
+        send_resultset(c, 1, [dtcol], Vector{UInt8}[])
     end) do conn
         static_stmt = DBInterface.prepare(conn, "SELECT CAST(NOW() AS DATETIME) AS dt")
         static_cur = DBInterface.execute(static_stmt; mysql_date_and_time=true)
-        @test Tables.schema(static_cur).types == (DateTime,)
+        @test Tables.schema(static_cur) == Tables.Schema((:changed,), (String,))
+        @test static_stmt.names == [:changed] && static_stmt.types == Type[String]
 
         dynamic_stmt = DBInterface.prepare(conn, "CALL dynamic_metadata()")
         dynamic_cur = DBInterface.execute(dynamic_stmt; mysql_date_and_time=true)
         @test Tables.schema(dynamic_cur).types == (MySQL.DateAndTime,)
+        @test dynamic_stmt.names == [:dt] && dynamic_stmt.types == Type[MySQL.DateAndTime]
+        # Caching the execute-time definitions must not turn a dynamic statement into a
+        # static one: each execute still honours its own mysql_date_and_time keyword.
+        @test Tables.schema(DBInterface.execute(dynamic_stmt)).types == (DateTime,)
         DBInterface.close!(static_stmt)
         DBInterface.close!(dynamic_stmt)
     end

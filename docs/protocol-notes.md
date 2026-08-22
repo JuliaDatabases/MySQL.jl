@@ -202,6 +202,9 @@ source are never read.
   closes the superseded id after the new prepare succeeds. A second 1615 propagates as
   `StmtError`. A statement whose generation predates a reconnect is re-prepared lazily on
   its next execute; its old id belongs to the dead session and is not closed on the new one.
+  Execute-time column definitions are authoritative and refresh the statement's cached
+  metadata; a statement prepared without static metadata still honours the per-execute
+  `mysql_date_and_time` keyword after that refresh.
 - **Binary temporal decoding preserves the 1.x prepared-statement quirks** except the shared
   Fixes: a sub-millisecond DATETIME **warns and truncates to milliseconds** (this differs from
   the text path, which warns and fails — both faithfully mirror what 1.x does on each

@@ -23,6 +23,7 @@ mutable struct Statement <: DBInterface.Statement
     lookup::Dict{Symbol, Int}
     last_signature::Vector{UInt16}
     date_and_time::Bool
+    dynamic_metadata::Bool
     closed::Bool
     reap::StatementReapEntry
 end
@@ -64,6 +65,7 @@ function DBInterface.prepare(conn::Connection, sql::AbstractString; mysql_date_a
             lookup,
             UInt16[],
             mysql_date_and_time,
+            isempty(ok.columns),
             false,
             StatementReapEntry(ok.statement_id, generation, nothing, false),
         )
@@ -92,6 +94,7 @@ function reprepare!(conn::Connection, s::P.Session, stmt::Statement; close_previ
     stmt.params = ok.params
     stmt.columns = ok.columns
     stmt.names, stmt.types, stmt.lookup = statement_schema(conn, ok, stmt.date_and_time)
+    stmt.dynamic_metadata = isempty(ok.columns)
     empty!(stmt.last_signature)
     return nothing
 end
@@ -147,13 +150,23 @@ function DBInterface.execute(stmt::Statement, params=(); mysql_store_result::Boo
             send_execute!(s, stmt, params)
             P.read_command_response!(s)
         end
-        date_and_time = isempty(stmt.columns) ? mysql_date_and_time : stmt.date_and_time
+        date_and_time = stmt.dynamic_metadata ? mysql_date_and_time : stmt.date_and_time
         opts = ResultOptions(;
             date_and_time=date_and_time,
             zero_dates=conn.results.zero_dates,
             time_type=conn.results.time_type,
         )
-        return make_cursor(conn, stmt.sql, token, resp, true, mysql_store_result, opts, 1)
+        cursor = make_cursor(conn, stmt.sql, token, resp, true, mysql_store_result, opts, 1)
+        if resp isa P.ResultHeader
+            # Execute-time definitions are authoritative. Reuse the cursor's immutable
+            # schema arrays so a METADATA_CHANGED response cannot leave the Statement cache
+            # stale. `dynamic_metadata` retains the prepare-time keyword-dispatch contract.
+            stmt.columns = resp.columns
+            stmt.names = cursor.names
+            stmt.types = cursor.types
+            stmt.lookup = cursor.lookup
+        end
+        return cursor
     end
 end
 
