@@ -70,12 +70,15 @@ const TEXT_ROW_TUPLE = (
             iterate(cur, st)
             try; r1.ID; "no error"; catch e; (typeof(e) <: ArgumentError, e.msg); end
         end),
-    Row("DML cursor: rows_affected, lastrowid, length, empty schema", :preserve,
+    Row("DML cursor: rows_affected, lastrowid, and empty schema", :preserve,
         conn -> let cur = DBInterface.execute(conn, "INSERT INTO manifest_employee (Name) VALUES ('x'), ('y')")
             res = (cur.rows_affected, Int(DBInterface.lastrowid(cur)) > 0, isempty(Tables.columntable(cur)), Tables.schema(cur).names)
             DBInterface.execute(conn, "DELETE FROM manifest_employee WHERE Name IN ('x', 'y')")
             res
         end),
+    Row("DML cursor length is zero (1.x kept the -1 streaming sentinel)", :fix,
+        conn -> length(DBInterface.execute(conn, "UPDATE manifest_employee SET Name = Name WHERE ID = 1"));
+        native=0, legacy=-1),
     Row("lastrowid on a SELECT cursor: snapshot of the cursor's own terminator (1.x: sticky connection state)", :fix,
         conn -> begin
             DBInterface.execute(conn, "INSERT INTO manifest_employee (Name) VALUES ('z')")
@@ -126,6 +129,12 @@ const TEXT_ROW_TUPLE = (
             n = Tables.columntable(DBInterface.execute(conn, "SELECT COUNT(*) AS c FROM manifest_employee WHERE Name = 'tx'")).c[1]
             DBInterface.execute(conn, "DELETE FROM manifest_employee WHERE Name = 'tx'")
             (v, n)
+        end),
+    Row("cursor close is idempotent and a closed cursor iterates empty", :preserve,
+        conn -> let cur = DBInterface.execute(conn, "SELECT ID FROM manifest_employee LIMIT 1")
+            DBInterface.close!(cur)
+            DBInterface.close!(cur)
+            iterate(cur) === nothing
         end),
     Row("show format", :preserve,
         conn -> occursin(r"^MySQL\.(Native\.)?Connection\(host=\"[^\"]+\", user=\"root\", port=\"\d+\", db=\"manifest\"\)$", sprint(show, conn))),

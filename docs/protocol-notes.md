@@ -129,8 +129,9 @@ source are never read.
   `Protocol.is_unsigned` derives numeric-ness from the wire type — otherwise
   `BIGINT UNSIGNED`/`YEAR` would decode as signed.
 - **Rows are valid only while current** (`wrongrow`, same `ArgumentError` text as 1.x): every
-  `iterate` bumps the cursor's `epoch` and each `TextRow` carries the epoch it was issued
-  under. Streaming cursors additionally own the connection's in-flight response through an
+  yielded row, outer-result advance, and explicit cursor close bumps the cursor's `epoch`;
+  each `TextRow` carries the epoch it was issued under. Streaming cursors additionally own
+  the connection's in-flight response through a per-result
   atomic `active_token` plus the connection `generation`; a foreign command drains the
   response and the cursor's rows raise `ProtocolError("cursor invalidated …")`. Buffered
   cursors own their bytes and survive later commands.

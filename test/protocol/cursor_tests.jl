@@ -302,6 +302,22 @@ end
     end
 end
 
+@testset "cursor close is local and idempotent" begin
+    cols = [coldef("x"; type=P.MYSQL_TYPE_LONG, flags=NOT_NULL)]
+    with_native(c -> begin
+        expect_query(c); send_resultset(c, 1, cols, [text_row("1"), text_row("2")])
+        expect_query(c); send_ok(c, 1; affected=3)
+    end) do conn
+        cur = DBInterface.execute(conn, "select")
+        row = first(cur)
+        DBInterface.close!(cur)
+        DBInterface.close!(cur)
+        @test iterate(cur) === nothing
+        @test_throws ArgumentError row.x
+        @test DBInterface.execute(conn, "after close").rows_affected == 3
+    end
+end
+
 @testset "multiple results: distinct cursors, drains, errors, budgets" begin
     cols = [coldef("x"; type=P.MYSQL_TYPE_LONG, flags=NOT_NULL)]
     cols2 = [coldef("a"; type=P.MYSQL_TYPE_VAR_STRING), coldef("a"; type=P.MYSQL_TYPE_LONG, flags=NOT_NULL)]
@@ -355,6 +371,19 @@ end
         c2, _ = iterate(tc, outer)
         @test_throws ArgumentError r1.x
         @test first(c2).x == 2
+    end
+    # closing an older cursor must not drain the newer result that now owns the response
+    with_native(c -> begin
+        expect_query(c)
+        seq = send_resultset(c, 1, cols, [text_row("1")]; more=true)
+        send_resultset(c, seq, cols, [text_row("2"), text_row("3")])
+    end; connect_kw=(; multi_statements=true)) do conn
+        tc = DBInterface.executemultiple(conn, "select; select"; mysql_store_result=false)
+        c1, outer = iterate(tc)
+        @test first(c1).x == 1
+        c2, _ = iterate(tc, outer)
+        DBInterface.close!(c1)
+        @test [r.x for r in c2] == [2, 3]
     end
     # a later ERR ends the iteration with Error, connection usable
     with_native(c -> begin
@@ -429,6 +458,14 @@ end
     with_native(c -> (expect_query(c); try; send_resultset(c, 1, [col], [malformed]); catch; end)) do conn
         cur = DBInterface.execute(conn, "select"; mysql_store_result=false)
         @test_throws P.ProtocolError iterate(cur)
+        @test !isopen(conn)
+    end
+    with_native(c -> (expect_query(c); try; send_resultset(c, 1, [col], [text_row("valid"), malformed]); catch; end)) do conn
+        cur = DBInterface.execute(conn, "select"; mysql_store_result=false)
+        row, state = iterate(cur)
+        @test row.s == "valid"
+        @test_throws P.ProtocolError iterate(cur, state)
+        @test_throws ArgumentError row.s
         @test !isopen(conn)
     end
 end
