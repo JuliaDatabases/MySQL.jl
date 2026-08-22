@@ -836,11 +836,13 @@ end
         send_ok(c, 1)
     end) do conn
         stmt = DBInterface.prepare(conn, "INSERT INTO t VALUES (?)")
+        @test_throws MySQL.MySQLInterfaceError N.send_long_data!(stmt, 1, "out of range")
         chunk = UInt8[0x61, 0x62]
         N.send_long_data!(stmt, 0, chunk)
         N.send_long_data!(stmt, 0, "c")
         chunk[1] = 0x7a   # the retained replay must own its bytes
         @test length(stmt.long_data) == 2
+        @test_throws MySQL.MySQLInterfaceError DBInterface.execute(stmt, (Int32(1),))
         DBInterface.execute(stmt, (UInt8[0xff],))
         @test isempty(stmt.long_data)
         DBInterface.close!(stmt)
