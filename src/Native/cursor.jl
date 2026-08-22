@@ -385,7 +385,8 @@ end
 Iterates every result of a multi-statement (needs `multi_statements=true`) or CALL response
 as a **distinct** cursor with its own metadata and OK snapshot; DML results and the final OK
 of a CALL yield empty cursors. Advancing past an unconsumed streaming result drains it and
-invalidates its rows; a later server error ends the iteration with `MySQL.Protocol.Error`.
+invalidates its rows; a later server error ends the iteration with `MySQL.Protocol.Error` for
+text commands or `MySQL.Protocol.StmtError` for prepared commands.
 """
 mutable struct Cursors{binary, buffered}
     conn::Connection

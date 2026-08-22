@@ -117,8 +117,9 @@ end
 
 Reads the first packet of a command response and advances the phase: an OK returns to READY
 (or RESULT_END when MORE_RESULTS_EXISTS is set), an ERR returns to READY and is thrown as
-`Error`, a LOCAL INFILE request enters LOCAL_INFILE, and a column count reads the column
-definitions (plus the pre-DEPRECATE_EOF metadata EOF) and enters ROWS.
+`Error` for connection commands or `StmtError` for prepared commands, a LOCAL INFILE request
+enters LOCAL_INFILE, and a column count reads the column definitions (plus the
+pre-DEPRECATE_EOF metadata EOF) and enters ROWS.
 """
 function read_command_response!(s::Session; kind::CommandKind=s.command_kind)
     require_phase(s, CMD_SENT)

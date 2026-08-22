@@ -823,6 +823,35 @@ end
     end
 end
 
+@testset "COM_STMT_RESET retains the id and cached parameter signature" begin
+    payloads = Vector{UInt8}[]
+    with_native(c -> begin
+        expect_prepare(c)
+        send_prepare_ok(c, 1, 52, paramdefs(1), P.ColumnDef[])
+        push!(payloads, expect_execute(c))
+        send_ok(c, 1)
+        _, cmd, payload = read_command(c)
+        @test cmd == P.COM_STMT_RESET
+        @test payload == reinterpret(UInt8, UInt32[52])
+        send_ok(c, 1)
+        push!(payloads, expect_execute(c))
+        send_ok(c, 1)
+    end) do conn
+        stmt = DBInterface.prepare(conn, "DO ?")
+        DBInterface.execute(stmt, (Int32(1),))
+        lock(conn.lock) do
+            s = N.session(conn)
+            P.stmt_reset!(s, stmt.statement_id)
+            @test P.read_command_response!(s) isa P.OKPacket
+        end
+        @test stmt.statement_id == 52
+        DBInterface.execute(stmt, (Int32(2),))
+        DBInterface.close!(stmt)
+    end
+    # RESET clears accumulated long data and cursor state, not the parameter type cache.
+    @test execute_new_params_flag.(payloads, 1) == UInt8[0x01, 0x00]
+end
+
 @testset "buffered binary metadata charges its column type table" begin
     col = coldef("x"; type=P.MYSQL_TYPE_LONG, flags=NOT_NULL)
     limit = length(col) + 3 * sizeof(Int)
