@@ -104,6 +104,7 @@ pview(payload::Vector{UInt8}; seq=0x00) = P.PacketView(payload, 1, length(payloa
         @test info.version == v"11.4.2" && info.kind == :mariadb
         # the 5.5.5- prefix is only stripped for MariaDB
         @test P.normalize_version("5.5.5-10.6.1-MariaDB", :mysql) == v"5.5.5"
+        @test P.normalize_version("5.5.5-12.3.2-MariaDB-log", :mariadb) == v"12.3.2"
         @test P.normalize_version("garbage", :mysql) == v"0.0.0"
         @test P.detect_kind("8.0.11-TiDB-v7.5.0", MYSQL8_SERVER_CAPS) == :tidb
         @test P.detect_kind("8.0.30-Vitess", MYSQL8_SERVER_CAPS) == :vitess
