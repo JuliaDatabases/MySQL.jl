@@ -63,11 +63,17 @@ function apply_deadline!(t::P.Transport, deadline::Int64)
     return nothing
 end
 
+function resolve_bind(bind::Union{Nothing, String})
+    bind === nothing && return nothing
+    return Reseau.HostResolvers.resolve_tcp_addr("tcp", hostport(bind, 0))
+end
+
 function dial(opts::ConnectOptions, deadline::Int64)
     address = hostport(opts.host, opts.port)
     try
-        deadline == 0 && return Reseau.TCP.connect(address)
-        return Reseau.TCP.connect(address; timeout_ns=remaining_ns(deadline))
+        local_addr = resolve_bind(opts.bind)
+        deadline == 0 && return Reseau.TCP.connect(address; local_addr=local_addr)
+        return Reseau.TCP.connect(address; timeout_ns=remaining_ns(deadline), local_addr=local_addr)
     catch err
         P.is_deadline_error(err) && throw(P.TimeoutError("connect_timeout expired while connecting to $address"))
         rethrow()

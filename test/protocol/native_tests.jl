@@ -176,6 +176,18 @@ function abandon_handles(port, n)
     return refs, entries
 end
 
+@testset "outbound bind address" begin
+    multi_accept_server() do port
+        h = native_connect(port; ssl_mode=:disabled, bind="127.0.0.1")
+        try
+            local_addr = Reseau.TCP.local_addr(h.session.transport)
+            @test local_addr.ip == (0x7F, 0x00, 0x00, 0x01)
+        finally
+            N.close!(h)
+        end
+    end
+end
+
 @testset "reaper: exactly-once, finalizer-free reclamation" begin
     N.reap_now!()
     @test N.pending_reaps() == 0
