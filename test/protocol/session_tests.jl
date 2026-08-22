@@ -631,6 +631,7 @@ end
             @test P.next_result!(s) isa P.OKPacket
             @test_throws P.ProtocolError P.next_result!(s)
             @test s.phase == P.BROKEN
+            @test s.io.seq == 0x03
         end
         with_peer(conn -> begin
             server_handshake!(conn)

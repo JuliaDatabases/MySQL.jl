@@ -232,6 +232,7 @@ continues; nothing is sent).
 """
 function next_result!(s::Session; kind::CommandKind=CMD_QUERY)
     require_phase(s, RESULT_END)
+    s.result_sets < s.limits.max_result_sets || throw(fault!(s, ProtocolError("command produced more than $(s.limits.max_result_sets) result sets")))
     transition!(s, :next_result, CMD_SENT)
     return read_command_response!(s; kind=kind)
 end
