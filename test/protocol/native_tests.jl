@@ -29,6 +29,9 @@
     @test N.ConnectOptions("h", "u"; server_public_key=certfile("rsa2048.pub")).auth.server_public_key == pem("rsa2048.pub")
     @test_throws ArgumentError N.ConnectOptions("h", "u"; server_public_key="missing-public-key.pem")
     @test_throws ArgumentError N.ConnectOptions("h", "u"; max_local_infile_bytes=0)
+    @test !N.ConnectOptions("h", "u"; reconnect=nothing).reconnect
+    @test N.ConnectOptions("h", "u"; reconnect=true).reconnect
+    @test N.ConnectOptions("h", "u"; max_allowed_packet=nothing).limits.max_packet == P.DEFAULT_MAX_PACKET
     @test N.ConnectOptions("h", "u"; max_allowed_packet=1024 * 1024).limits.max_packet == 1024 * 1024
     @test N.ConnectOptions("h", "u"; max_response_bytes=nothing).limits.max_response_bytes === nothing
     @test N.ConnectOptions("h", "u"; can_handle_expired_passwords=true).client_flags & P.CLIENT_CAN_HANDLE_EXPIRED_PASSWORDS != 0
