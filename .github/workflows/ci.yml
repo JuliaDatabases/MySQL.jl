@@ -4,9 +4,14 @@ on:
     branches: [main]
     tags: ["*"]
   pull_request:
+  schedule:
+    # nightly deterministic fuzz budget (plan §8.4); the smoke batch runs in every test job
+    - cron: "17 6 * * *"
+  workflow_dispatch:
 jobs:
   test:
     name: Julia ${{ matrix.version }} - ${{ matrix.os }} - ${{ matrix.arch }} - ${{ github.event_name }}
+    if: github.event_name != 'schedule'
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -52,8 +57,29 @@ jobs:
         with:
           files: lcov.info
           token: ${{ secrets.CODECOV_TOKEN }}
+  fuzz:
+    # Budgeted mutation fuzzing in isolated worker processes (test/protocol/fuzz.jl via
+    # scripts/fuzz.jl); scheduled nightly, or run on demand with workflow_dispatch.
+    name: Nightly fuzz
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: "1"
+      - uses: julia-actions/cache@v2
+      - uses: julia-actions/julia-buildpkg@v1
+      - run: julia --project=. scripts/fuzz.jl --minutes 30 --seed $(date +%Y%m%d)000000 --out fuzz_failures
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: fuzz-failures
+          path: fuzz_failures/
   docs:
     name: Documentation
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
