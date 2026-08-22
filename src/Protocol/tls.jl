@@ -93,11 +93,12 @@ function starttls!(s::Session, opts::TLSOptions, host::AbstractString; handshake
     tcp = raw_tcp(s.transport)
     config = tls_config(opts, host, handshake_timeout_ns)
     send_ssl_request!(s)
-    tls = Reseau.TLS.client(tcp, config)
+    tls = nothing
     try
+        tls = Reseau.TLS.client(tcp, config)
         Reseau.TLS.handshake!(tls)
     catch err
-        transport_close(tls)
+        tls === nothing || transport_close(tls)
         throw(fault!(s, tls_failure(err)))
     end
     replace_transport!(s, tls)
