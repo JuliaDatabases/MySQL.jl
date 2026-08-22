@@ -82,6 +82,44 @@ end
     @test_throws P.ProtocolError P.parse_prepare_ok_header(pv(bad_reserved))
 end
 
+@testset "binary row spans and NULL bitmap boundaries" begin
+    for n in (1, 7, 8, 9, 64)
+        null_index = n
+        row = UInt8[0x00]
+        nullbytes = (n + 7 + 2) >> 3
+        nullmap = zeros(UInt8, nullbytes)
+        bit = null_index - 1 + 2
+        nullmap[(bit >> 3) + 1] |= UInt8(1) << (bit & 7)
+        append!(row, nullmap)
+        append!(row, fill(0x2a, n - 1))
+        offsets, lengths = Int[], Int[]
+        P.scan_binary_row!(fill(P.MYSQL_TYPE_TINY, n), pv(row), offsets, lengths)
+        @test length(offsets) == n && length(lengths) == n
+        @test lengths[1:(n - 1)] == fill(1, n - 1)
+        @test lengths[n] == -1
+    end
+
+    row = UInt8[0x00, 0x00]
+    P.write_u32!(row, 7)
+    append!(row, UInt8[0x07, 0xe8, 0x07, 0x02, 0x1d, 0x0d, 0x0e, 0x0f])
+    P.write_lenenc_string!(row, "abc")
+    push!(row, 0x00)
+    offsets, lengths = Int[], Int[]
+    types = UInt8[P.MYSQL_TYPE_LONG, P.MYSQL_TYPE_DATETIME, P.MYSQL_TYPE_VAR_STRING, P.MYSQL_TYPE_TIME]
+    P.scan_binary_row!(types, pv(row), offsets, lengths)
+    @test lengths == [4, 7, 3, 0]
+    @test row[offsets[1]:(offsets[1] + 3)] == reinterpret(UInt8, UInt32[7])
+    @test row[offsets[2]:(offsets[2] + 6)] == UInt8[0xe8, 0x07, 0x02, 0x1d, 0x0d, 0x0e, 0x0f]
+    @test String(row[offsets[3]:(offsets[3] + 2)]) == "abc"
+
+    @test_throws P.ProtocolError P.scan_binary_row!(UInt8[P.MYSQL_TYPE_DATETIME], pv(UInt8[0x00, 0x00, 0x03, 0x00, 0x00, 0x00]), Int[], Int[])
+    @test_throws P.ProtocolError P.scan_binary_row!(UInt8[P.MYSQL_TYPE_TIME], pv(UInt8[0x00, 0x00, 0x07, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]), Int[], Int[])
+    @test_throws P.ProtocolError P.scan_binary_row!(UInt8[P.MYSQL_TYPE_NEWDATE], pv(UInt8[0x00, 0x00, 0x00]), Int[], Int[])
+    @test_throws P.ProtocolError P.scan_binary_row!(UInt8[P.MYSQL_TYPE_NULL], pv(UInt8[0x00, 0x00, 0x00]), Int[], Int[])
+    @test_throws P.ProtocolError P.scan_binary_row!(UInt8[P.MYSQL_TYPE_LONG], pv(UInt8[0x00, 0x00, 0x01]), Int[], Int[])
+    @test_throws P.ProtocolError P.scan_binary_row!(UInt8[P.MYSQL_TYPE_VAR_STRING], pv(UInt8[0x00, 0x00, 0x03, 0x61]), Int[], Int[])
+end
+
 @testset "binary value decoder: fixed, float, string, temporal" begin
     o = N.DEFAULT_RESULT_OPTIONS
     # signed and unsigned integers at every width, boundaries included

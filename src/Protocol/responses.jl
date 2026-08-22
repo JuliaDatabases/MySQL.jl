@@ -326,7 +326,19 @@ function fixed_binary_width(type::UInt8)
 end
 
 is_binary_temporal(type::UInt8) = type == MYSQL_TYPE_DATE || type == MYSQL_TYPE_DATETIME ||
-    type == MYSQL_TYPE_TIMESTAMP || type == MYSQL_TYPE_TIME || type == MYSQL_TYPE_NEWDATE
+    type == MYSQL_TYPE_TIMESTAMP || type == MYSQL_TYPE_TIME
+
+function is_binary_lenenc(type::UInt8)
+    (type == MYSQL_TYPE_STRING || type == MYSQL_TYPE_VARCHAR || type == MYSQL_TYPE_VAR_STRING) && return true
+    (type == MYSQL_TYPE_ENUM || type == MYSQL_TYPE_SET || type == MYSQL_TYPE_GEOMETRY) && return true
+    (type == MYSQL_TYPE_TINY_BLOB || type == MYSQL_TYPE_MEDIUM_BLOB || type == MYSQL_TYPE_LONG_BLOB || type == MYSQL_TYPE_BLOB) && return true
+    return type == MYSQL_TYPE_BIT || type == MYSQL_TYPE_DECIMAL || type == MYSQL_TYPE_NEWDECIMAL || type == MYSQL_TYPE_JSON
+end
+
+function valid_binary_temporal_length(type::UInt8, len::Int)
+    type == MYSQL_TYPE_TIME && return len == 0 || len == 8 || len == 12
+    return len == 0 || len == 4 || len == 7 || len == 11
+end
 
 # Advances `c` past one binary value of wire `type` and returns the (offset, length) window
 # of its *content* bytes: the fixed-width little-endian bytes for numbers, the raw bytes of a
@@ -343,11 +355,13 @@ function binary_value_span!(c::PacketCursor, type::UInt8)
     end
     if is_binary_temporal(type)
         len = Int(read_u8!(c))
+        valid_binary_temporal_length(type, len) || protocol_error("malformed binary temporal value: type $(field_type_name(type)) has invalid length $len")
         off = c.pos
         need!(c, len, "binary temporal value")
         c.pos += len
         return (off, len)
     end
+    is_binary_lenenc(type) || protocol_error("unsupported binary protocol column type $(field_type_name(type))")
     return read_lenenc_window_len!(c, "binary value")
 end
 
