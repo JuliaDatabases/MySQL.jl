@@ -27,6 +27,7 @@ empty!(P.COVERAGE)
     include("cursor_tests.jl")
     include("binary_tests.jl")
     include("fuzz_tests.jl")
+    include("perf_tests.jl")
     include("coverage_tests.jl")
 end
 

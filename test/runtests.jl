@@ -107,6 +107,14 @@ include("protocol/runtests.jl")
 # Native backend against real servers (Harbor containers; skipped without Docker)
 include("protocol/live_tests.jl")
 
+# §8.9 performance/allocation gates: native vs Connector/C on a dedicated server
+if docker_available() && get(ENV, "MYSQL_PERF_GATES", "1") != "0"
+    include("perf/perf_gates.jl")
+    PerfGates.runtests()
+else
+    @info "skipping §8.9 performance gates (no Docker, or MYSQL_PERF_GATES=0)"
+end
+
 let mysql = MySQL.API.init()
     MySQL.setoptions!(mysql)
     @test MySQL.API.getoption(mysql, MySQL.API.MYSQL_OPT_SSL_VERIFY_SERVER_CERT) == false
