@@ -141,7 +141,9 @@ function run_init_command!(s::P.Session, sql::String, read_timeout::Union{Nothin
             P.drain_step!(s)
         end
     finally
-        read_timeout === nothing || P.set_read_deadline!(s.transport, 0)
+        if read_timeout !== nothing && P.transport_isopen(s.transport)
+            P.set_read_deadline!(s.transport, 0)
+        end
     end
     return nothing
 end

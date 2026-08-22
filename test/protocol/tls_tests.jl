@@ -260,6 +260,22 @@ end
             @test err isa P.Error
             @test err isa P.Error && err.errno == 1064 && err.msg == "late init error"
         end
+
+        with_server(conn -> plain_peer_connect!(conn; caps=MYSQL8_SERVER_CAPS & ~P.CLIENT_SSL, after=c -> begin
+            read_command(c)
+            await_eof(c)
+        end)) do port
+            t0 = time()
+            err = try
+                native_connect(port; init_command="DO SLEEP(10)", read_timeout=1)
+                nothing
+            catch ex
+                ex
+            end
+            elapsed = time() - t0
+            @test err isa P.TimeoutError
+            @test elapsed < 5
+        end
     end
 
     @testset "charset bootstrap requires one final OK" begin
