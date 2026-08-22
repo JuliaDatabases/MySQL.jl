@@ -19,7 +19,9 @@
         @test P.fault!(s, InterruptException()) isa InterruptException   # already terminal: no transition
         @test s.phase == P.BROKEN
     end
-    @test P.fault!(P.Session(P.FaultTransport(IOBuffer())), P.Reseau.IOPoll.DeadlineExceededError()) isa P.TimeoutError
+    timeout = P.fault!(P.Session(P.FaultTransport(IOBuffer())), P.Reseau.IOPoll.DeadlineExceededError())
+    @test timeout isa P.TimeoutError
+    @test occursin("phase CONNECTING", timeout.msg)
     s = P.Session(P.FaultTransport(IOBuffer()))
     @test_throws ErrorException P.transition!(s, :row, P.ROWS)   # illegal transition is a programming error
     missing_rows = P.uncovered_transitions()

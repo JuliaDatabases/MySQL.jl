@@ -63,9 +63,10 @@ should throw: deadlines become `TimeoutError`, a peer EOF becomes `ProtocolError
 everything else (including `InterruptException` and `ProtocolError`) is returned as is.
 """
 function fault!(s::Session, err)
+    phase = s.phase
     is_terminal(s.phase) || transition!(s, :fault, BROKEN)
     transport_close(s.transport)
-    is_deadline_error(err) && return TimeoutError("deadline expired while waiting for the server (phase $(s.phase)); the connection has been closed")
+    is_deadline_error(err) && return TimeoutError("deadline expired while waiting for the server (phase $phase); the connection has been closed")
     (err isa EOFError || (err isa Reseau.TLS.TLSError && err.cause isa EOFError)) && return ProtocolError("connection closed by the server in the middle of the protocol stream")
     # A TLS 1.3 server may reject the session (e.g. a missing client certificate) on the
     # first record after the handshake; before authentication that is still a negotiation
