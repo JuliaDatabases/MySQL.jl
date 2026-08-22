@@ -188,10 +188,12 @@ the transaction ends, so `f` must not wait on tasks that need this connection.
 """
 function DBInterface.transaction(f, conn::Connection)
     lock(conn.lock)
+    owns_transaction = false
     try
         conn.transaction_owner === nothing || throw(MySQLInterfaceError("a transaction is already active on this connection"))
         execute_ok!(conn, "START TRANSACTION")
         conn.transaction_owner = current_task()
+        owns_transaction = true
         try
             result = f()
             execute_ok!(conn, "COMMIT")
@@ -204,7 +206,7 @@ function DBInterface.transaction(f, conn::Connection)
             rethrow()
         end
     finally
-        conn.transaction_owner = nothing
+        owns_transaction && (conn.transaction_owner = nothing)
         unlock(conn.lock)
     end
 end

@@ -820,6 +820,8 @@ end
         @test DBInterface.transaction(conn) do
             DBInterface.execute(conn, "insert 1")
             @test_throws MySQL.MySQLInterfaceError DBInterface.transaction(() -> nothing, conn)
+            @test conn.transaction_owner === current_task()
+            @test_throws MySQL.MySQLInterfaceError DBInterface.transaction(() -> nothing, conn)
             42
         end == 42
         @test_throws ErrorException DBInterface.transaction(conn) do
