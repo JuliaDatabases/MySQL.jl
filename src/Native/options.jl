@@ -128,6 +128,17 @@ function resolve_ssl_mode(; ssl_mode=nothing, ssl_enforce=nothing, ssl_verify_se
     return P.SSL_PREFERRED
 end
 
+function resolve_ssl_sources(file_mode; ssl_mode=nothing, ssl_enforce=nothing, ssl_verify_server_cert=nothing, has_ca::Bool=false)
+    ssl_mode === nothing || return resolve_ssl_mode(; ssl_mode=ssl_mode, ssl_enforce=ssl_enforce, ssl_verify_server_cert=ssl_verify_server_cert, has_ca=has_ca)
+    ssl_verify_server_cert === true && return P.SSL_VERIFY_IDENTITY
+    if ssl_enforce === true
+        mode = file_mode === nothing ? P.SSL_REQUIRED : P.ssl_mode(file_mode)
+        return mode in (P.SSL_VERIFY_CA, P.SSL_VERIFY_IDENTITY) ? mode : P.SSL_REQUIRED
+    end
+    file_mode === nothing || return P.ssl_mode(file_mode)
+    return resolve_ssl_mode(; has_ca=has_ca)
+end
+
 # ---- option files ----
 
 const OPTION_FILE_KEYS = Dict{String, Symbol}(
@@ -329,7 +340,7 @@ function ConnectOptions(host::AbstractString, user::AbstractString, password::Un
     ssl_capath = pick(:ssl_capath, nothing)
     (ssl_ca !== nothing && ssl_capath !== nothing) && throw(ArgumentError("ssl_ca and ssl_capath cannot be combined yet (Reseau takes a single trust root); pass one of them"))
     ca_file = ssl_ca !== nothing ? String(ssl_ca) : ssl_capath !== nothing ? String(ssl_capath) : nothing
-    mode = resolve_ssl_mode(; ssl_mode=pick(:ssl_mode, nothing), ssl_enforce=get(kwd, :ssl_enforce, nothing), ssl_verify_server_cert=get(kwd, :ssl_verify_server_cert, nothing), has_ca=ca_file !== nothing)
+    mode = resolve_ssl_sources(get(file, :ssl_mode, nothing); ssl_mode=get(kwd, :ssl_mode, nothing), ssl_enforce=get(kwd, :ssl_enforce, nothing), ssl_verify_server_cert=get(kwd, :ssl_verify_server_cert, nothing), has_ca=ca_file !== nothing)
     min_version, max_version = parse_tls_version(pick(:tls_version, nothing))
     tls = P.TLSOptions(; mode=mode, ca_file=ca_file, cert_file=pick(:ssl_cert, nothing), key_file=pick(:ssl_key, nothing), server_name=get(kwd, :ssl_server_name, nothing), min_version=min_version, max_version=max_version)
     default_auth = get(kwd, :default_auth, nothing)

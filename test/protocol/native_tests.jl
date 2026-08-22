@@ -106,6 +106,13 @@ end
         @test N.ConnectOptions("h", "u"; option_file=path, port=1).port == 1
         @test N.ConnectOptions("h", "u"; option_file=path, option_group="extra").port == 3308
         @test N.ConnectOptions("h", "u"; option_file=path, ssl_mode=:disabled).tls.mode == P.SSL_DISABLED
+        file_tls = joinpath(dir, "tls.cnf")
+        write(file_tls, "[client]\nssl-mode=disabled\n")
+        @test N.ConnectOptions("h", "u"; option_file=file_tls).tls.mode == P.SSL_DISABLED
+        @test N.ConnectOptions("h", "u"; option_file=file_tls, ssl_enforce=true).tls.mode == P.SSL_REQUIRED
+        @test N.ConnectOptions("h", "u"; option_file=file_tls, ssl_verify_server_cert=true).tls.mode == P.SSL_VERIFY_IDENTITY
+        write(file_tls, "[client]\nssl-mode=verify_identity\n")
+        @test N.ConnectOptions("h", "u"; option_file=file_tls, ssl_enforce=true).tls.mode == P.SSL_VERIFY_IDENTITY
         @test N.read_option_file(path)[:host] == "db.example"
         syntax = joinpath(dir, "syntax.cnf")
         write(syntax, raw"""
