@@ -1,6 +1,6 @@
 # Native wire-protocol tests. These need no database server (scripted loopback peer only)
 # and therefore run on every platform and CI lane.
-using Test, MySQL
+using Test, MySQL, SHA
 
 const P = MySQL.Protocol
 const Reseau = P.Reseau
@@ -20,6 +20,8 @@ empty!(P.COVERAGE)
     include("handshake_tests.jl")
     include("responses_tests.jl")
     include("session_tests.jl")
+    include("crypto_tests.jl")
+    include("auth_tests.jl")
     include("coverage_tests.jl")
 end
 

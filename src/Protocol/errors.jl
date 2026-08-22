@@ -63,6 +63,11 @@ struct TimeoutError <: MySQLError
     msg::String
 end
 
+struct TLSNegotiationError <: MySQLError
+    msg::String
+    cause::Union{Nothing, Exception}
+end
+
 struct ConversionError <: MySQLError
     msg::String
 end
@@ -72,7 +77,7 @@ struct LocalInfileRefused <: MySQLError
     msg::String
 end
 
-function Base.showerror(io::IO, e::Union{ProtocolError, AuthError, TimeoutError, ConversionError})
+function Base.showerror(io::IO, e::Union{ProtocolError, AuthError, TimeoutError, ConversionError, TLSNegotiationError})
     print(io, nameof(typeof(e)), ": ", e.msg)
     return nothing
 end

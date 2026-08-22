@@ -66,7 +66,12 @@ function fault!(s::Session, err)
     is_terminal(s.phase) || transition!(s, :fault, BROKEN)
     transport_close(s.transport)
     is_deadline_error(err) && return TimeoutError("deadline expired while waiting for the server (phase $(s.phase)); the connection has been closed")
-    err isa EOFError && return ProtocolError("connection closed by the server in the middle of the protocol stream")
+    (err isa EOFError || (err isa Reseau.TLS.TLSError && err.cause isa EOFError)) && return ProtocolError("connection closed by the server in the middle of the protocol stream")
+    # A TLS 1.3 server may reject the session (e.g. a missing client certificate) on the
+    # first record after the handshake; before authentication that is still a negotiation
+    # failure from the caller's point of view.
+    err isa Reseau.TLS.TLSError && !s.authenticated && return TLSNegotiationError("TLS failure while establishing the connection ($(err.op)): $(err.message)", err)
+    err isa Reseau.TLS.TLSError && return ProtocolError("TLS transport failure ($(err.op)): $(err.message)")
     return err
 end
 
