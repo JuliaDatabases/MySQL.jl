@@ -47,6 +47,18 @@ function expect_stmt_close(conn)
            (UInt32(payload[4]) << 24)
 end
 
+function expect_long_data(conn)
+    _, cmd, payload = read_command(conn)
+    cmd == P.COM_STMT_SEND_LONG_DATA || error("expected COM_STMT_SEND_LONG_DATA, got $cmd")
+    length(payload) >= 6 || error("expected a 6-byte long-data header")
+    statement_id = UInt32(payload[1]) |
+                   (UInt32(payload[2]) << 8) |
+                   (UInt32(payload[3]) << 16) |
+                   (UInt32(payload[4]) << 24)
+    parameter_number = UInt16(payload[5]) | (UInt16(payload[6]) << 8)
+    return (statement_id, parameter_number, payload[7:end])
+end
+
 # A binary protocol resultset row: 0x00 header, NULL bitmap (bit offset 2), then the non-NULL
 # values encoded exactly as parameters are (same wire form).
 function binary_row(values...)
@@ -798,6 +810,80 @@ end
     end
     @test sent[1] == vcat(reinterpret(UInt8, UInt32[5]), reinterpret(UInt8, UInt16[0]), UInt8[0x61, 0x62])
     @test sent[2] == vcat(reinterpret(UInt8, UInt32[5]), reinterpret(UInt8, UInt16[0]), UInt8[0x63])
+end
+
+@testset "statement long data survives 1615 and reconnect re-prepare" begin
+    with_native(c -> begin
+        expect_prepare(c)
+        send_prepare_ok(c, 1, 80, paramdefs(1), P.ColumnDef[])
+        @test expect_long_data(c) == (UInt32(80), UInt16(0), UInt8[0x61, 0x62])
+        @test expect_long_data(c) == (UInt32(80), UInt16(0), UInt8[0x63])
+        first = expect_execute(c)
+        @test execute_new_params_flag(first, 1) == 0x01
+        @test length(first) == 13   # header + NULL map + bind flag + type; no inline value
+        send_err(c, 1, P.ER_NEED_REPREPARE, "Prepared statement needs re-preparing")
+        expect_prepare(c)
+        send_prepare_ok(c, 1, 81, paramdefs(1), P.ColumnDef[])
+        @test expect_stmt_close(c) == 80
+        @test expect_long_data(c) == (UInt32(81), UInt16(0), UInt8[0x61, 0x62])
+        @test expect_long_data(c) == (UInt32(81), UInt16(0), UInt8[0x63])
+        retry = expect_execute(c)
+        @test execute_new_params_flag(retry, 1) == 0x01
+        @test length(retry) == 13
+        send_ok(c, 1)
+    end) do conn
+        stmt = DBInterface.prepare(conn, "INSERT INTO t VALUES (?)")
+        chunk = UInt8[0x61, 0x62]
+        N.send_long_data!(stmt, 0, chunk)
+        N.send_long_data!(stmt, 0, "c")
+        chunk[1] = 0x7a   # the retained replay must own its bytes
+        @test length(stmt.long_data) == 2
+        DBInterface.execute(stmt, (UInt8[0xff],))
+        @test isempty(stmt.long_data)
+        DBInterface.close!(stmt)
+    end
+
+    with_native(c -> begin
+        expect_prepare(c)
+        send_prepare_ok(c, 1, 82, paramdefs(1), P.ColumnDef[])
+        @test expect_long_data(c) == (UInt32(82), UInt16(0), UInt8[0x63])
+        expect_prepare(c)
+        send_prepare_ok(c, 1, 83, paramdefs(1), P.ColumnDef[])
+        @test expect_long_data(c) == (UInt32(83), UInt16(0), UInt8[0x63])
+        payload = expect_execute(c)
+        @test length(payload) == 13
+        send_ok(c, 1)
+    end) do conn
+        stmt = DBInterface.prepare(conn, "INSERT INTO t VALUES (?)")
+        N.send_long_data!(stmt, 0, "c")
+        stmt.generation -= 1
+        DBInterface.execute(stmt, ("ignored",))
+        @test stmt.statement_id == 83 && isempty(stmt.long_data)
+        DBInterface.close!(stmt)
+    end
+end
+
+@testset "statement reset clears retained long data" begin
+    payload = Ref(UInt8[])
+    with_native(c -> begin
+        expect_prepare(c)
+        send_prepare_ok(c, 1, 84, paramdefs(1), P.ColumnDef[])
+        @test expect_long_data(c) == (UInt32(84), UInt16(0), UInt8[0x61])
+        _, cmd, reset_payload = read_command(c)
+        @test cmd == P.COM_STMT_RESET
+        @test reset_payload == reinterpret(UInt8, UInt32[84])
+        send_ok(c, 1)
+        payload[] = expect_execute(c)
+        send_ok(c, 1)
+    end) do conn
+        stmt = DBInterface.prepare(conn, "INSERT INTO t VALUES (?)")
+        N.send_long_data!(stmt, 0, "a")
+        N.reset_statement!(stmt)
+        @test isempty(stmt.long_data) && stmt.statement_id == 84
+        DBInterface.execute(stmt, ("inline",))
+        DBInterface.close!(stmt)
+    end
+    @test length(payload[]) > 13   # reset made the value inline again
 end
 
 @testset "prepared response errors retain StmtError" begin

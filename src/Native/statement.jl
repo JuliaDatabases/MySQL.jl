@@ -1,7 +1,13 @@
 # Prepared statements: COM_STMT_PREPARE with the parameter/column definitions, parameter
 # binding and the `(type, unsigned)` signature that drives `new_params_bind_flag`,
 # COM_STMT_EXECUTE returning a binary-protocol cursor, the single `ER_NEED_REPREPARE` (1615)
-# retry, lazy re-prepare after a reconnect, and finalizer-free statement reaping.
+# retry, lazy re-prepare after a reconnect, retained long-data chunks, and finalizer-free
+# statement reaping.
+
+struct LongDataChunk
+    parameter_number::UInt16
+    data::Vector{UInt8}
+end
 
 """
     MySQL.Native.Statement
@@ -22,6 +28,7 @@ mutable struct Statement <: DBInterface.Statement
     types::Vector{Type}
     lookup::Dict{Symbol, Int}
     last_signature::Vector{UInt16}
+    long_data::Vector{LongDataChunk}
     date_and_time::Bool
     dynamic_metadata::Bool
     closed::Bool
@@ -64,6 +71,7 @@ function DBInterface.prepare(conn::Connection, sql::AbstractString; mysql_date_a
             types,
             lookup,
             UInt16[],
+            LongDataChunk[],
             mysql_date_and_time,
             isempty(ok.columns),
             false,
@@ -77,7 +85,7 @@ end
 # Re-prepares `stmt.sql` on the current (READY) session and refreshes its id/generation and
 # cached metadata. A 1615 retry closes the superseded id on the same session. A reconnect
 # leaves the old-generation id alone because it belongs to the dead session.
-function reprepare!(conn::Connection, s::P.Session, stmt::Statement; close_previous::Bool=false)
+function reprepare!(conn::Connection, s::P.Session, stmt::Statement; close_previous::Bool=false, replay_long_data::Bool=true)
     old_id = stmt.statement_id
     old_generation = stmt.generation
     P.stmt_prepare!(s, stmt.sql)
@@ -96,15 +104,127 @@ function reprepare!(conn::Connection, s::P.Session, stmt::Statement; close_previ
     stmt.names, stmt.types, stmt.lookup = statement_schema(conn, ok, stmt.date_and_time)
     stmt.dynamic_metadata = isempty(ok.columns)
     empty!(stmt.last_signature)
+    if replay_long_data
+        validate_long_data_ids(stmt)
+        replay_long_data!(s, stmt)
+    end
     return nothing
 end
 
 function send_execute!(s::P.Session, stmt::Statement, params)
+    validate_long_data_params(stmt, params)
     signature = param_signature(params)
     send_types = signature != stmt.last_signature
-    block = encode_param_block(params, signature, send_types)
+    block = if isempty(stmt.long_data)
+        encode_param_block(params, signature, send_types)
+    else
+        slots = Int[Int(chunk.parameter_number) + 1 for chunk in stmt.long_data]
+        unique!(slots)
+        encode_param_block(params, signature, send_types; skip=slots)
+    end
     P.stmt_execute!(s, stmt.statement_id, block)
     stmt.last_signature = signature
+    return nothing
+end
+
+function read_execute_response!(s::P.Session, stmt::Statement; retain_need_reprepare::Bool)
+    response = try
+        P.read_command_response!(s)
+    catch err
+        need_reprepare = err isa P.StmtError && err.errno == P.ER_NEED_REPREPARE
+        (retain_need_reprepare && need_reprepare) || empty!(stmt.long_data)
+        rethrow()
+    end
+    empty!(stmt.long_data)
+    return response
+end
+
+function validate_long_data_ids(stmt::Statement)
+    for chunk in stmt.long_data
+        Int(chunk.parameter_number) < stmt.nparams || throw(MySQLInterfaceError(
+            "long-data parameter $(chunk.parameter_number) is outside 0:$(stmt.nparams - 1) after re-prepare",
+        ))
+    end
+    return nothing
+end
+
+function replay_long_data!(s::P.Session, stmt::Statement)
+    for chunk in stmt.long_data
+        P.stmt_send_long_data!(s, stmt.statement_id, chunk.parameter_number, chunk.data)
+    end
+    return nothing
+end
+
+function validate_long_data_params(stmt::Statement, params)
+    for chunk in stmt.long_data
+        value = params[Int(chunk.parameter_number) + 1]
+        type, _ = param_type(value)
+        (type == P.MYSQL_TYPE_STRING || type == P.MYSQL_TYPE_BLOB) || throw(MySQLInterfaceError(
+            "long-data parameter $(chunk.parameter_number) must be bound as a string or binary value, got $(typeof(value))",
+        ))
+    end
+    return nothing
+end
+
+long_data_bytes(data::AbstractString) = Vector{UInt8}(codeunits(String(data)))
+long_data_bytes(data::AbstractVector{UInt8}) = Vector{UInt8}(data)
+
+"""
+    MySQL.Native.send_long_data!(stmt, parameter_number, data)
+
+Sends one copied string or byte chunk for the zero-based prepared-statement parameter number.
+Repeated calls append chunks. The next execute omits that parameter's inline value and retains
+the copied chunks until its first response, so a 1615 or reconnect re-prepare can replay them.
+"""
+function send_long_data!(stmt::Statement, parameter_number::Integer, data::Union{AbstractString, AbstractVector{UInt8}})
+    conn = stmt.conn
+    lock(conn.lock) do
+        stmt.closed && closed_statement()
+        (0 <= parameter_number < stmt.nparams) || throw(MySQLInterfaceError(
+            "long-data parameter $parameter_number is outside 0:$(stmt.nparams - 1)",
+        ))
+        bytes = long_data_bytes(data)
+        s = begin_command!(conn)
+        if stmt.generation != (@atomic conn.generation)
+            reprepare!(conn, s, stmt)
+            (0 <= parameter_number < stmt.nparams) || throw(MySQLInterfaceError(
+                "long-data parameter $parameter_number is outside 0:$(stmt.nparams - 1) after re-prepare",
+            ))
+        end
+        chunk = LongDataChunk(UInt16(parameter_number), bytes)
+        push!(stmt.long_data, chunk)
+        try
+            P.stmt_send_long_data!(s, stmt.statement_id, chunk.parameter_number, chunk.data)
+        catch
+            pop!(stmt.long_data)
+            rethrow()
+        end
+        return nothing
+    end
+    return nothing
+end
+
+"""
+    MySQL.Native.reset_statement!(stmt)
+
+Resets a prepared statement's accumulated long data and open server cursor. The statement id
+and cached parameter signature remain valid when the session generation did not change.
+"""
+function reset_statement!(stmt::Statement)
+    conn = stmt.conn
+    lock(conn.lock) do
+        stmt.closed && closed_statement()
+        s = begin_command!(conn)
+        if stmt.generation != (@atomic conn.generation)
+            empty!(stmt.long_data)
+            reprepare!(conn, s, stmt; replay_long_data=false)
+            return nothing
+        end
+        P.stmt_reset!(s, stmt.statement_id)
+        P.read_command_response!(s)
+        empty!(stmt.long_data)
+        return nothing
+    end
     return nothing
 end
 
@@ -139,7 +259,7 @@ function DBInterface.execute(stmt::Statement, params=(); mysql_store_result::Boo
         token = new_token!(conn)
         resp = try
             send_execute!(s, stmt, params)
-            P.read_command_response!(s)
+            read_execute_response!(s, stmt; retain_need_reprepare=true)
         catch err
             # A complete ER_NEED_REPREPARE before any result bytes: re-prepare once, re-execute
             # once (the server's cached type signature is gone, so types are re-sent).
@@ -148,7 +268,7 @@ function DBInterface.execute(stmt::Statement, params=(); mysql_store_result::Boo
             check_paramcount(stmt, params)
             token = new_token!(conn)
             send_execute!(s, stmt, params)
-            P.read_command_response!(s)
+            read_execute_response!(s, stmt; retain_need_reprepare=false)
         end
         date_and_time = stmt.dynamic_metadata ? mysql_date_and_time : stmt.date_and_time
         opts = ResultOptions(;
@@ -192,6 +312,7 @@ function DBInterface.close!(stmt::Statement)
     lock(conn.lock) do
         stmt.closed && return nothing
         stmt.closed = true
+        empty!(stmt.long_data)
         conn.handle === nothing && return nothing
         park_statement!(conn, stmt.reap)
         return nothing

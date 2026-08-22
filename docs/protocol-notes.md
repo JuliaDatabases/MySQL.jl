@@ -192,6 +192,11 @@ source are never read.
   values are converted to strings and sent as `STRING`. `Bool` maps to `TINY` (1.x left it
   at the `MYSQL_TYPE_STRING` fallback, an untested latent bug, so this is the sole deliberate
   deviation).
+- **Long data**: `Native.send_long_data!` copies and sends each string/blob chunk, and the
+  next execute omits that parameter's inline value. Copies remain on the statement until the
+  first execute response so both reconnect and the single 1615 re-prepare can replay them for
+  the new statement id. `Native.reset_statement!` sends `COM_STMT_RESET` and discards them;
+  neither helper is exported.
 - **Cursor is shared across protocols**: `Cursor{binary, buffered}` — `TextCursor =
   Cursor{false}`, `BinaryCursor = Cursor{true}` — so the ownership tokens, row epochs,
   multi-result draining, buffered budget and LOCAL INFILE state table have a single
