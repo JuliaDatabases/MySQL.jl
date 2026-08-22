@@ -1,0 +1,295 @@
+# Generic response packets and the phase-aware first-byte classification.
+#
+# The same first byte means different things in different phases (0x00 is OK in a command
+# response but a binary row header in row state; 0xFB is a LOCAL INFILE request in a COM_QUERY
+# response but NULL inside a text row; 0xFE is an EOF/OK terminator only when the logical
+# packet is shorter than 0xFFFFFF), so every classifier takes the phase explicitly.
+
+struct SessionStateChange
+    type::UInt8
+    data::Vector{UInt8}
+end
+
+"""
+    OKPacket
+
+`is_eof` is true when the packet carried the `0xFE` header (an OK acting as the
+DEPRECATE_EOF result-set terminator).
+"""
+struct OKPacket
+    is_eof::Bool
+    affected_rows::UInt64
+    last_insert_id::UInt64
+    status::UInt16
+    warnings::UInt16
+    info::String
+    session_state::Vector{SessionStateChange}
+end
+
+struct EOFPacket
+    warnings::UInt16
+    status::UInt16
+end
+
+struct ERRPacket
+    code::UInt16
+    sqlstate::String
+    msg::String
+end
+
+struct LocalInfileRequest
+    filename::Vector{UInt8}
+end
+
+struct AuthSwitchRequest
+    plugin::String
+    data::Vector{UInt8}
+end
+
+struct AuthMoreData
+    data::Vector{UInt8}
+end
+
+more_results(status::UInt16) = (status & SERVER_MORE_RESULTS_EXISTS) != 0
+more_results(ok::OKPacket) = more_results(ok.status)
+more_results(eof::EOFPacket) = more_results(eof.status)
+in_transaction(status::UInt16) = (status & SERVER_STATUS_IN_TRANS) != 0
+
+Error(e::ERRPacket) = Error(e.code, e.msg, e.sqlstate)
+StmtError(e::ERRPacket) = StmtError(e.code, e.msg, e.sqlstate)
+
+# ---- OK ----
+
+"""
+    parse_ok(p::PacketView, caps, limits) -> OKPacket
+
+Layout depends on the negotiated capabilities: status/warnings need `CLIENT_PROTOCOL_41`,
+the `info` field is length-encoded (and optional) under `CLIENT_SESSION_TRACK` and
+`string<EOF>` otherwise; session-state blocks follow only when
+`SERVER_SESSION_STATE_CHANGED` is set.
+"""
+function parse_ok(p::PacketView, caps::UInt64, limits::Limits)
+    c = PacketCursor(p)
+    header = read_u8!(c)
+    (header == OK_HEADER || header == EOF_HEADER) || protocol_error("expected OK packet, got header 0x$(string(header, base=16, pad=2))")
+    affected_rows = read_lenenc!(c)
+    last_insert_id = read_lenenc!(c)
+    status = 0x0000
+    warnings = 0x0000
+    if has_capability(caps, CLIENT_PROTOCOL_41)
+        status = read_u16!(c)
+        warnings = read_u16!(c)
+    elseif has_capability(caps, CLIENT_TRANSACTIONS)
+        status = read_u16!(c)
+    end
+    info = ""
+    state = SessionStateChange[]
+    if has_capability(caps, CLIENT_SESSION_TRACK)
+        remaining(c) > 0 && (info = read_lenenc_string!(c, "info"))
+        if (status & SERVER_SESSION_STATE_CHANGED) != 0 && remaining(c) > 0
+            len = read_lenenc_length!(c, "session state info")
+            check_limit("session state bytes", len, limits.max_session_state_bytes)
+            parse_session_state!(state, PacketCursor(c.buf, c.pos, c.pos + len - 1))
+            c.pos += len
+        end
+    else
+        info = read_eof_string!(c)
+    end
+    return OKPacket(header == EOF_HEADER, affected_rows, last_insert_id, status, warnings, info, state)
+end
+
+function parse_session_state!(state::Vector{SessionStateChange}, c::PacketCursor)
+    while remaining(c) > 0
+        type = read_u8!(c)
+        data = read_lenenc_bytes!(c, "session state block")
+        push!(state, SessionStateChange(type, data))
+    end
+    return nothing
+end
+
+"""
+    system_variables(ok::OKPacket) -> Vector{Pair{String, String}}
+
+Tracked `SESSION_TRACK_SYSTEM_VARIABLES` changes (MySQL sends one pair per block; MariaDB
+may pack several pairs into one block).
+"""
+function system_variables(ok::OKPacket)
+    vars = Pair{String, String}[]
+    for block in ok.session_state
+        block.type == SESSION_TRACK_SYSTEM_VARIABLES || continue
+        c = PacketCursor(block.data)
+        while remaining(c) > 0
+            name = read_lenenc_string!(c, "system variable name")
+            value = read_lenenc_string!(c, "system variable value")
+            push!(vars, name => value)
+        end
+    end
+    return vars
+end
+
+function schema_change(ok::OKPacket)
+    for block in ok.session_state
+        block.type == SESSION_TRACK_SCHEMA || continue
+        return read_lenenc_string!(PacketCursor(block.data), "schema name")
+    end
+    return nothing
+end
+
+# ---- EOF / ERR ----
+
+function parse_eof(p::PacketView, caps::UInt64)
+    c = PacketCursor(p)
+    read_u8!(c) == EOF_HEADER || protocol_error("expected EOF packet")
+    has_capability(caps, CLIENT_PROTOCOL_41) || return EOFPacket(0x0000, 0x0000)
+    warnings = read_u16!(c)
+    status = read_u16!(c)
+    return EOFPacket(warnings, status)
+end
+
+# EOF packets are at most 5 bytes (header + warnings + status); longer 0xFE packets are OK
+# packets (DEPRECATE_EOF) or rows.
+is_eof_packet(p::PacketView) = first_byte(p) == EOF_HEADER && payload_length(p) < 9
+
+function parse_err(p::PacketView, caps::UInt64)
+    c = PacketCursor(p)
+    read_u8!(c) == ERR_HEADER || protocol_error("expected ERR packet")
+    code = read_u16!(c)
+    code == MARIADB_ER_PROGRESS && protocol_error("unexpected MariaDB progress packet (MARIADB_CLIENT_PROGRESS was not negotiated)")
+    is_client_reserved_errno(code) && protocol_error("server ERR packet carries client-reserved error code $(Int(code))")
+    sqlstate = ""
+    if has_capability(caps, CLIENT_PROTOCOL_41) && remaining(c) >= 1 + SQLSTATE_LENGTH && peek_u8(c) == SQLSTATE_MARKER
+        skip!(c, 1, "sql_state_marker")
+        sqlstate = read_fixed_string!(c, SQLSTATE_LENGTH, "sql_state")
+    end
+    return ERRPacket(code, sqlstate, read_eof_string!(c))
+end
+
+# ---- auth & LOCAL INFILE ----
+
+function parse_local_infile_request(p::PacketView)
+    c = PacketCursor(p)
+    read_u8!(c) == LOCAL_INFILE_HEADER || protocol_error("expected LOCAL INFILE request")
+    return LocalInfileRequest(read_eof_bytes!(c))
+end
+
+function parse_auth_switch(p::PacketView)
+    c = PacketCursor(p)
+    read_u8!(c) == AUTH_SWITCH_HEADER || protocol_error("expected AuthSwitchRequest")
+    plugin = read_nul_string!(c, "auth plugin name")
+    return AuthSwitchRequest(plugin, read_eof_bytes!(c))
+end
+
+function parse_auth_more_data(p::PacketView)
+    c = PacketCursor(p)
+    read_u8!(c) == AUTH_MORE_DATA_HEADER || protocol_error("expected AuthMoreData")
+    return AuthMoreData(read_eof_bytes!(c))
+end
+
+# ---- classification ----
+
+@enum CommandKind begin
+    CMD_SIMPLE        # COM_PING, COM_INIT_DB, COM_SET_OPTION, COM_RESET_CONNECTION, COM_STMT_RESET, upload responses
+    CMD_QUERY         # COM_QUERY: OK | ERR | LOCAL INFILE | text result set
+    CMD_STMT_PREPARE  # COM_STMT_PREPARE: PREPARE_OK | ERR
+    CMD_STMT_EXECUTE  # COM_STMT_EXECUTE: OK | ERR | binary result set
+end
+
+@noinline function unexpected_packet(phase::Phase, p::PacketView)
+    b = first_byte(p)
+    desc = b === nothing ? "an empty packet" : "header byte 0x$(string(b, base=16, pad=2)) (length $(payload_length(p)))"
+    return protocol_error("unexpected packet in phase $phase: $desc")
+end
+
+"""
+    classify_greeting(p) -> :greeting | :initial_err
+"""
+function classify_greeting(p::PacketView)
+    b = first_byte(p)
+    b == HANDSHAKE_PROTOCOL_VERSION && return :greeting
+    b == ERR_HEADER && return :initial_err
+    return unexpected_packet(CONNECTING, p)
+end
+
+"""
+    classify_auth(p, mariadb::Bool) -> :ok | :err | :auth_switch | :old_auth_switch | :auth_more | :auth_next_factor | :plugin_data
+
+MySQL wraps plugin data in the `0x01` envelope and reserves `0x02` for multi-factor
+requests; MariaDB sends plugin payloads unwrapped (an optional leading `0x01` must be
+skipped), so for MariaDB every non-OK/ERR/switch packet is plugin data.
+"""
+function classify_auth(p::PacketView, mariadb::Bool)
+    b = first_byte(p)
+    b === nothing && return unexpected_packet(AUTH, p)
+    b == OK_HEADER && return :ok
+    b == ERR_HEADER && return :err
+    b == AUTH_SWITCH_HEADER && return payload_length(p) == 1 ? :old_auth_switch : :auth_switch
+    mariadb && return :plugin_data
+    b == AUTH_MORE_DATA_HEADER && return :auth_more
+    b == AUTH_NEXT_FACTOR_HEADER && return :auth_next_factor
+    return unexpected_packet(AUTH, p)
+end
+
+"""
+    classify_command_response(kind, p) -> :ok | :err | :local_infile | :column_count | :prepare_ok
+"""
+function classify_command_response(kind::CommandKind, p::PacketView)
+    b = first_byte(p)
+    b === nothing && return unexpected_packet(CMD_SENT, p)
+    b == ERR_HEADER && return :err
+    if kind == CMD_SIMPLE
+        b == OK_HEADER && return :ok
+        return unexpected_packet(CMD_SENT, p)
+    elseif kind == CMD_STMT_PREPARE
+        b == OK_HEADER && return :prepare_ok
+        return unexpected_packet(CMD_SENT, p)
+    end
+    b == OK_HEADER && return :ok
+    b == LOCAL_INFILE_HEADER && kind == CMD_QUERY && return :local_infile
+    b == NULL_VALUE && return unexpected_packet(CMD_SENT, p)
+    b == EOF_HEADER && return unexpected_packet(CMD_SENT, p)
+    return :column_count
+end
+
+# A 0xFE-headed packet is a terminator only when the logical packet is shorter than
+# 0xFFFFFF: a text row whose first value is an 8-byte-lenenc string is ≥ 2^24 bytes and is
+# therefore carried in a full-size first chunk.
+is_row_terminator(p::PacketView) = first_byte(p) == EOF_HEADER && p.first_chunk_len < MAX_CHUNK
+
+"""
+    classify_row(p, binary::Bool) -> :row | :terminator | :err
+"""
+function classify_row(p::PacketView, binary::Bool)
+    b = first_byte(p)
+    b === nothing && return unexpected_packet(ROWS, p)
+    b == ERR_HEADER && return :err
+    is_row_terminator(p) && return :terminator
+    binary || return :row
+    b == OK_HEADER && return :row
+    return unexpected_packet(ROWS, p)
+end
+
+"""
+    scan_text_row!(p, offsets, lengths)
+
+Splits a text row into per-column windows of the packet buffer: `offsets[i]`/`lengths[i]`
+describe column `i`; NULL columns get `lengths[i] == -1`. Both vectors are resized to the
+number of columns found and reused across rows.
+"""
+function scan_text_row!(p::PacketView, ncols::Int, offsets::Vector{Int}, lengths::Vector{Int})
+    resize!(offsets, ncols)
+    resize!(lengths, ncols)
+    c = PacketCursor(p)
+    for i in 1:ncols
+        if peek_u8(c) == NULL_VALUE
+            skip!(c, 1, "NULL marker")
+            offsets[i] = c.pos
+            lengths[i] = -1
+        else
+            lo, hi = read_lenenc_window!(c, "text row value")
+            offsets[i] = lo
+            lengths[i] = hi - lo + 1
+        end
+    end
+    atend(c) || protocol_error("malformed text row: $(remaining(c)) trailing bytes after $ncols columns")
+    return nothing
+end

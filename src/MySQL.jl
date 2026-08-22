@@ -15,6 +15,9 @@ Base.showerror(io::IO, e::MySQLInterfaceError) = print(io, e.msg)
 include("api/API.jl")
 using .API
 
+# Native wire-protocol backend (no Connector/C); see docs/protocol-notes.md
+include("Protocol/Protocol.jl")
+
 mutable struct Connection <: DBInterface.Connection
     mysql::API.MYSQL
     host::String

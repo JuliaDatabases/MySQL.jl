@@ -1,4 +1,4 @@
-using Test, MySQL, DBInterface, Tables, Dates, DecFP, Harbor, Sockets
+using Test, MySQL, DBInterface, Tables, Dates, DecFP, Harbor
 
 const MYSQL_IMAGE_REF = get(ENV, "MYSQL_IMAGE", "mysql:8")
 const MYSQL_TEST_USER = "root"
@@ -34,10 +34,9 @@ function docker_available()
 end
 
 function pick_port()
-    server = Sockets.listen(Sockets.IPv4(0), 0)
-    _, port = Sockets.getsockname(server)
-    port = Int(port)
-    close(server)
+    listener = MySQL.Protocol.Reseau.TCP.listen(MySQL.Protocol.Reseau.TCP.loopback_addr(0))
+    port = Int(MySQL.Protocol.Reseau.TCP.addr(listener).port)
+    close(listener)
     return port
 end
 
@@ -101,6 +100,9 @@ function with_mysql(f::Function)
 end
 
 @testset "MySQL" begin
+
+# Native wire-protocol tests (no database server needed)
+include("protocol/runtests.jl")
 
 let mysql = MySQL.API.init()
     MySQL.setoptions!(mysql)
