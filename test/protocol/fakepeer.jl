@@ -72,7 +72,7 @@ function serve(handler::Function)
     listener = TCP.listen(TCP.loopback_addr(0))
     port = Int(TCP.addr(listener).port)
     err = Ref{Any}(nothing)
-    task = Threads.@spawn begin
+    task = errormonitor(Threads.@spawn begin
         conn = nothing
         try
             conn = TCP.accept(listener)
@@ -82,8 +82,7 @@ function serve(handler::Function)
         finally
             conn === nothing || close(conn)
         end
-    end
-    errormonitor(task)
+    end)
     return Peer(listener, port, task, err)
 end
 

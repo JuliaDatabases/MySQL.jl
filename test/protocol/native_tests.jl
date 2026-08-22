@@ -138,7 +138,8 @@ function multi_accept_server(f::Function)
     port = Int(Reseau.TCP.addr(listener).port)
     conns = Reseau.TCP.Conn[]
     lock = ReentrantLock()
-    Threads.@spawn begin
+    peer_tasks = Task[]
+    accept_task = errormonitor(Threads.@spawn begin
         while true
             conn = try
                 Reseau.TCP.accept(listener)
@@ -146,22 +147,51 @@ function multi_accept_server(f::Function)
                 break   # listener closed
             end
             @lock lock push!(conns, conn)
-            Threads.@spawn begin
+            task = errormonitor(Threads.@spawn begin
                 try
                     plain_peer_connect!(conn; caps=MYSQL8_SERVER_CAPS & ~P.CLIENT_SSL, after=c -> await_eof(c))
                 catch
                 finally
                     close(conn)
                 end
-            end
+            end)
+            @lock lock push!(peer_tasks, task)
         end
-    end
+    end)
     try
         return f(port)
     finally
         close(listener)
+        wait(accept_task)
         @lock lock foreach(c -> (try; close(c); catch; end), conns)
+        tasks = @lock lock copy(peer_tasks)
+        foreach(wait, tasks)
     end
+end
+
+mutable struct CloseCounterIO <: IO
+    @atomic closes::Int
+end
+
+Base.isopen(io::CloseCounterIO) = (@atomic io.closes) == 0
+
+function Base.close(io::CloseCounterIO)
+    @atomic io.closes += 1
+    return nothing
+end
+
+function synthetic_reap_entries(n::Int)
+    entries = N.ReapEntry[]
+    counters = CloseCounterIO[]
+    refs = WeakRef[]
+    for _ in 1:n
+        counter = CloseCounterIO(0)
+        transport = P.FaultTransport(counter)
+        push!(entries, N.ReapEntry(transport))
+        push!(counters, counter)
+        push!(refs, WeakRef(transport))
+    end
+    return entries, counters, refs
 end
 
 # Allocated in a function so no top-level binding keeps the handles reachable.
@@ -221,6 +251,44 @@ end
     end
     # the timer-driven reaper runs on its own
     @test N.REAPER_TIMER[] isa Timer
+
+    # A busy queue lock leaves ownership live so an explicit close can still claim it.
+    counter = CloseCounterIO(0)
+    entry = N.ReapEntry(P.FaultTransport(counter))
+    reregistered = Ref(false)
+    lock(N.REAPER_LOCK)
+    try
+        N.enqueue_from_finalizer!(entry, () -> (reregistered[] = true))
+        @test reregistered[] && (@atomic entry.state) == :live
+        P.transport_close(N.retire!(entry))
+    finally
+        unlock(N.REAPER_LOCK)
+    end
+    @test (@atomic counter.closes) == 1
+
+    # Exercise the finalizer enqueue path concurrently without opening 10,000 sockets.
+    entries, counters, refs = synthetic_reap_entries(10_000)
+    tasks = Task[]
+    for range in Iterators.partition(eachindex(entries), cld(length(entries), Threads.nthreads()))
+        push!(tasks, errormonitor(Threads.@spawn begin
+            for i in range
+                while (@atomic entries[i].state) == :live
+                    N.enqueue_from_finalizer!(entries[i], () -> nothing)
+                    yield()
+                end
+            end
+        end))
+    end
+    foreach(wait, tasks)
+    while any(entry -> (@atomic entry.state) != :closed, entries)
+        N.reap_now!()
+        yield()
+    end
+    @test all(counter -> (@atomic counter.closes) == 1, counters)
+    @test all(entry -> entry.transport === nothing, entries)
+    @test N.pending_reaps() == 0
+    GC.gc(); GC.gc()
+    @test all(ref -> ref.value === nothing, refs)
 end
 
 @testset "no descriptor growth across connect/close cycles" begin

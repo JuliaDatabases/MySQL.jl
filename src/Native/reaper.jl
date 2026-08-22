@@ -1,8 +1,9 @@
 # Finalizer-free transport reclamation.
 #
 # A handle's finalizer must not do transport I/O (`close(::Reseau.TLS.Conn)` sends
-# close_notify and takes locks). Instead the finalizer flips the handle's `ReapEntry` from
-# `:live` to `:pending` with a CAS and pushes it on a package-global queue under a trylock;
+# close_notify and takes locks). Instead the finalizer obtains a package-global queue
+# trylock, flips the handle's `ReapEntry` from `:live` to `:pending` with a CAS, and pushes
+# the entry;
 # a timer-driven reaper task closes the transports later. Exactly-once is guaranteed by the
 # CAS: explicit `retire!` performs the same transition, so a finalizer can never re-enqueue a
 # handle that was closed explicitly, and an entry never holds a closed transport.
@@ -23,18 +24,16 @@ const REAPER_STATS = Ref((enqueued=0, closed=0))
 # Called from finalizers: may only trylock, may not yield. `reregister` re-arms the finalizer
 # when the lock is busy (the Julia-manual pattern for finalizers that need locks).
 function enqueue_from_finalizer!(entry::ReapEntry, reregister::F) where {F}
-    _, swapped = @atomicreplace entry.state :live => :pending
-    swapped || return nothing
     if trylock(REAPER_LOCK)
         try
+            _, swapped = @atomicreplace entry.state :live => :pending
+            swapped || return nothing
             push!(REAPER_QUEUE, entry)
             REAPER_STATS[] = (enqueued=REAPER_STATS[].enqueued + 1, closed=REAPER_STATS[].closed)
         finally
             unlock(REAPER_LOCK)
         end
     else
-        # undo the CAS so the re-armed finalizer can enqueue next time
-        @atomic entry.state = :live
         reregister()
     end
     return nothing
