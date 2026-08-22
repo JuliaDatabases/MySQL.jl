@@ -64,7 +64,7 @@ const COL1 = Vectors.payload(Vectors.COLUMN_DEF_COL1)
     @testset "greeting, handshake response, auth OK" begin
         seen = Vector{UInt8}[]
         with_peer(conn -> server_handshake!(conn; record=seen)) do client
-            s = P.Session(client; log_transitions=true)
+            s = P.Session(client; capabilities=P.DEFAULT_CLIENT_CAPABILITIES | P.CLIENT_CONNECT_WITH_DB, log_transitions=true)
             @test s.phase == P.CONNECTING
             info = P.read_greeting!(s)
             @test s.phase == P.HANDSHAKE
@@ -90,6 +90,17 @@ const COL1 = Vectors.payload(Vectors.COLUMN_DEF_COL1)
         @test length(P.read_lenenc_bytes!(c)) == 32
         @test P.read_nul_string!(c) == "test"
         @test P.read_nul_string!(c) == "caching_sha2_password"
+    end
+
+    @testset "database capability must be negotiated" begin
+        caps = MYSQL8_SERVER_CAPS & ~P.CLIENT_CONNECT_WITH_DB
+        with_peer(conn -> (send_packet(conn, 0, greeting(; caps=caps)); await_eof(conn))) do client
+            s = P.Session(client; capabilities=P.DEFAULT_CLIENT_CAPABILITIES | P.CLIENT_CONNECT_WITH_DB)
+            P.read_greeting!(s)
+            @test !P.has_capability(s, P.CLIENT_CONNECT_WITH_DB)
+            @test_throws P.ProtocolError P.send_handshake_response!(s, "root", UInt8[], "caching_sha2_password"; db="app")
+            @test s.phase == P.HANDSHAKE
+        end
     end
 
     @testset "pre-capability initial ERR" begin

@@ -21,6 +21,8 @@
     @test N.ConnectOptions("h", "u"; port=0).port == 3306
     @test_throws ArgumentError N.ConnectOptions("h", "u"; port=70000)
     @test N.ConnectOptions("h", "u").client_flags & P.CLIENT_MULTI_STATEMENTS == 0
+    @test N.ConnectOptions("h", "u"; db="app").client_flags & P.CLIENT_CONNECT_WITH_DB != 0
+    @test N.ConnectOptions("h", "u").client_flags & P.CLIENT_CONNECT_WITH_DB == 0
     @test N.ConnectOptions("h", "u"; multi_statements=true, found_rows=true, ignore_space=true).client_flags & (P.CLIENT_MULTI_STATEMENTS | P.CLIENT_FOUND_ROWS | P.CLIENT_IGNORE_SPACE) == (P.CLIENT_MULTI_STATEMENTS | P.CLIENT_FOUND_ROWS | P.CLIENT_IGNORE_SPACE)
     @test_throws P.UnsupportedAuthError N.ConnectOptions("h", "u"; default_auth="client_ed25519")
     @test N.ConnectOptions("h", "u"; default_auth="mysql_clear_password").auth.enable_cleartext_plugin

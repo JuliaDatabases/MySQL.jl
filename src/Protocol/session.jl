@@ -192,9 +192,8 @@ selected plugin (M2); M1 only frames the packet.
 function send_handshake_response!(s::Session, user::AbstractString, auth_response::AbstractVector{UInt8}, plugin::AbstractString; db::AbstractString="", attrs::Vector{Pair{String, String}}=Pair{String, String}[], charset::UInt8=CHARSET_UTF8MB4_GENERAL_CI)
     require_phase(s, HANDSHAKE)
     caps = s.capabilities
-    isempty(db) || (caps |= CLIENT_CONNECT_WITH_DB)
+    isempty(db) || has_capability(caps, CLIENT_CONNECT_WITH_DB) || throw(ProtocolError("a database was requested but CLIENT_CONNECT_WITH_DB was not negotiated"))
     sendpacket!(s, build_handshake_response(caps, s.limits.max_packet, charset, user, auth_response, plugin; db=db, attrs=attrs, mariadb=is_mariadb(s)))
-    s.capabilities = caps
     transition!(s, :handshake_response, AUTH)
     return nothing
 end

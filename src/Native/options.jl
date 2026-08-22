@@ -285,7 +285,9 @@ function ConnectOptions(host::AbstractString, user::AbstractString, password::Un
     local_files = get(kwd, :local_files, false)
     handler = get(kwd, :local_infile_handler, nothing)
     local_files && handler === nothing && throw(ArgumentError("local_files=true requires a local_infile_handler"))
+    db = String(pick(:db, ""))
     flags = client_flags(; found_rows=get(kwd, :found_rows, false), no_schema=get(kwd, :no_schema, false), ignore_space=get(kwd, :ignore_space, false), multi_statements=get(kwd, :multi_statements, false), local_files=local_files)
+    isempty(db) || (flags |= P.CLIENT_CONNECT_WITH_DB)
     get(kwd, :can_handle_expired_passwords, false) && (flags |= P.CLIENT_CAN_HANDLE_EXPIRED_PASSWORDS)
     limits = P.Limits(; max_packet=get(kwd, :max_allowed_packet, P.DEFAULT_MAX_PACKET), max_buffered_bytes=get(kwd, :max_buffered_bytes, P.DEFAULT_MAX_BUFFERED_BYTES), max_response_bytes=get(kwd, :max_response_bytes, nothing), max_columns=get(kwd, :max_columns, 4096), max_result_sets=get(kwd, :max_result_sets, 1024), max_metadata_bytes=get(kwd, :max_metadata_bytes, 16 * 1024 * 1024))
     attrs = Vector{Pair{String, String}}(get(kwd, :attrs, default_attrs()))
@@ -293,5 +295,5 @@ function ConnectOptions(host::AbstractString, user::AbstractString, password::Un
     ct = ct isa AbstractString ? parse(Int, ct) : ct
     max_local_infile_bytes = Int(get(kwd, :max_local_infile_bytes, 1024 * 1024 * 1024))
     max_local_infile_bytes > 0 || throw(ArgumentError("max_local_infile_bytes must be positive"))
-    return ConnectOptions(host_s, port, user_s, pw, String(pick(:db, "")), positive_or_nothing(ct, "connect_timeout"), positive_or_nothing(get(kwd, :read_timeout, nothing), "read_timeout"), positive_or_nothing(get(kwd, :write_timeout, nothing), "write_timeout"), pick(:bind, nothing) === nothing ? nothing : String(pick(:bind, nothing)), get(kwd, :init_command, nothing) === nothing ? nothing : String(kwd[:init_command]), get(kwd, :reconnect, false), flags, tls, auth, default_auth === nothing ? nothing : String(default_auth), get(kwd, :can_handle_expired_passwords, false), limits, attrs, handler, max_local_infile_bytes, get(kwd, :debug, false))
+    return ConnectOptions(host_s, port, user_s, pw, db, positive_or_nothing(ct, "connect_timeout"), positive_or_nothing(get(kwd, :read_timeout, nothing), "read_timeout"), positive_or_nothing(get(kwd, :write_timeout, nothing), "write_timeout"), pick(:bind, nothing) === nothing ? nothing : String(pick(:bind, nothing)), get(kwd, :init_command, nothing) === nothing ? nothing : String(kwd[:init_command]), get(kwd, :reconnect, false), flags, tls, auth, default_auth === nothing ? nothing : String(default_auth), get(kwd, :can_handle_expired_passwords, false), limits, attrs, handler, max_local_infile_bytes, get(kwd, :debug, false))
 end
