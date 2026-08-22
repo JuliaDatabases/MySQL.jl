@@ -244,6 +244,22 @@ end
             N.close!(h)
         end
         @test seen == ["SET time_zone = '+00:00'"]
+
+        with_server(conn -> plain_peer_connect!(conn; caps=MYSQL8_SERVER_CAPS & ~P.CLIENT_SSL, after=c -> begin
+            read_command(c)
+            send_packet(c, 1, ok_payload(; status=P.SERVER_STATUS_AUTOCOMMIT | P.SERVER_MORE_RESULTS_EXISTS))
+            send_packet(c, 2, vcat(UInt8[0xFF, 0x28, 0x04], codeunits("#42000late init error")))
+            await_eof(c)
+        end)) do port
+            err = try
+                native_connect(port; init_command="SELECT 1; INVALID", multi_statements=true)
+                nothing
+            catch ex
+                ex
+            end
+            @test err isa P.Error
+            @test err isa P.Error && err.errno == 1064 && err.msg == "late init error"
+        end
     end
 
     @testset "charset bootstrap requires one final OK" begin
