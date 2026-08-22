@@ -105,6 +105,46 @@ function prepared_bool_parameter(conn)
     return value == 1 ? :one : :zero
 end
 
+function prepared_wrongrow(conn)
+    stmt = DBInterface.prepare(conn, "SELECT ID FROM manifest_employee ORDER BY ID")
+    try
+        cur = DBInterface.execute(stmt)
+        first, state = iterate(cur)
+        iterate(cur, state)
+        return try
+            first.ID
+            (false, "no error")
+        catch err
+            (err isa ArgumentError, sprint(showerror, err))
+        end
+    finally
+        DBInterface.close!(stmt)
+    end
+end
+
+function prepared_negative_time(conn)
+    stmt = DBInterface.prepare(conn, "SELECT CAST('-01:02:03.000004' AS TIME(6)) AS tm")
+    try
+        return try
+            (:value, only(Tables.columntable(DBInterface.execute(stmt)).tm))
+        catch err
+            (:error, nameof(typeof(err)))
+        end
+    finally
+        DBInterface.close!(stmt)
+    end
+end
+
+function prepared_zero_datetime(conn)
+    DBInterface.execute(conn, "SET SESSION SQL_MODE=''")
+    stmt = DBInterface.prepare(conn, "SELECT CAST('0000-00-00 00:00:00' AS DATETIME) AS dt")
+    try
+        return only(Tables.columntable(DBInterface.execute(stmt)).dt)
+    finally
+        DBInterface.close!(stmt)
+    end
+end
+
 # A tuple, not an array literal: `end` inside `[...]` is the last-index token, which breaks
 # `begin ... end` closure bodies.
 const TEXT_ROW_TUPLE = (
@@ -212,6 +252,8 @@ const BINARY_ROW_TUPLE = (
             DBInterface.close!(stmt)
             v
         end),
+    Row("prepared row is valid only while current: ArgumentError text", :preserve,
+        prepared_wrongrow),
     Row("prepared INSERT/SELECT round-trips bound parameters (int, float, string, date, time, blob)", :preserve,
         conn -> begin
             ins = DBInterface.prepare(conn, "INSERT INTO manifest_employee (OfficeNo, Wage, Name, JoinDate, LunchTime, Photo) VALUES (?, ?, ?, ?, ?, ?)")
@@ -227,6 +269,14 @@ const BINARY_ROW_TUPLE = (
         prepared_parameter_roundtrip),
     Row("prepared Bool uses TINY instead of the 1.x empty-STRING fallback", :fix,
         prepared_bool_parameter; native=:one, legacy=:zero),
+    Row("prepared negative TIME honours the sign and applies the Dates.Time range policy", :fix,
+        prepared_negative_time;
+        native=(:error, :ConversionError),
+        legacy=(:value, Time(1, 2, 3, 0, 4))),
+    Row("prepared zero DATETIME follows the unified zero-date sentinel policy", :fix,
+        prepared_zero_datetime;
+        native=DateTime(0),
+        legacy=DateTime(1970, 1, 1)),
     Row("executemany bulk-inserts each parameter row in a transaction", :preserve,
         conn -> begin
             DBInterface.execute(conn, "CREATE TEMPORARY TABLE manifest_many (a INT, b VARCHAR(8))")
