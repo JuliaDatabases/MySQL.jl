@@ -1,0 +1,245 @@
+# The DBInterface connection of the native backend: lock-serialized use of one
+# `Protocol.Session`, pending-response draining, cursor invalidation tokens, the narrow
+# reconnect rule, transactions that hold the lock, and `escape`.
+
+"""
+    MySQL.Native.Connection
+
+A connection on the native wire-protocol backend. Obtain one with
+`DBInterface.connect(MySQL.Native.Connection, host, user, password; kw...)`; every
+keyword of `MySQL.Connection` is accepted (removed ones explain why they fail).
+Operations are serialized by the connection lock; a streaming cursor and a transaction are
+owned by the task that created them.
+"""
+mutable struct Connection <: DBInterface.Connection
+    handle::Union{Nothing, Handle}
+    options::ConnectOptions
+    host::String
+    user::String
+    port::String
+    db::String
+    lock::ReentrantLock
+    generation::Int
+    @atomic active_token::Int
+    next_token::Int
+    buffered_bytes::Int
+    transaction_owner::Union{Nothing, Task}
+    results::ResultOptions
+end
+
+# Preserved 1.x quirk: a `mysql://` substring anywhere in the host is stripped.
+function strip_scheme(host::AbstractString)
+    rng = findfirst("mysql://", host)
+    return rng === nothing ? String(host) : String(host[(last(rng) + 1):end])
+end
+
+"""
+    DBInterface.connect(MySQL.Native.Connection, host, user, passwd=nothing; db="", port=nothing, kw...)
+
+Connects with the native backend. Keywords are those of `MySQL.Connection` plus the
+native-only options (`ssl_mode=:preferred`, `get_server_public_key`, `tls_version`,
+`zero_dates`, `time_type`, `local_infile_handler`, `max_buffered_bytes`, …); see
+`MySQL.Native.ConnectOptions`.
+"""
+function DBInterface.connect(::Type{Connection}, host::AbstractString, user::AbstractString, passwd::Union{AbstractString, Nothing}=nothing; db::AbstractString="", port::Union{Integer, Nothing}=nothing, kw...)
+    opts = ConnectOptions(strip_scheme(host), user, passwd; db=db, port=port, kw...)
+    h = connect(opts)
+    results = ResultOptions(; zero_dates=opts.zero_dates, time_type=opts.time_type)
+    return Connection(h, opts, opts.host, opts.user, string(opts.port), opts.db, ReentrantLock(), 1, 0, 0, 0, nothing, results)
+end
+
+function Base.show(io::IO, conn::Connection)
+    opts = conn.handle === nothing ? "disconnected" : "host=\"$(conn.host)\", user=\"$(conn.user)\", port=\"$(conn.port)\", db=\"$(conn.db)\""
+    print(io, "MySQL.Native.Connection($opts)")
+    return nothing
+end
+
+@noinline closed_connection() = error("mysql connection has been closed or disconnected")
+
+function checkconn(conn::Connection)
+    conn.handle === nothing && closed_connection()
+    return nothing
+end
+
+session(conn::Connection) = (checkconn(conn); conn.handle.session)
+
+"""
+    Base.isopen(conn)
+
+A local check (the transport is open and the session is not closed or broken); it does not
+detect a peer that went away silently — use `MySQL.Native.ping`.
+"""
+Base.isopen(conn::Connection) = conn.handle !== nothing && isopen(conn.handle)
+
+"""
+    DBInterface.close!(conn)
+
+Sends COM_QUIT (best effort) and closes the transport. Idempotent; every cursor of the
+connection becomes invalid.
+"""
+function DBInterface.close!(conn::Connection)
+    lock(conn.lock) do
+        h = conn.handle
+        h === nothing && return nothing
+        conn.handle = nothing
+        invalidate_cursors!(conn)
+        close!(h)
+        return nothing
+    end
+    return nothing
+end
+
+Base.close(conn::Connection) = DBInterface.close!(conn)
+
+# ---- response ownership ----
+
+function invalidate_cursors!(conn::Connection)
+    conn.generation += 1
+    @atomic conn.active_token = 0
+    return nothing
+end
+
+function new_token!(conn::Connection)
+    conn.next_token += 1
+    @atomic conn.active_token = conn.next_token
+    return conn.next_token
+end
+
+# Reads and discards whatever the server still has to say about the previous command, and
+# withdraws ownership from the cursor that was consuming it.
+function drain_pending!(conn::Connection)
+    s = session(conn)
+    if !P.is_terminal(s.phase) && s.phase != P.READY
+        P.drain!(s)
+    end
+    @atomic conn.active_token = 0
+    return nothing
+end
+
+# Reconnect only before a send, only on a session known to be closed or broken, never
+# inside a transaction. Statements and cursors of the old session are invalidated by the
+# generation bump.
+function ensure_live!(conn::Connection)
+    h = conn.handle
+    isopen(h.session) && return nothing
+    (conn.options.reconnect && conn.transaction_owner === nothing) || throw(P.Error(P.CR_SERVER_GONE_ERROR, "MySQL server has gone away", "HY000"))
+    conn.handle = nothing
+    close!(h)
+    conn.handle = connect(conn.options)
+    invalidate_cursors!(conn)
+    return nothing
+end
+
+# Every command starts here (under the lock): live connection, no pending response, fresh
+# per-command buffered budget.
+function begin_command!(conn::Connection)
+    checkconn(conn)
+    drain_pending!(conn)
+    ensure_live!(conn)
+    conn.buffered_bytes = 0
+    return conn.handle.session
+end
+
+# Runs a statement that must answer with OK (no result set) and returns the OK packet.
+function execute_ok!(conn::Connection, sql::AbstractString)
+    s = begin_command!(conn)
+    P.query!(s, sql)
+    resp = P.read_command_response!(s)
+    if !(resp isa P.OKPacket)
+        P.drain!(s)
+        throw(MySQLInterfaceError("expected `$sql` to return OK"))
+    end
+    P.drain!(s)
+    return resp
+end
+
+"""
+    MySQL.Native.ping(conn) -> Bool
+
+COM_PING round trip; throws when the connection is unusable.
+"""
+function ping(conn::Connection)
+    lock(conn.lock) do
+        s = begin_command!(conn)
+        P.ping!(s)
+        P.read_command_response!(s; kind=P.CMD_SIMPLE)
+        return true
+    end
+end
+
+# ---- transactions ----
+
+"""
+    DBInterface.transaction(f, conn)
+
+Runs `f()` inside `START TRANSACTION` / `COMMIT` (or `ROLLBACK` when `f` throws) and returns
+`f()`'s value. The connection lock is held for the whole callback: other tasks block until
+the transaction ends, so `f` must not wait on tasks that need this connection.
+"""
+function DBInterface.transaction(f, conn::Connection)
+    lock(conn.lock)
+    try
+        conn.transaction_owner === nothing || throw(MySQLInterfaceError("a transaction is already active on this connection"))
+        conn.transaction_owner = current_task()
+        execute_ok!(conn, "START TRANSACTION")
+        try
+            result = f()
+            execute_ok!(conn, "COMMIT")
+            return result
+        catch
+            try
+                execute_ok!(conn, "ROLLBACK")
+            catch
+            end
+            rethrow()
+        end
+    finally
+        conn.transaction_owner = nothing
+        unlock(conn.lock)
+    end
+end
+
+# ---- escaping ----
+
+"""
+    MySQL.Native.escape(conn, str) -> String
+
+Escapes `str` for use inside a single-quoted SQL literal on this connection's character set
+(utf8mb4): `\\`, `'`, `"`, NUL, newline, carriage return and Control-Z are backslash-escaped;
+under the session's `NO_BACKSLASH_ESCAPES` mode only `'` is doubled.
+"""
+function escape(conn::Connection, str::AbstractString)
+    s = session(conn)
+    return escape_literal(str, (s.status & P.SERVER_STATUS_NO_BACKSLASH_ESCAPES) != 0)
+end
+
+function escape_literal(str::AbstractString, no_backslash_escapes::Bool)
+    out = IOBuffer(; sizehint=ncodeunits(str) + 8)
+    for b in codeunits(str)
+        if no_backslash_escapes
+            b == UInt8('\'') && write(out, UInt8('\''))
+            write(out, b)
+        elseif b == 0x00
+            write(out, "\\0")
+        elseif b == UInt8('\n')
+            write(out, "\\n")
+        elseif b == UInt8('\r')
+            write(out, "\\r")
+        elseif b == UInt8('\\') || b == UInt8('\'') || b == UInt8('"')
+            write(out, UInt8('\\'))
+            write(out, b)
+        elseif b == 0x1A
+            write(out, "\\Z")
+        else
+            write(out, b)
+        end
+    end
+    return String(take!(out))
+end
+
+"""
+    MySQL.Native.escape_identifier(name) -> String
+
+Backtick-quotes an identifier, doubling embedded backticks.
+"""
+escape_identifier(name::AbstractString) = string('`', replace(String(name), "`" => "``"), '`')

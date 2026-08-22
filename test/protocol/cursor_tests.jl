@@ -1,0 +1,440 @@
+# The DBInterface text-protocol layer (`Native.Connection`, `TextCursor`) against the fake
+# peer: decoding policies, the row-validity contract, multi-results, LOCAL INFILE, limits,
+# reconnect. Server scripts answer the connection phase with `plain_peer_connect!` (no TLS,
+# SET NAMES bootstrap) and then serve commands from `after`.
+using Dates, DecFP, Tables, DBInterface
+
+# ColumnDefinition41 for a column of `type` (wire byte) with `flags`.
+function coldef(name::AbstractString; type::Integer=P.MYSQL_TYPE_VAR_STRING, flags::Integer=0, decimals::Integer=0, charset::Integer=0x2D, length::Integer=255, table::AbstractString="t")
+    buf = UInt8[]
+    for s in ("def", "db", table, table, name, name)
+        P.write_lenenc_string!(buf, s)
+    end
+    P.write_lenenc!(buf, 0x0C)
+    P.write_u16!(buf, charset)
+    P.write_u32!(buf, length)
+    P.write_u8!(buf, type)
+    P.write_u16!(buf, flags)
+    P.write_u8!(buf, decimals)
+    P.write_u16!(buf, 0)
+    return buf
+end
+
+const NOT_NULL = P.NOT_NULL_FLAG
+const UNSIGNED = P.UNSIGNED_FLAG
+const BINARY = P.BINARY_FLAG
+
+# Sends a complete text result set: column count, definitions, rows, OK terminator.
+function send_resultset(conn, seq, cols::Vector{Vector{UInt8}}, rows::Vector{Vector{UInt8}}; status=P.SERVER_STATUS_AUTOCOMMIT, more::Bool=false, terminator=nothing)
+    send_packet(conn, seq, column_count(length(cols)))
+    seq += 1
+    for c in cols
+        send_packet(conn, seq, c)
+        seq += 1
+    end
+    for r in rows
+        seq = send_logical(conn, seq, r)
+    end
+    st = more ? status | P.SERVER_MORE_RESULTS_EXISTS : status
+    send_packet(conn, seq, terminator === nothing ? ok_payload(; header=0xFE, status=st) : terminator)
+    return seq + 1
+end
+
+send_ok(conn, seq; affected=0, insert_id=0, status=P.SERVER_STATUS_AUTOCOMMIT, more::Bool=false) = (send_packet(conn, seq, ok_payload(; affected=affected, insert_id=insert_id, status=more ? status | P.SERVER_MORE_RESULTS_EXISTS : status)); seq + 1)
+send_err(conn, seq, code, msg; sqlstate="HY000") = (send_packet(conn, seq, vcat(UInt8[0xFF], reinterpret(UInt8, [UInt16(code)]), UInt8['#'], codeunits(sqlstate), codeunits(msg))); seq + 1)
+
+# Expects COM_QUERY and returns the SQL text.
+function expect_query(conn)
+    seq, cmd, payload = read_command(conn)
+    cmd == P.COM_QUERY || error("expected COM_QUERY, got $cmd")
+    return String(payload)
+end
+
+# Serves one native connection: the handshake, then `script(conn)` for the commands, then
+# waits for COM_QUIT/EOF.
+function with_native(f::Function, script::Function; connect_kw=(;), caps=MYSQL8_SERVER_CAPS & ~P.CLIENT_SSL)
+    with_server(conn -> plain_peer_connect!(conn; caps=caps, after=c -> (script(c); stall_until_eof(c)))) do port
+        conn = DBInterface.connect(N.Connection, "127.0.0.1", "root", "pw"; port=port, ssl_mode=:disabled, connect_timeout=10, connect_kw...)
+        try
+            f(conn)
+        finally
+            DBInterface.close!(conn)
+        end
+    end
+end
+
+const TYPED_COLS = [
+    coldef("i"; type=P.MYSQL_TYPE_LONG, flags=NOT_NULL),
+    coldef("u"; type=P.MYSQL_TYPE_LONGLONG, flags=UNSIGNED),
+    coldef("f"; type=P.MYSQL_TYPE_FLOAT),
+    coldef("d"; type=P.MYSQL_TYPE_NEWDECIMAL, decimals=3),
+    coldef("s"; type=P.MYSQL_TYPE_VAR_STRING),
+    coldef("b"; type=P.MYSQL_TYPE_BLOB, flags=BINARY),
+    coldef("bit"; type=P.MYSQL_TYPE_BIT, flags=UNSIGNED),
+    coldef("dt"; type=P.MYSQL_TYPE_DATETIME),
+    coldef("da"; type=P.MYSQL_TYPE_DATE),
+    coldef("tm"; type=P.MYSQL_TYPE_TIME),
+    coldef("y"; type=P.MYSQL_TYPE_YEAR, flags=UNSIGNED),
+]
+
+@testset "text cursor: values, NULLs and the row-validity contract" begin
+    rows = [text_row("-7", "18446744073709551615", "1.5", "12.345", "héllo", "\x00\x01", "\x01\x02", "2024-02-29 13:14:15.250500", "2024-02-29", "838:59:59", "2024"),
+            text_row(nothing, nothing, nothing, nothing, nothing, nothing, nothing, nothing, nothing, nothing, nothing)]
+    with_native(c -> (expect_query(c); send_resultset(c, 1, TYPED_COLS, rows))) do conn
+        cur = DBInterface.execute(conn, "select typed")
+        @test Tables.schema(cur) == Tables.Schema([:i, :u, :f, :d, :s, :b, :bit, :dt, :da, :tm, :y], [Int32, Union{Missing, UInt64}, Union{Missing, Float32}, Union{Missing, Dec64}, Union{Missing, String}, Union{Missing, Vector{UInt8}}, Union{Missing, MySQL.API.Bit}, Union{Missing, DateTime}, Union{Missing, Date}, Union{Missing, Time}, Union{Missing, UInt64}])
+        @test length(cur) == 2 && Base.IteratorSize(typeof(cur)) == Base.HasLength() && eltype(cur) == N.TextRow
+        state = iterate(cur)
+        row, st = state
+        @test row.i === Int32(-7) && row.u === typemax(UInt64) && row.f === 1.5f0 && row.d == d64"12.345"
+        @test row.s == "héllo" && row.b == UInt8[0x00, 0x01] && row.bit == MySQL.API.Bit(0x0102)
+        @test_throws P.ConversionError row.tm                               # 838 h does not fit Dates.Time
+        @test row.da == Date(2024, 2, 29) && row.y === UInt64(2024)                 # YEAR is an unsigned numeric (Clong → UInt64)
+        @test (@test_logs (:warn, r"microsecond") row.dt) == DateTime(2024, 2, 29, 13, 14, 15, 250)
+        @test propertynames(row) == [:i, :u, :f, :d, :s, :b, :bit, :dt, :da, :tm, :y] && length(row) == 11
+        @test Base.IndexStyle(typeof(row)) == Base.IndexLinear()
+        row2, _ = iterate(cur, st)
+        @test all(ismissing, (row2.u, row2.f, row2.d, row2.s, row2.b, row2.bit, row2.dt, row2.da, row2.tm, row2.y))
+        @test_throws P.ConversionError row2.i                                # NULL in a NOT NULL column
+        err = try; row.i; nothing; catch e; e; end
+        @test err isa ArgumentError && err.msg == "row 1 is no longer valid; mysql results are forward-only iterators where each row is only valid when iterated"
+        @test iterate(cur, 3) === nothing
+        @test row2.s === missing                                             # the last row stays current
+    end
+end
+
+@testset "text cursor: TIME and zero-date policies" begin
+    cols = [coldef("tm"; type=P.MYSQL_TYPE_TIME), coldef("dt"; type=P.MYSQL_TYPE_DATETIME, flags=NOT_NULL), coldef("da"; type=P.MYSQL_TYPE_DATE, flags=NOT_NULL)]
+    rows = [text_row("-01:02:03.5", "0000-00-00 00:00:00", "0000-00-00"), text_row("23:59:59.999999", "2024-05-00 00:00:00", "2024-00-01")]
+    serve = c -> (expect_query(c); send_resultset(c, 1, cols, rows))
+    with_native(serve) do conn   # defaults: Time, :sentinel
+        cur = DBInterface.execute(conn, "select")
+        @test Tables.schema(cur).types == (Union{Missing, Time}, DateTime, Date)
+        r1, st = iterate(cur)
+        @test_throws P.ConversionError r1.tm                                 # negative
+        @test r1.dt == DateTime(0) && r1.da == Date(0)
+        r2, _ = iterate(cur, st)
+        @test r2.tm == Time(23, 59, 59, 999, 999)
+        @test_throws P.ConversionError r2.dt                                 # partial zero date
+        @test_throws P.ConversionError r2.da
+    end
+    with_native(serve; connect_kw=(; zero_dates=:missing, time_type=Dates.Microsecond)) do conn
+        cur = DBInterface.execute(conn, "select")
+        @test Tables.schema(cur).types == (Union{Missing, Dates.Microsecond}, Union{Missing, DateTime}, Union{Missing, Date})   # NOT NULL widened
+        r1, st = iterate(cur)
+        @test r1.tm == Dates.Microsecond(-3_723_500_000) && r1.dt === missing && r1.da === missing
+        r2, _ = iterate(cur, st)
+        @test r2.tm == Dates.Microsecond(86_399_999_999) && r2.dt === missing && r2.da === missing
+    end
+    with_native(serve; connect_kw=(; zero_dates=:error)) do conn
+        r1, _ = iterate(DBInterface.execute(conn, "select"))
+        @test_throws P.ConversionError r1.dt
+    end
+    @test_throws ArgumentError N.ConnectOptions("h", "u"; zero_dates=:nope)
+    @test_throws ArgumentError N.ConnectOptions("h", "u"; time_type=Int)
+end
+
+@testset "DML cursors, lastrowid snapshots, rows_affected bitcast" begin
+    with_native(c -> begin
+        expect_query(c); send_ok(c, 1; affected=3, insert_id=41)
+        expect_query(c); send_ok(c, 1; affected=0xFFFF_FFFF_FFFF_FFFF, insert_id=0)
+        expect_query(c); send_resultset(c, 1, [coldef("x"; type=P.MYSQL_TYPE_LONG)], [text_row("1")]; terminator=ok_payload(; header=0xFE, insert_id=41))
+    end) do conn
+        cur = DBInterface.execute(conn, "insert")
+        @test cur.rows_affected == 3 && DBInterface.lastrowid(cur) == 41 && length(cur) == 0 && isempty(Tables.columntable(cur))
+        @test Tables.schema(cur) == Tables.Schema(Symbol[], Type[])
+        cur = DBInterface.execute(conn, "update")
+        @test cur.rows_affected == -1                                          # preserved Int64 bitcast of UInt64
+        cur = DBInterface.execute(conn, "select")
+        @test DBInterface.lastrowid(cur) == 41                                  # from this cursor's own terminator OK
+    end
+end
+
+@testset "streaming cursor: ownership, invalidation, close!" begin
+    cols = [coldef("x"; type=P.MYSQL_TYPE_LONG, flags=NOT_NULL)]
+    with_native(c -> begin
+        expect_query(c); send_resultset(c, 1, cols, [text_row("1"), text_row("2"), text_row("3")])
+        expect_query(c); send_ok(c, 1)
+        expect_query(c); send_resultset(c, 1, cols, [text_row("10"), text_row("20")])
+        expect_query(c); send_resultset(c, 1, cols, [text_row("5"), text_row("6")])
+        expect_query(c); send_ok(c, 1)
+    end) do conn
+        cur = DBInterface.execute(conn, "select"; mysql_store_result=false)
+        @test Base.IteratorSize(typeof(cur)) == Base.SizeUnknown() && length(cur) == -1
+        r1, st = iterate(cur)
+        @test r1.x == 1
+        # a foreign command drains the rest and invalidates the streaming cursor
+        DBInterface.execute(conn, "other")
+        @test_throws P.ProtocolError r1.x
+        @test_throws P.ProtocolError iterate(cur, st)
+        # close! drains a streaming cursor so the connection is idle again
+        cur = DBInterface.execute(conn, "select"; mysql_store_result=false)
+        r, st = iterate(cur)
+        @test r.x == 10
+        DBInterface.close!(cur)
+        @test iterate(cur, st) === nothing
+        @test isopen(conn)
+        cur = DBInterface.execute(conn, "select"; mysql_store_result=false)
+        @test [r.x for r in cur] == [5, 6]
+        @test DBInterface.execute(conn, "after").rows_affected == 0
+    end
+end
+
+@testset "multiple results: distinct cursors, drains, errors, budgets" begin
+    cols = [coldef("x"; type=P.MYSQL_TYPE_LONG, flags=NOT_NULL)]
+    cols2 = [coldef("a"; type=P.MYSQL_TYPE_VAR_STRING), coldef("a"; type=P.MYSQL_TYPE_LONG, flags=NOT_NULL)]
+    # DML → SELECT → DML(final), buffered and streaming
+    for buffered in (true, false)
+        with_native(c -> begin
+            expect_query(c)
+            seq = send_ok(c, 1; affected=2, insert_id=7, more=true)
+            seq = send_resultset(c, seq, cols, [text_row("1"), text_row("2")]; more=true)
+            send_ok(c, seq; affected=0)
+            expect_query(c); send_ok(c, 1)
+        end; connect_kw=(; multi_statements=true)) do conn
+            results = collect(DBInterface.executemultiple(conn, "insert; select; delete"; mysql_store_result=buffered))
+            @test length(results) == 3 && length(unique(objectid.(results))) == 3
+            @test results[1].rows_affected == 2 && DBInterface.lastrowid(results[1]) == 7 && isempty(results[1].names)
+            @test results[2].names == [:x] && results[2].current_resultsetnumber == 2
+            @test results[3].rows_affected == 0 && results[3].current_resultsetnumber == 3
+            # the streaming middle result was drained when the outer iterator advanced: its rows are gone
+            buffered ? (@test [r.x for r in results[2]] == [1, 2]) : (@test collect(results[2]) == [])
+            @test DBInterface.execute(conn, "next").rows_affected == 0
+        end
+    end
+    # SELECT → SELECT with changed metadata and duplicate names; stale row after advancing
+    with_native(c -> begin
+        expect_query(c)
+        seq = send_resultset(c, 1, cols, [text_row("1")]; more=true)
+        send_resultset(c, seq, cols2, [text_row("s", "9")])
+    end; connect_kw=(; multi_statements=true)) do conn
+        tc = DBInterface.executemultiple(conn, "select; select"; mysql_store_result=false)
+        c1, st = iterate(tc)
+        r1, _ = iterate(c1)
+        @test r1.x == 1
+        c2, st = iterate(tc, st)
+        @test c2 !== c1 && c2.names == [:a, :a] && c2.lookup[:a] == 2 && c1.names == [:x]
+        @test_throws ArgumentError r1.x                                        # drained: stale row
+        r2, _ = iterate(c2)
+        @test r2.a == 9 && r2[1] == "s"
+        @test iterate(tc, st) === nothing
+    end
+    # a later ERR ends the iteration with Error, connection usable
+    with_native(c -> begin
+        expect_query(c)
+        seq = send_resultset(c, 1, cols, [text_row("1")]; more=true)
+        send_err(c, seq, 1064, "You have an error in your SQL syntax"; sqlstate="42000")
+        expect_query(c); send_ok(c, 1)
+    end; connect_kw=(; multi_statements=true)) do conn
+        tc = DBInterface.executemultiple(conn, "select; bogus")
+        c1, st = iterate(tc)
+        @test [r.x for r in c1] == [1]
+        err = try; iterate(tc, st); nothing; catch e; e; end
+        @test err isa P.Error && err.errno == 1064 && err.sqlstate == "42000"
+        @test DBInterface.execute(conn, "ok").rows_affected == 0
+    end
+    # CALL: results then a final OK; plain execute drains the rest on the next command
+    with_native(c -> begin
+        expect_query(c)
+        seq = send_resultset(c, 1, cols, [text_row("1")]; more=true)
+        send_ok(c, seq; status=P.SERVER_STATUS_AUTOCOMMIT)
+        expect_query(c); send_ok(c, 1; affected=5)
+    end) do conn
+        cur = DBInterface.execute(conn, "call p()")
+        @test Tables.columntable(cur).x == [1]
+        @test DBInterface.execute(conn, "next").rows_affected == 5
+    end
+    # buffered results individually below but jointly above max_buffered_bytes → ProtocolError, connection closed
+    big = text_row(repeat("x", 300))
+    with_native(c -> begin
+        expect_query(c)
+        seq = send_resultset(c, 1, [coldef("s")], [big, big]; more=true)
+        try; send_resultset(c, seq, [coldef("s")], [big, big]); catch; end
+    end; connect_kw=(; multi_statements=true, max_buffered_bytes=1000)) do conn
+        tc = DBInterface.executemultiple(conn, "select; select")
+        c1, st = iterate(tc)
+        @test length(c1) == 2
+        @test_throws P.ProtocolError iterate(tc, st)
+        @test !isopen(conn)
+    end
+    # a single result above the budget
+    with_native(c -> (expect_query(c); try; send_resultset(c, 1, [coldef("s")], [big, big, big, big]); catch; end); connect_kw=(; max_buffered_bytes=1000)) do conn
+        @test_throws P.ProtocolError DBInterface.execute(conn, "select")
+        @test !isopen(conn)
+        err = try; DBInterface.execute(conn, "select"); nothing; catch e; e; end   # broken session, reconnect=false
+        @test err isa P.Error && err.errno == P.CR_SERVER_GONE_ERROR
+    end
+end
+
+@testset "server errors keep the connection usable" begin
+    with_native(c -> begin
+        expect_query(c); send_err(c, 1, 1146, "Table 'x' doesn't exist"; sqlstate="42S02")
+        expect_query(c); send_ok(c, 1; affected=1)
+    end) do conn
+        err = try; DBInterface.execute(conn, "select * from x"); nothing; catch e; e; end
+        @test err isa P.Error && err.errno == 1146 && err.sqlstate == "42S02" && sprint(showerror, err) == "(1146): Table 'x' doesn't exist"
+        @test DBInterface.execute(conn, "ok").rows_affected == 1
+    end
+end
+
+@testset "LOCAL INFILE state table" begin
+    # the request is sent only when the client negotiated LOCAL_FILES
+    infile_request(c, seq, name) = (send_packet(c, seq, vcat(UInt8[0xFB], codeunits(name))); seq + 1)
+    function read_upload(c)
+        chunks = Vector{UInt8}[]
+        while true
+            seq, data = read_packet(c)
+            isempty(data) && return (seq, chunks)
+            push!(chunks, data)
+        end
+    end
+    uploads = Vector{Vector{UInt8}}[]
+    handler_calls = String[]
+    handler = name -> (push!(handler_calls, name); name == "refuse" ? nothing : name == "boom" ? error("handler exploded") : IOBuffer(name == "empty" ? "" : "line1\nline2\n"))
+    with_native(c -> begin
+        # 1. upload accepted
+        expect_query(c); seq = infile_request(c, 1, "data.csv"); seq, chunks = read_upload(c); push!(uploads, chunks); send_ok(c, seq + 1; affected=2)
+        # 2. empty file is a valid upload
+        expect_query(c); seq = infile_request(c, 1, "empty"); seq, chunks = read_upload(c); push!(uploads, chunks); send_ok(c, seq + 1; affected=0)
+        # 3. refusal, server answers OK
+        expect_query(c); seq = infile_request(c, 1, "refuse"); seq, chunks = read_upload(c); push!(uploads, chunks); send_ok(c, seq + 1; affected=0)
+        # 4. refusal, server answers ERR
+        expect_query(c); seq = infile_request(c, 1, "refuse"); seq, chunks = read_upload(c); push!(uploads, chunks); send_err(c, seq + 1, 1148, "not allowed")
+        # 5. handler throws before any data: resynchronized, the handler error surfaces, connection usable
+        expect_query(c); seq = infile_request(c, 1, "boom"); seq, chunks = read_upload(c); push!(uploads, chunks); send_ok(c, seq + 1)
+        expect_query(c); send_ok(c, 1; affected=9)
+    end; connect_kw=(; local_files=true, local_infile_handler=handler)) do conn
+        @test DBInterface.execute(conn, "load data local infile 'data.csv'").rows_affected == 2
+        @test DBInterface.execute(conn, "load data local infile 'empty'").rows_affected == 0
+        err = try; DBInterface.execute(conn, "load data local infile 'refuse'"); nothing; catch e; e; end
+        @test err isa P.LocalInfileRefused && err.filename == "refuse" && occursin("accepted the empty upload", err.msg)
+        err = try; DBInterface.execute(conn, "load data local infile 'refuse'"); nothing; catch e; e; end
+        @test err isa P.LocalInfileRefused && occursin("(1148)", err.msg)
+        err = try; DBInterface.execute(conn, "load data local infile 'boom'"); nothing; catch e; e; end
+        @test err isa ErrorException && err.msg == "handler exploded"
+        @test DBInterface.execute(conn, "ok").rows_affected == 9
+        @test isopen(conn)
+    end
+    @test uploads[1] == [Vector{UInt8}(codeunits("line1\nline2\n"))] && uploads[2] == [] && uploads[3] == [] && uploads[4] == [] && uploads[5] == []
+    @test handler_calls == ["data.csv", "empty", "refuse", "refuse", "boom"]
+    # size limit crossed after data was sent: the connection is closed
+    with_native(c -> (expect_query(c); infile_request(c, 1, "big"); try; read_upload(c); catch; end); connect_kw=(; local_files=true, local_infile_handler=name -> IOBuffer(repeat("z", 5000)), max_local_infile_bytes=4096)) do conn
+        @test_throws P.ProtocolError DBInterface.execute(conn, "load data local infile 'big'")
+        @test !isopen(conn)
+    end
+    # an unsolicited request (LOCAL_FILES not negotiated) is a protocol error; handler never called
+    called = Ref(false)
+    with_native(c -> (expect_query(c); infile_request(c, 1, "x"))) do conn
+        @test_throws P.ProtocolError DBInterface.execute(conn, "select 1")
+        @test !isopen(conn)
+    end
+    @test !called[]
+end
+
+@testset "reconnect rule and closed connections" begin
+    cols = [coldef("x"; type=P.MYSQL_TYPE_LONG, flags=NOT_NULL)]
+    # reconnect=false: a dead session is reported as "server has gone away"
+    with_native(c -> (expect_query(c); send_resultset(c, 1, cols, [text_row("1")]); close(c))) do conn
+        cur = DBInterface.execute(conn, "select")
+        @test Tables.columntable(cur).x == [1]                                   # buffered rows survive the peer closing
+        sleep(0.2)
+        err = try; DBInterface.execute(conn, "again"); nothing; catch e; e; end
+        @test err isa P.Error && err.errno == P.CR_SERVER_GONE_ERROR || err isa P.ProtocolError
+        @test_throws ErrorException (DBInterface.close!(conn); DBInterface.execute(conn, "after close"))
+        @test sprint(show, conn) == "MySQL.Native.Connection(disconnected)"
+    end
+    # reconnect=true: a new session before the next send once the old one is known dead,
+    # old cursors invalidated, never inside a transaction
+    accepted = Ref(0)
+    listener = Reseau.TCP.listen(Reseau.TCP.loopback_addr(0))
+    port = Int(Reseau.TCP.addr(listener).port)
+    errormonitor(Threads.@spawn begin
+        while true
+            c = try; Reseau.TCP.accept(listener); catch; break; end
+            accepted[] += 1
+            n = accepted[]
+            errormonitor(Threads.@spawn begin
+                try
+                    plain_peer_connect!(c; caps=MYSQL8_SERVER_CAPS & ~P.CLIENT_SSL, after=cc -> begin
+                        if n == 1
+                            expect_query(cc); send_resultset(cc, 1, cols, [text_row("1")])
+                            expect_query(cc)                                     # hang up without answering
+                        else
+                            expect_query(cc); send_ok(cc, 1; affected=4)
+                            expect_query(cc); send_ok(cc, 1)
+                            expect_query(cc); send_ok(cc, 1)
+                            stall_until_eof(cc)
+                        end
+                    end)
+                catch
+                finally
+                    close(c)
+                end
+            end)
+        end
+    end)
+    try
+        conn = DBInterface.connect(N.Connection, "127.0.0.1", "root", "pw"; port=port, ssl_mode=:disabled, connect_timeout=10, reconnect=true)
+        cur = DBInterface.execute(conn, "select"; mysql_store_result=false)
+        r, _ = iterate(cur)
+        @test r.x == 1
+        @test_throws P.ProtocolError DBInterface.execute(conn, "peer hangs up")  # EOF mid-protocol: broken
+        @test !isopen(conn)
+        gen = conn.generation
+        @test DBInterface.execute(conn, "after").rows_affected == 4              # reconnected before the send
+        @test conn.generation > gen && accepted[] == 2 && isopen(conn)
+        @test_throws P.ProtocolError r.x
+        # never inside a transaction
+        DBInterface.transaction(conn) do
+            conn.handle.session.phase = P.BROKEN
+            err = try; DBInterface.execute(conn, "in tx"); nothing; catch e; e; end
+            @test err isa P.Error && err.errno == P.CR_SERVER_GONE_ERROR
+            conn.handle.session.phase = P.READY
+        end
+        DBInterface.close!(conn)
+    finally
+        close(listener)
+    end
+end
+
+@testset "escape and identifiers" begin
+    @test N.escape_literal("a'b\"c\\d\n\r\0\x1a", false) == "a\\'b\\\"c\\\\d\\n\\r\\0\\Z"
+    @test N.escape_literal("a'b\\c", true) == "a''b\\c"
+    @test N.escape_identifier("we`ird") == "`we``ird`"
+    with_native(c -> begin
+        expect_query(c); send_ok(c, 1; status=P.SERVER_STATUS_AUTOCOMMIT | P.SERVER_STATUS_NO_BACKSLASH_ESCAPES)
+    end) do conn
+        @test N.escape(conn, SubString("'); DROP TABLE Employee; --")) == "\\'); DROP TABLE Employee; --"
+        DBInterface.execute(conn, "SET sql_mode='NO_BACKSLASH_ESCAPES'")
+        @test N.escape(conn, "it's") == "it''s"
+    end
+end
+
+@testset "transactions hold the lock; nested use is an error" begin
+    seen = String[]
+    with_native(c -> begin
+        for _ in 1:3
+            push!(seen, expect_query(c)); send_ok(c, 1)
+        end
+        push!(seen, expect_query(c)); send_ok(c, 1)
+        push!(seen, expect_query(c)); send_ok(c, 1)
+    end) do conn
+        @test DBInterface.transaction(conn) do
+            DBInterface.execute(conn, "insert 1")
+            @test_throws MySQL.MySQLInterfaceError DBInterface.transaction(() -> nothing, conn)
+            42
+        end == 42
+        @test_throws ErrorException DBInterface.transaction(conn) do
+            error("inside")
+        end
+    end
+    @test seen == ["START TRANSACTION", "insert 1", "COMMIT", "START TRANSACTION", "ROLLBACK"]
+end
+
+@testset "connection keyword surface and show" begin
+    with_native(c -> nothing) do conn
+        @test sprint(show, conn) == "MySQL.Native.Connection(host=\"127.0.0.1\", user=\"root\", port=\"$(conn.port)\", db=\"\")"
+        @test_throws MySQL.MySQLInterfaceError DBInterface.execute(conn, "select ?", (1,))
+    end
+    @test N.strip_scheme("mysql://db.example") == "db.example" && N.strip_scheme("db.example") == "db.example"
+end

@@ -24,6 +24,7 @@ empty!(P.COVERAGE)
     include("auth_tests.jl")
     include("tls_tests.jl")
     include("native_tests.jl")
+    include("cursor_tests.jl")
     include("coverage_tests.jl")
 end
 

@@ -3,7 +3,9 @@
 
 The native wire-protocol backend's driver layer: option validation (the compatibility truth
 table, option files), the single connection-establishment deadline, STARTTLS,
-authentication, the utf8mb4 bootstrap, the finalizer-free reaper, and text-protocol value decoding (`decode.jl`).
+authentication, the utf8mb4 bootstrap, the finalizer-free reaper, and the DBInterface
+surface (`Native.Connection`, text-protocol cursors). Opt-in during 1.x:
+`DBInterface.connect(MySQL.Native.Connection, host, user, password; kw...)`.
 """
 module Native
 
@@ -17,5 +19,7 @@ include("decode.jl")
 include("options.jl")
 include("reaper.jl")
 include("connect.jl")
+include("connection.jl")
+include("cursor.jl")
 
 end # module
