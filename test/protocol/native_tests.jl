@@ -9,6 +9,7 @@
     @test_throws ArgumentError N.ConnectOptions("h", "u"; unix_socket="/tmp/mysql.sock")
     @test_throws ArgumentError N.ConnectOptions("h", "u"; named_pipe=true)
     @test_throws ArgumentError N.ConnectOptions("h", "u"; protocol=:socket)
+    @test_throws ArgumentError N.ConnectOptions("", "u")
     @test N.ConnectOptions("h", "u"; protocol=:tcp).port == 3306
     @test N.ConnectOptions("h", "u"; protocol=MySQL.API.MYSQL_PROTOCOL_TCP).port == 3306
     @test_throws ArgumentError N.ConnectOptions("h", "u"; protocol=MySQL.API.MYSQL_PROTOCOL_SOCKET)

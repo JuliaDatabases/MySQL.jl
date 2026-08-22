@@ -327,6 +327,7 @@ function ConnectOptions(host::AbstractString, user::AbstractString, password::Un
     haskey(file, :unix_socket) && delete!(file, :unix_socket)
     host_s = String(host)
     host_s == "" && haskey(file, :host) && (host_s = file[:host])
+    isempty(host_s) && throw(ArgumentError("an empty host selects a Unix socket in MySQL.jl 1.x; the native backend currently supports TCP hosts only"))
     user_s = String(user)
     user_s == "" && haskey(file, :user) && (user_s = file[:user])
     pw = password === nothing ? (haskey(file, :password) ? file[:password] : nothing) : String(password)
