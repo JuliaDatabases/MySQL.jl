@@ -55,13 +55,14 @@ end
 @noinline sequence_mismatch(expected::UInt8, got::UInt8) = protocol_error("sequence id mismatch: expected $(Int(expected)), got $(Int(got))")
 
 """
-    readpacket!(io, transport, max_payload; max_response=nothing) -> PacketView
+    readpacket!(io, transport, max_payload; max_response=nothing, dest=io.inbuf) -> PacketView
 
 Reads one logical packet, reassembling continuation chunks, validating sequence ids, and
 bounding the reassembled size by `max_payload` *before* growing the buffer. `max_response`
-bounds the cumulative payload bytes since `newcommand!`.
+bounds the cumulative payload bytes since `newcommand!`. `dest` is the buffer the payload is
+read into (a cursor passes its own buffer so rows never alias the shared reader buffer).
 """
-function readpacket!(io::PacketIO, transport::Transport, max_payload::Int; max_response::Union{Nothing, Int}=nothing)
+function readpacket!(io::PacketIO, transport::Transport, max_payload::Int; max_response::Union{Nothing, Int}=nothing, dest::Vector{UInt8}=io.inbuf)
     total = 0
     nchunks = 0
     first_chunk_len = -1
@@ -76,13 +77,13 @@ function readpacket!(io::PacketIO, transport::Transport, max_payload::Int; max_r
         first_chunk_len < 0 && (first_chunk_len = len)
         check_limit("packet length", total + len, max_payload)
         check_limit("response bytes", io.response_bytes + len, max_response)
-        length(io.inbuf) < total + len && resize!(io.inbuf, total + len)
-        transport_read!(transport, io.inbuf, total + 1, len)
+        length(dest) < total + len && resize!(dest, total + len)
+        transport_read!(transport, dest, total + 1, len)
         total += len
         io.response_bytes += len
         len < MAX_CHUNK && break
     end
-    return PacketView(io.inbuf, 1, total, seq, nchunks, first_chunk_len)
+    return PacketView(dest, 1, total, seq, nchunks, first_chunk_len)
 end
 
 # Frames `payload` into chunks in `io.outbuf` (one write per logical packet), advancing the

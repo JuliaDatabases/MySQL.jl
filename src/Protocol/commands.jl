@@ -199,15 +199,15 @@ function read_result_header!(s::Session, p::PacketView, binary::Bool)
 end
 
 """
-    read_row!(s; binary=false) -> PacketView | ResultEnd
+    read_row!(s; binary=false, dest=s.io.inbuf) -> PacketView | ResultEnd
 
-Reads the next row packet (returned as a view valid until the next read) or the result-set
-terminator. A server ERR in row state ends the result set, returns the session to READY, and
-is thrown as `Error`.
+Reads the next row packet (returned as a view over `dest`, valid until the next read into
+that buffer) or the result-set terminator. A server ERR in row state ends the result set,
+returns the session to READY, and is thrown as `Error`.
 """
-function read_row!(s::Session; binary::Bool=s.command_kind == CMD_STMT_EXECUTE)
+function read_row!(s::Session; binary::Bool=s.command_kind == CMD_STMT_EXECUTE, dest::Vector{UInt8}=s.io.inbuf)
     require_phase(s, ROWS)
-    p = readpacket!(s)
+    p = readpacket!(s; dest=dest)
     what = guarded(() -> classify_row(p, binary), s)
     if what == :row
         transition!(s, :row, ROWS)

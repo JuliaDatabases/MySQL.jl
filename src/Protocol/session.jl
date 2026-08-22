@@ -87,15 +87,16 @@ function guarded(f::F, s::Session) where {F}
 end
 
 """
-    readpacket!(s; packet_limit=max_payload(s)) -> PacketView
+    readpacket!(s; packet_limit=max_payload(s), dest=s.io.inbuf) -> PacketView
 
 Reads one logical packet under the phase-dependent size bound; any failure faults the
-session. `packet_limit` can impose a smaller state-specific bound. The view is valid until
-the next read.
+session. `packet_limit` can impose a smaller state-specific bound; `dest` is the buffer the
+payload is read into (a cursor passes its own). The view is valid until the next read into
+the same buffer.
 """
-function readpacket!(s::Session; packet_limit::Int=max_payload(s))
+function readpacket!(s::Session; packet_limit::Int=max_payload(s), dest::Vector{UInt8}=s.io.inbuf)
     try
-        p = readpacket!(s.io, s.transport, min(packet_limit, max_payload(s)); max_response=s.authenticated ? s.limits.max_response_bytes : nothing)
+        p = readpacket!(s.io, s.transport, min(packet_limit, max_payload(s)); max_response=s.authenticated ? s.limits.max_response_bytes : nothing, dest=dest)
         s.debug && @debug "MySQL.Protocol read" phase=s.phase length=payload_length(p) header=first_byte(p) seq=p.seq chunks=p.nchunks
         return p
     catch err

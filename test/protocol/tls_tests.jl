@@ -254,6 +254,34 @@ end
         @test_throws ArgumentError N.ConnectOptions("h", "u"; connect_timeout=0)
     end
 
+    @testset "SSLRequest and HandshakeResponse carry identical capability flags" begin
+        words = Vector{UInt8}[]
+        with_server(conn -> begin
+            send_packet(conn, 0, greeting())
+            seq, sslreq = read_packet(conn)
+            push!(words, sslreq[1:4])
+            tls = TLS.server(conn, server_config())
+            TLS.handshake!(tls)
+            seq2, response = read_packet(tls)
+            push!(words, response[1:4])
+            c = P.PacketCursor(response)
+            P.skip!(c, 32)
+            P.read_nul_string!(c)
+            P.read_lenenc_bytes!(c)
+            push!(words, Vector{UInt8}(codeunits(P.read_nul_string!(c))))   # the database
+            send_packet(tls, seq2 + 1, ok_payload())
+            read_command(tls)                                               # SET NAMES
+            send_packet(tls, 1, ok_payload())
+            stall_until_eof(tls)
+        end) do port
+            h = N.connect("127.0.0.1", "root", "pw"; port=port, db="manifest", ssl_mode=:required, connect_timeout=10)
+            N.close!(h)
+        end
+        @test words[1] == words[2]
+        caps = UInt32(words[2][1]) | UInt32(words[2][2]) << 8 | UInt32(words[2][3]) << 16 | UInt32(words[2][4]) << 24
+        @test caps & P.CLIENT_CONNECT_WITH_DB != 0 && String(words[3]) == "manifest"
+    end
+
     @testset "init_command runs after the bootstrap, under read_timeout" begin
         seen = String[]
         with_server(conn -> plain_peer_connect!(conn; caps=MYSQL8_SERVER_CAPS & ~P.CLIENT_SSL, after=c -> begin

@@ -73,7 +73,7 @@ struct ConversionError <: MySQLError
 end
 
 struct LocalInfileRefused <: MySQLError
-    filename::Vector{UInt8}
+    filename::String
     msg::String
 end
 
