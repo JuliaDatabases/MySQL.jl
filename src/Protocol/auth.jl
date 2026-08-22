@@ -252,9 +252,16 @@ function wipe_outbuf!(s::Session)
     return nothing
 end
 
+# The greeting announces the server's *default* plugin, not the account's. When that default
+# is one this client does not implement (e.g. a PARSEC- or WebAuthn-default server), the
+# client answers with its own default, exactly as libmysqlclient does, and the server replies
+# with an AuthSwitchRequest naming the account's plugin — which is then either served or
+# reported as `UnsupportedAuthError`. Failing here would lock out accounts on supported
+# plugins behind such servers.
 function select_plugin(server::ServerInfo, default_auth::Union{Nothing, AbstractString})
     default_auth === nothing || return plugin_for(default_auth)
-    return plugin_for(server.auth_plugin)
+    is_supported_plugin(server.auth_plugin) && return plugin_for(server.auth_plugin)
+    return CachingSha2Password()
 end
 
 function record_initial_auth_state!(state::AuthState, response::Vector{UInt8})

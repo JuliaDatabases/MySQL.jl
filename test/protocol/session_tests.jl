@@ -177,11 +177,35 @@ end
             @test_throws ArgumentError P.authenticate!(s, "bad\0user", "pw", P.AuthPolicy())
             @test s.phase == P.CLOSED && !isopen(s)
         end
-        with_peer(conn -> (send_packet(conn, 0, greeting(; plugin="client_ed25519")); await_eof(conn))) do client
+        # an unknown server default: the client answers with its own default plugin and the
+        # server switches to the account's plugin — unsupported here, so the switch is refused
+        announced = Vector{UInt8}[]
+        with_peer(conn -> begin
+            send_packet(conn, 0, greeting(; plugin="client_ed25519"))
+            seq, response = read_packet(conn)
+            push!(announced, response)
+            send_packet(conn, seq + 1, vcat(UInt8[0xFE], codeunits("client_ed25519"), UInt8[0x00], zeros(UInt8, 32)))
+            await_eof(conn)
+        end) do client
             s = P.Session(client)
             P.read_greeting!(s)
-            @test_throws P.UnsupportedAuthError P.authenticate!(s, "root", "pw", P.AuthPolicy())
+            err = try; P.authenticate!(s, "root", "pw", P.AuthPolicy()); nothing; catch e; e; end
+            @test err isa P.UnsupportedAuthError && err.plugin == "client_ed25519"
             @test s.phase == P.CLOSED
+        end
+        @test occursin("caching_sha2_password", String(copy(announced[1])))
+        # ... and an account on a supported plugin behind such a server still connects
+        with_peer(conn -> begin
+            send_packet(conn, 0, greeting(; plugin="client_ed25519"))
+            seq, _ = read_packet(conn)
+            send_packet(conn, seq + 1, vcat(UInt8[0xFE], codeunits("mysql_native_password"), UInt8[0x00], collect(UInt8, 1:20), UInt8[0x00]))
+            seq, _ = read_packet(conn)
+            send_packet(conn, seq + 1, ok_payload())
+        end) do client
+            s = P.Session(client)
+            P.read_greeting!(s)
+            @test P.authenticate!(s, "root", "pw", P.AuthPolicy()) isa P.OKPacket
+            @test s.phase == P.READY
         end
         with_peer(conn -> (send_packet(conn, 0, greeting()); read_packet(conn); send_packet(conn, 2, vcat(UInt8[0x02], codeunits("authentication_webauthn_client"), UInt8[0x00])); await_eof(conn))) do client
             s = P.Session(client)

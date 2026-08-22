@@ -44,7 +44,7 @@ const POLICY_TLS_VERIFIED = P.AuthPolicy(; secure_transport=true, identity_verif
         @test P.select_plugin(info, nothing) isa P.NativePassword
         @test P.select_plugin(info, "caching_sha2_password") isa P.CachingSha2Password
         info = P.parse_handshake_v10(pview(greeting(; plugin="client_ed25519")))
-        @test_throws P.UnsupportedAuthError P.select_plugin(info, nothing)
+        @test P.select_plugin(info, nothing) isa P.CachingSha2Password    # unknown server default: answer with ours, the server switches
         @test_throws P.UnsupportedAuthError P.select_plugin(info, "parsec")
     end
 
