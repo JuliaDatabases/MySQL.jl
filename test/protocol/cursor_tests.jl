@@ -858,7 +858,9 @@ end
 @testset "connection keyword surface and show" begin
     with_native(c -> nothing) do conn
         @test sprint(show, conn) == "MySQL.Native.Connection(host=\"127.0.0.1\", user=\"root\", port=\"$(conn.port)\", db=\"\")"
-        @test_throws MySQL.MySQLInterfaceError DBInterface.execute(conn, "select ?", (1,))
+        # `execute(conn, sql, params)` now prepares and executes (see binary_tests.jl); an
+        # unbindable parameter type is still a MySQLInterfaceError, checked without the wire.
+        @test_throws MySQL.MySQLInterfaceError N.param_type(:not_a_value)
     end
     @test N.strip_scheme("mysql://db.example") == "db.example" && N.strip_scheme("db.example") == "db.example"
 end

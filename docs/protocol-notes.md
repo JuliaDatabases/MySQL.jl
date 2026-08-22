@@ -167,6 +167,49 @@ source are never read.
 - Handle-level facts from the 8.4 lane: the terminator OK of a SELECT carries
   `last_insert_id = 0`; mariadb:11.4 and mysql:8.4 both serve the fixture identically.
 
+## M4 decisions worth remembering
+
+- **Prepared statements are the binary protocol**: `COM_STMT_PREPARE` → `PrepareOK` (the
+  reserved byte is followed by `warning_count` only when the packet is ≥ 12 bytes; the
+  `metadata_follows` flag belongs to `CLIENT_OPTIONAL_RESULTSET_METADATA`, which 2.0 never
+  negotiates), then the parameter definitions and the column definitions, each closed by an
+  EOF **only when `CLIENT_DEPRECATE_EOF` is off**. `read_definition_block!` bounds both blocks
+  by `max_metadata_bytes`. `COM_STMT_EXECUTE` carries `statement_id`, `flags`
+  (`CURSOR_TYPE_NO_CURSOR` — no server cursors in 2.0) and `iteration_count = 1`.
+- **Two NULL-bitmap offsets**: the execute parameter bitmap uses bit offset **0**
+  (`(nparams+7)/8` bytes); the binary resultset row bitmap uses bit offset **2**
+  (`(ncols+7+2)/8` bytes). `scan_binary_row!` mirrors `scan_text_row!` — it walks the row once
+  and records each column's *content* window (fixed width for numbers, the length-prefixed
+  bytes for the temporal types, the `string<lenenc>` bytes for everything else) so the value
+  decoders stay lazy and the `wrongrow`/cursor-owned-buffer contract is identical to text.
+- **`new_params_bind_flag` / signature**: the client keeps the full last-sent `(type,
+  unsigned)` signature per statement (`Statement.last_signature`) and resends the types only
+  when the signature changes (a NULL parameter's slot is `MYSQL_TYPE_NULL`, so a value that
+  flips NULL↔non-NULL forces a resend). Parameter type/encoding mirrors the 1.x
+  `mysqltype`/`bind!` mapping; `Bool` maps to `TINY` (1.x left it at the `MYSQL_TYPE_STRING`
+  fallback, an untested latent bug, so this is the sole deliberate deviation).
+- **Cursor is shared across protocols**: `Cursor{binary, buffered}` — `TextCursor =
+  Cursor{false}`, `BinaryCursor = Cursor{true}` — so the ownership tokens, row epochs,
+  multi-result draining, buffered budget and LOCAL INFILE state table have a single
+  implementation; only `scan_row!` and `decode_column` dispatch on the protocol.
+- **`ER_NEED_REPREPARE` (1615)**: a complete 1615 ERR as the first execute response packet
+  (before any result bytes) triggers exactly one re-prepare (a fresh `statement_id`) and one
+  re-execute (types re-sent, because the server's cached signature is gone); a second 1615
+  propagates as `StmtError`. A statement whose generation predates a reconnect is re-prepared
+  lazily on its next execute.
+- **Binary temporal decoding preserves the 1.x prepared-statement quirks** except the shared
+  Fixes: a sub-millisecond DATETIME **warns and truncates to milliseconds** (this differs from
+  the text path, which warns and fails — both faithfully mirror what 1.x does on each
+  protocol); BIT is the big-endian value of all bytes (Fix), TIME honours sign and days and
+  applies the `Dates.Time` range policy (Fix), and zero/partial dates follow the unified
+  `zero_dates` policy (Fix; 1.x binary mapped zero components to 1970).
+- **Statement reaping is finalizer-free**: `DBInterface.close!(stmt)` and a dropped
+  statement's finalizer both park `(statement_id, generation)` under a per-connection
+  spinlock; `begin_command!` sends `COM_STMT_CLOSE` for the parked ids of the current
+  generation before the next command (after `drain_pending!`, so a streaming result is drained
+  first). One-shot `execute(conn, sql, params)` prepares, executes and parks the statement the
+  same way.
+
 ## Third-party consultations
 
 None.

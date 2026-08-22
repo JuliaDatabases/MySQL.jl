@@ -135,13 +135,77 @@ const TEXT_ROW_TUPLE = (
 )
 const TEXT_ROWS = collect(Row, TEXT_ROW_TUPLE)
 
+# M4: the same scenarios over the binary protocol (prepared statements). `run` uses
+# `DBInterface.prepare`/`execute(stmt, params)`/`executemany`, which both backends provide.
+const BINARY_ROW_TUPLE = (
+    Row("prepared SELECT schema mirrors the text mapping", :preserve,
+        conn -> let stmt = DBInterface.prepare(conn, "SELECT ID, EmpNo, Salary, Rate, Name, JoinDate, LastLogin, LunchTime, Photo, JobType, Senior, Born FROM manifest_employee")
+            sch = Tables.schema(DBInterface.execute(stmt))
+            DBInterface.close!(stmt)
+            collect(zip(sch.names, sch.types))
+        end),
+    Row("prepared SELECT decodes values (ints, DOUBLE, Dec64, Date, DateTime, Time, blob, enum, single-byte BIT, YEAR)", :preserve,
+        conn -> let stmt = DBInterface.prepare(conn, "SELECT OfficeNo, EmpNo, Salary, Rate, JoinDate, LastLogin, LunchTime, Photo, JobType, Senior, Born FROM manifest_employee ORDER BY ID")
+            t = Tables.columntable(DBInterface.execute(stmt))
+            DBInterface.close!(stmt)
+            t
+        end),
+    Row("prepared WHERE with a bound parameter filters rows", :preserve,
+        conn -> let stmt = DBInterface.prepare(conn, "SELECT ID FROM manifest_employee WHERE EmpNo = ? ORDER BY ID")
+            v = Tables.columntable(DBInterface.execute(stmt, (1301,))).ID
+            DBInterface.close!(stmt)
+            v
+        end),
+    Row("prepared INSERT/SELECT round-trips bound parameters (int, float, string, date, time, blob)", :preserve,
+        conn -> begin
+            ins = DBInterface.prepare(conn, "INSERT INTO manifest_employee (OfficeNo, Wage, Name, JoinDate, LunchTime, Photo) VALUES (?, ?, ?, ?, ?, ?)")
+            DBInterface.execute(ins, (Int8(7), 1.5f0, "prep", Date(2020, 1, 2), Time(9, 30, 0), UInt8[0x01, 0x02]))
+            DBInterface.close!(ins)
+            sel = DBInterface.prepare(conn, "SELECT OfficeNo, Wage, Name, JoinDate, LunchTime, Photo FROM manifest_employee WHERE Name = ?")
+            r = Tables.columntable(DBInterface.execute(sel, ("prep",)))
+            DBInterface.close!(sel)
+            DBInterface.execute(conn, "DELETE FROM manifest_employee WHERE Name = 'prep'")
+            r
+        end),
+    Row("executemany bulk-inserts each parameter row in a transaction", :preserve,
+        conn -> begin
+            DBInterface.execute(conn, "CREATE TEMPORARY TABLE manifest_many (a INT, b VARCHAR(8))")
+            stmt = DBInterface.prepare(conn, "INSERT INTO manifest_many (a, b) VALUES (?, ?)")
+            DBInterface.executemany(stmt, ([1, 2, 3], ["x", "y", "z"]))
+            DBInterface.close!(stmt)
+            r = Tables.columntable(DBInterface.execute(conn, "SELECT a, b FROM manifest_many ORDER BY a"))
+            DBInterface.execute(conn, "DROP TEMPORARY TABLE manifest_many")
+            r
+        end),
+    Row("prepared DATETIME(6) → DateTime warns and truncates to ms (1.x prepared quirk; the text path fails)", :preserve,
+        conn -> let stmt = DBInterface.prepare(conn, "SELECT CAST('2021-01-02 01:02:03.456789' AS DATETIME(6)) AS dt")
+            v = try; Tables.columntable(DBInterface.execute(stmt)).dt; catch; :error; end
+            DBInterface.close!(stmt)
+            v
+        end),
+    Row("prepared mysql_date_and_time=true maps DATETIME(6) to DateAndTime", :preserve,
+        conn -> let stmt = DBInterface.prepare(conn, "SELECT CAST('2021-01-02 01:02:03.456789' AS DATETIME(6)) AS dt"; mysql_date_and_time=true)
+            v = Tables.columntable(DBInterface.execute(stmt)).dt
+            DBInterface.close!(stmt)
+            v
+        end),
+    Row("prepared BIT(12): big-endian value of all bytes (1.x prepared read a shifted subset)", :fix,
+        conn -> let stmt = DBInterface.prepare(conn, "SELECT Flags FROM manifest_employee ORDER BY ID")
+            v = Tables.columntable(DBInterface.execute(stmt)).Flags
+            DBInterface.close!(stmt)
+            v
+        end; native=Union{Missing, MySQL.API.Bit}[MySQL.API.Bit(0b101000000001), MySQL.API.Bit(1), missing]),
+)
+const BINARY_ROWS = collect(Row, BINARY_ROW_TUPLE)
+const ALL_ROWS = vcat(TEXT_ROWS, BINARY_ROWS)
+
 """
     run!(make_c, make_native; rows=TEXT_ROWS)
 
-`make_c(; db)`/`make_native(; db)` open fresh connections. Runs every row on both backends
-inside `@testset`s.
+`make_c(; db)`/`make_native(; db)` open fresh connections. Runs every row (the text protocol
+rows and the M4 prepared-statement rows) on both backends inside `@testset`s.
 """
-function run!(make_c::Function, make_native::Function; rows::Vector{Row}=TEXT_ROWS)
+function run!(make_c::Function, make_native::Function; rows::Vector{Row}=ALL_ROWS)
     c = make_c(; db="")
     prepare!(c)
     DBInterface.close!(c)
