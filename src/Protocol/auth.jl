@@ -225,7 +225,9 @@ function step!(::Sha256Password, state::AuthState, data::AbstractVector{UInt8}, 
     state.awaiting_public_key || protocol_error("sha256_password received an RSA public key that was not requested")
     is_pem(data) || protocol_error("expected the server RSA public key, got $(length(data)) bytes")
     state.awaiting_public_key = false
-    return rsa_encrypt_password(password, state.nonce, data)
+    reply = rsa_encrypt_password(password, state.nonce, data)
+    state.full_auth = true
+    return reply
 end
 
 # ---- the exchange ----
@@ -257,7 +259,6 @@ end
 
 function record_initial_auth_state!(state::AuthState, response::Vector{UInt8})
     state.plugin isa Sha256Password || return nothing
-    state.full_auth = true
     state.awaiting_public_key = response == UInt8[SHA256_REQUEST_PUBLIC_KEY]
     return nothing
 end
@@ -308,6 +309,7 @@ function authenticate!(s::Session, user::AbstractString, password::Union{Nothing
                 note(:ok)
                 return value
             elseif kind == :auth_switch
+                (state.full_auth || state.awaiting_public_key) && protocol_error("authentication plugin switch received after $(plugin_name(state.plugin)) entered its final exchange")
                 state = AuthState(plugin_for(value.plugin), strip_nonce(value.data))
                 note(Symbol("switch_", value.plugin))
                 reply = initial_response(state.plugin, pw, state.nonce, policy)

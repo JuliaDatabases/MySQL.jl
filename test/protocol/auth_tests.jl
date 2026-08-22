@@ -93,6 +93,7 @@ const POLICY_TLS_VERIFIED = P.AuthPolicy(; secure_transport=true, identity_verif
         @test_throws P.ProtocolError P.step!(sha, pem("rsa3072.pub"), PW, POLICY_PLAIN)
         sha.awaiting_public_key = true
         @test length(P.step!(sha, pem("rsa3072.pub"), PW, POLICY_PLAIN)) == 384
+        @test sha.full_auth && !sha.awaiting_public_key
     end
 end
 
@@ -186,6 +187,19 @@ end
             seq, _ = read_packet(conn)
             send_packet(conn, seq + 1, UInt8[0x01, P.CACHING_SHA2_FAST_AUTH_SUCCESS])
             send_packet(conn, seq + 2, UInt8[0x01, P.CACHING_SHA2_PERFORM_FULL_AUTH])
+            await_eof(conn)
+        end) do client
+            s = P.Session(client)
+            P.read_greeting!(s)
+            @test_throws P.ProtocolError P.authenticate!(s, "root", "pw", POLICY_PLAIN)
+            @test s.phase == P.BROKEN && !isopen(s)
+        end
+        with_peer(conn -> begin
+            send_packet(conn, 0, greeting())
+            seq, _ = read_packet(conn)
+            send_packet(conn, seq + 1, UInt8[0x01, P.CACHING_SHA2_FAST_AUTH_SUCCESS])
+            switch = vcat(UInt8[0xFE], codeunits(P.PLUGIN_NATIVE_PASSWORD), UInt8[0x00], NONCE, UInt8[0x00])
+            send_packet(conn, seq + 2, switch)
             await_eof(conn)
         end) do client
             s = P.Session(client)
