@@ -73,12 +73,19 @@ function DBInterface.prepare(conn::Connection, sql::AbstractString; mysql_date_a
 end
 
 # Re-prepares `stmt.sql` on the current (READY) session and refreshes its id/generation and
-# cached metadata. Used after a reconnect and after a single 1615 (ER_NEED_REPREPARE).
-function reprepare!(conn::Connection, s::P.Session, stmt::Statement)
+# cached metadata. A 1615 retry closes the superseded id on the same session. A reconnect
+# leaves the old-generation id alone because it belongs to the dead session.
+function reprepare!(conn::Connection, s::P.Session, stmt::Statement; close_previous::Bool=false)
+    old_id = stmt.statement_id
+    old_generation = stmt.generation
     P.stmt_prepare!(s, stmt.sql)
     ok = P.read_prepare_response!(s)
+    generation = @atomic conn.generation
+    if close_previous && old_generation == generation && old_id != ok.statement_id
+        P.stmt_close!(s, old_id)
+    end
     stmt.statement_id = ok.statement_id
-    stmt.generation = @atomic conn.generation
+    stmt.generation = generation
     stmt.reap.statement_id = stmt.statement_id
     stmt.reap.generation = stmt.generation
     stmt.nparams = P.num_params(ok)
@@ -123,7 +130,7 @@ function DBInterface.execute(stmt::Statement, params=(); mysql_store_result::Boo
             # A complete ER_NEED_REPREPARE before any result bytes: re-prepare once, re-execute
             # once (the server's cached type signature is gone, so types are re-sent).
             (err isa P.StmtError && err.errno == P.ER_NEED_REPREPARE) || rethrow()
-            reprepare!(conn, s, stmt)
+            reprepare!(conn, s, stmt; close_previous=true)
             token = new_token!(conn)
             send_execute!(s, stmt, params)
             P.read_command_response!(s)

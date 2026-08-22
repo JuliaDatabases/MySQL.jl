@@ -196,9 +196,10 @@ source are never read.
   implementation; only `scan_row!` and `decode_column` dispatch on the protocol.
 - **`ER_NEED_REPREPARE` (1615)**: a complete 1615 ERR as the first execute response packet
   (before any result bytes) triggers exactly one re-prepare (a fresh `statement_id`) and one
-  re-execute (types re-sent, because the server's cached signature is gone); a second 1615
-  propagates as `StmtError`. A statement whose generation predates a reconnect is re-prepared
-  lazily on its next execute.
+  re-execute (types re-sent, because the server's cached signature is gone). The client
+  closes the superseded id after the new prepare succeeds. A second 1615 propagates as
+  `StmtError`. A statement whose generation predates a reconnect is re-prepared lazily on
+  its next execute; its old id belongs to the dead session and is not closed on the new one.
 - **Binary temporal decoding preserves the 1.x prepared-statement quirks** except the shared
   Fixes: a sub-millisecond DATETIME **warns and truncates to milliseconds** (this differs from
   the text path, which warns and fails — both faithfully mirror what 1.x does on each

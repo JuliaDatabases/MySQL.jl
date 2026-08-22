@@ -37,6 +37,16 @@ function expect_execute(conn)
     return payload
 end
 
+function expect_stmt_close(conn)
+    _, cmd, payload = read_command(conn)
+    cmd == P.COM_STMT_CLOSE || error("expected COM_STMT_CLOSE, got $cmd")
+    length(payload) == 4 || error("expected a 4-byte statement id")
+    return UInt32(payload[1]) |
+           (UInt32(payload[2]) << 8) |
+           (UInt32(payload[3]) << 16) |
+           (UInt32(payload[4]) << 24)
+end
+
 # A binary protocol resultset row: 0x00 header, NULL bitmap (bit offset 2), then the non-NULL
 # values encoded exactly as parameters are (same wire form).
 function binary_row(values...)
@@ -283,12 +293,14 @@ end
         expect_execute(c); send_err(c, 1, P.ER_NEED_REPREPARE, "Prepared statement needs re-preparing")
         @test expect_prepare(c) == "SELECT x FROM t WHERE x = ?"    # re-prepared
         send_prepare_ok(c, 1, 11, paramdefs(1), cols)
+        @test expect_stmt_close(c) == 10                             # superseded id is released
         payload = expect_execute(c)
         @test execute_new_params_flag(payload, 1) == 0x01           # types re-sent after re-prepare
         send_resultset(c, 1, cols, [binary_row(Int32(5))])
         # a persistent 1615 propagates after the single retry
         expect_execute(c); send_err(c, 1, P.ER_NEED_REPREPARE, "still stale")
         expect_prepare(c); send_prepare_ok(c, 1, 12, paramdefs(1), cols)
+        @test expect_stmt_close(c) == 11
         expect_execute(c); send_err(c, 1, P.ER_NEED_REPREPARE, "still stale")
     end) do conn
         stmt = DBInterface.prepare(conn, "SELECT x FROM t WHERE x = ?")
@@ -321,9 +333,7 @@ end
     with_native(c -> begin
         expect_prepare(c); send_prepare_ok(c, 1, 77, P.ColumnDef[], [coldef("x"; type=P.MYSQL_TYPE_LONG, flags=NOT_NULL)])
         # the next command must be preceded by COM_STMT_CLOSE(77)
-        _, cmd, payload = read_command(c)
-        @test cmd == P.COM_STMT_CLOSE
-        closed[] = payload[1] | (UInt32(payload[2]) << 8) | (UInt32(payload[3]) << 16) | (UInt32(payload[4]) << 24)
+        closed[] = expect_stmt_close(c)
         expect_query(c); send_ok(c, 1)
     end) do conn
         stmt = DBInterface.prepare(conn, "SELECT x FROM t")
