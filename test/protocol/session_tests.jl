@@ -171,6 +171,12 @@ end
     end
 
     @testset "unsupported authentication requests" begin
+        with_peer(conn -> (send_packet(conn, 0, greeting()); await_eof(conn))) do client
+            s = P.Session(client)
+            P.read_greeting!(s)
+            @test_throws ArgumentError P.authenticate!(s, "bad\0user", "pw", P.AuthPolicy())
+            @test s.phase == P.CLOSED && !isopen(s)
+        end
         with_peer(conn -> (send_packet(conn, 0, greeting(; plugin="client_ed25519")); await_eof(conn))) do client
             s = P.Session(client)
             P.read_greeting!(s)

@@ -79,9 +79,12 @@ function native_scramble(password::AbstractVector{UInt8}, nonce::AbstractVector{
     stage1 = SHA.sha1(password)
     stage2 = SHA.sha1(stage1)
     mixed = SHA.sha1(vcat(Vector{UInt8}(nonce), stage2))
-    out = xor_bytes!(stage1, mixed)
-    securezero!(stage2)
-    return out
+    try
+        return xor_bytes!(stage1, mixed)
+    finally
+        securezero!(stage2)
+        securezero!(mixed)
+    end
 end
 
 """
@@ -95,9 +98,12 @@ function caching_sha2_scramble(password::AbstractVector{UInt8}, nonce::AbstractV
     stage1 = SHA.sha256(password)
     stage2 = SHA.sha256(stage1)
     mixed = SHA.sha256(vcat(stage2, Vector{UInt8}(nonce)))
-    out = xor_bytes!(stage1, mixed)
-    securezero!(stage2)
-    return out
+    try
+        return xor_bytes!(stage1, mixed)
+    finally
+        securezero!(stage2)
+        securezero!(mixed)
+    end
 end
 
 # password ‖ NUL, XORed with the nonce cycled over the length.
@@ -298,8 +304,8 @@ function authenticate!(s::Session, user::AbstractString, password::Union{Nothing
                 reply === nothing || send_wiped!(s, reply)
             end
         end
-    catch err
-        (err isa AuthError || err isa UnsupportedAuthError || err isa ProtocolError) && close!(s)
+    catch
+        is_terminal(s.phase) || close!(s)
         rethrow()
     finally
         securezero!(pw)

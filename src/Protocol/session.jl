@@ -194,7 +194,12 @@ function send_handshake_response!(s::Session, user::AbstractString, auth_respons
     require_phase(s, HANDSHAKE)
     caps = s.capabilities
     isempty(db) || has_capability(caps, CLIENT_CONNECT_WITH_DB) || throw(ProtocolError("a database was requested but CLIENT_CONNECT_WITH_DB was not negotiated"))
-    sendpacket!(s, build_handshake_response(caps, s.limits.max_packet, charset, user, auth_response, plugin; db=db, attrs=attrs, mariadb=is_mariadb(s)))
+    payload = build_handshake_response(caps, s.limits.max_packet, charset, user, auth_response, plugin; db=db, attrs=attrs, mariadb=is_mariadb(s))
+    try
+        sendpacket!(s, payload)
+    finally
+        securezero!(payload)
+    end
     transition!(s, :handshake_response, AUTH)
     return nothing
 end
