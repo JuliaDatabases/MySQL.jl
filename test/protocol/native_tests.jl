@@ -34,6 +34,12 @@
     @test N.ConnectOptions("h", "u"; max_allowed_packet=nothing).limits.max_packet == P.DEFAULT_MAX_PACKET
     @test N.ConnectOptions("h", "u"; max_allowed_packet=1024 * 1024).limits.max_packet == 1024 * 1024
     @test N.ConnectOptions("h", "u"; max_response_bytes=nothing).limits.max_response_bytes === nothing
+    limits = N.ConnectOptions("h", "u"; max_preauth_packet=4096, max_auth_rounds=3, max_auth_bytes=2048, max_session_state_bytes=1024).limits
+    @test limits.max_preauth_packet == 4096
+    @test limits.max_auth_rounds == 3
+    @test limits.max_auth_bytes == 2048
+    @test limits.max_session_state_bytes == 1024
+    @test_throws ArgumentError N.ConnectOptions("h", "u"; max_auth_rounds=0)
     @test N.ConnectOptions("h", "u"; can_handle_expired_passwords=true).client_flags & P.CLIENT_CAN_HANDLE_EXPIRED_PASSWORDS != 0
     @test N.ConnectOptions("h", "u"; attrs=["program_name" => "x"]).attrs == ["program_name" => "x"]
     @test any(p -> p.first == "_client_name", N.ConnectOptions("h", "u").attrs)

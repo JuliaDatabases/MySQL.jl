@@ -66,8 +66,9 @@ const KNOWN_KEYWORDS = Set{Symbol}([
     :server_public_key, :get_server_public_key, :enable_cleartext_plugin, :insecure_cleartext_auth,
     :can_handle_expired_passwords, :read_default_file, :option_file, :read_default_group,
     :option_group, :read_env, :local_infile_handler, :max_local_infile_bytes, :max_buffered_bytes,
-    :max_response_bytes, :max_columns, :max_result_sets, :max_metadata_bytes, :debug, :attrs,
-    :tls_version,
+    :max_response_bytes, :max_columns, :max_result_sets, :max_metadata_bytes,
+    :max_preauth_packet, :max_auth_rounds, :max_auth_bytes, :max_session_state_bytes,
+    :debug, :attrs, :tls_version,
 ])
 
 const TLS_VERSION_NAMES = Dict{String, UInt16}("tlsv1.2" => P.Reseau.TLS.TLS1_2_VERSION, "tlsv1.3" => P.Reseau.TLS.TLS1_3_VERSION)
@@ -361,7 +362,19 @@ function ConnectOptions(host::AbstractString, user::AbstractString, password::Un
     flags = client_flags(; found_rows=get(kwd, :found_rows, false), no_schema=get(kwd, :no_schema, false), ignore_space=get(kwd, :ignore_space, false), multi_statements=get(kwd, :multi_statements, false), local_files=local_files)
     isempty(db) || (flags |= P.CLIENT_CONNECT_WITH_DB)
     get(kwd, :can_handle_expired_passwords, false) && (flags |= P.CLIENT_CAN_HANDLE_EXPIRED_PASSWORDS)
-    limits = P.Limits(; max_packet=something(get(kwd, :max_allowed_packet, nothing), P.DEFAULT_MAX_PACKET), max_buffered_bytes=get(kwd, :max_buffered_bytes, P.DEFAULT_MAX_BUFFERED_BYTES), max_response_bytes=get(kwd, :max_response_bytes, nothing), max_columns=get(kwd, :max_columns, 4096), max_result_sets=get(kwd, :max_result_sets, 1024), max_metadata_bytes=get(kwd, :max_metadata_bytes, 16 * 1024 * 1024))
+    max_packet = something(get(kwd, :max_allowed_packet, nothing), P.DEFAULT_MAX_PACKET)
+    limits = P.Limits(;
+        max_packet=max_packet,
+        max_preauth_packet=something(get(kwd, :max_preauth_packet, nothing), min(P.DEFAULT_MAX_PREAUTH_PACKET, max_packet)),
+        max_auth_rounds=something(get(kwd, :max_auth_rounds, nothing), 8),
+        max_auth_bytes=something(get(kwd, :max_auth_bytes, nothing), 64 * 1024),
+        max_columns=something(get(kwd, :max_columns, nothing), 4096),
+        max_result_sets=something(get(kwd, :max_result_sets, nothing), 1024),
+        max_metadata_bytes=something(get(kwd, :max_metadata_bytes, nothing), 16 * 1024 * 1024),
+        max_buffered_bytes=get(kwd, :max_buffered_bytes, P.DEFAULT_MAX_BUFFERED_BYTES),
+        max_response_bytes=get(kwd, :max_response_bytes, nothing),
+        max_session_state_bytes=something(get(kwd, :max_session_state_bytes, nothing), 1024 * 1024),
+    )
     attrs = Vector{Pair{String, String}}(get(kwd, :attrs, default_attrs()))
     ct = pick(:connect_timeout, nothing)
     ct = ct isa AbstractString ? parse(Int, ct) : ct
