@@ -9,7 +9,8 @@ implementation (none so far). The plan that drives this work is
 
 1. Live lanes: `test/protocol/live_tests.jl` exercises the native backend against Harbor
    containers (`MYSQL_NATIVE_IMAGES`, default `mysql:8.4,mariadb:11.4`) — authentication
-   plugin exchanges, TLS, charset bootstrap, ping/init_db/quit.
+   plugin exchanges, TLS, charset bootstrap, ping/init_db/quit — and runs the executable
+   compatibility manifest (`test/compat_manifest.jl`) on both backends side by side.
 2. Server public headers, **numeric values only**: `include/my_command.h`,
    `include/mysql_com.h`, `include/field_types.h` from the `mysql-server` trunk.
    `scripts/gen_constants.jl` regenerates `src/Protocol/constants_generated.jl` and stamps
@@ -119,6 +120,47 @@ source are never read.
   error), world-writable files skipped with a warning, `.mylogin.cnf` skipped with a warning
   (obfuscated format; out of scope); `read_env=true` reads `MYSQL_TCP_PORT` only
   (`MYSQL_PWD` is deliberately ignored). Keywords beat files; a named group beats `[client]`.
+
+## M3 decisions worth remembering
+
+- **Type mapping is the 1.x mapping by construction**: `Native.juliatype` calls
+  `MySQL.juliatype` with the wire type and flags. One wire fact feeds it: the server never
+  sends `NUM_FLAG` (libmysqlclient synthesizes it client-side for `IS_NUM` types), so
+  `Protocol.is_unsigned` derives numeric-ness from the wire type — otherwise
+  `BIGINT UNSIGNED`/`YEAR` would decode as signed.
+- **Rows are valid only while current** (`wrongrow`, same `ArgumentError` text as 1.x): every
+  `iterate` bumps the cursor's `epoch` and each `TextRow` carries the epoch it was issued
+  under. Streaming cursors additionally own the connection's in-flight response through an
+  atomic `active_token` plus the connection `generation`; a foreign command drains the
+  response and the cursor's rows raise `ProtocolError("cursor invalidated …")`. Buffered
+  cursors own their bytes and survive later commands.
+- **Cursor-owned buffers**: streaming rows are read into the cursor's buffer
+  (`read_row!(s; dest)`), buffered results into one contiguous buffer plus row offsets; the
+  per-command `max_buffered_bytes` budget is charged across every retained result of the
+  command (multi-results included) and exceeding it faults the session.
+- **Multi-results**: `executemultiple` yields a distinct cursor per result (DML/OK results
+  and CALL's final OK yield empty cursors with their own snapshot); advancing past an
+  unconsumed streaming result drains it and stales its rows; a later ERR ends iteration with
+  `Error`; whatever a plain `execute` left unread is drained by the next operation.
+- **Snapshots**: `rows_affected` is the preserved `Int64` bitcast; `lastrowid` comes from the
+  cursor's own OK/terminator (a SELECT cursor reports 0 under DEPRECATE_EOF, where 1.x
+  reported the connection's sticky value); a DML cursor has `length == 0` (1.x: -1).
+- **Decoding policies** (`ResultOptions`): BIT is the big-endian value of all bytes (1.x read
+  the first byte only); TIME decodes to `Dates.Time` for `0 ≤ t < 24h` and raises
+  `ConversionError` otherwise, `time_type=Dates.Microsecond` is lossless; `zero_dates`
+  (`:sentinel` default → `Date(0)`/`DateTime(0)`, `:missing` → `missing` and every date
+  column typed `Union{Missing,T}`, `:error`); partial zero dates are errors unless
+  `:missing`; DATETIME values with sub-millisecond digits warn once and truncate (1.x warned,
+  then failed).
+- **LOCAL INFILE** follows the plan's state table: refusal (`nothing`) always raises
+  `LocalInfileRefused` even when the server accepts the empty upload; a handler error before
+  any data is re-raised after resynchronizing; an error, size-limit crossing or write fault
+  after data closes the connection; an unsolicited `0xFB` is a `ProtocolError`.
+- **Reconnect** is narrow: only before a send, only when the session is known closed or
+  broken, never inside a transaction; it bumps the generation so older cursors invalidate.
+  `transaction` holds the connection lock across `f`.
+- Handle-level facts from the 8.4 lane: the terminator OK of a SELECT carries
+  `last_insert_id = 0`; mariadb:11.4 and mysql:8.4 both serve the fixture identically.
 
 ## Third-party consultations
 

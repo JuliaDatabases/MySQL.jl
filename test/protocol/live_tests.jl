@@ -1,6 +1,8 @@
 # Live lanes: the native backend against real servers in Harbor containers. Runs only when
 # Docker is available; images are configurable via MYSQL_NATIVE_IMAGES (comma separated).
 using Harbor
+include(joinpath(@__DIR__, "..", "compat_manifest.jl"))
+using .CompatManifest
 
 const LIVE_IMAGES = split(get(ENV, "MYSQL_NATIVE_IMAGES", "mysql:8.4,mariadb:11.4"), ',')
 const ROOT_PW = "native-secret"
@@ -124,6 +126,10 @@ function run_live_lane(ref::String)
             @test P.read_command_response!(root.session) isa Union{P.OKPacket, P.EOFPacket}
             N.close!(root)
             @test !isopen(root)
+            # the executable compatibility manifest: Connector/C backend vs native, same server
+            CompatManifest.run!(
+                (; db) -> DBInterface.connect(MySQL.Connection, "127.0.0.1", "root", ROOT_PW; port=port, db=db),
+                (; db) -> DBInterface.connect(N.Connection, "127.0.0.1", "root", ROOT_PW; port=port, db=db, connect_timeout=10))
         end
     end
     return nothing
