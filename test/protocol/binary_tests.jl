@@ -403,6 +403,9 @@ end
         static_cur = DBInterface.execute(static_stmt; mysql_date_and_time=true)
         @test Tables.schema(static_cur) == Tables.Schema((:changed,), (String,))
         @test static_stmt.names == [:changed] && static_stmt.types == Type[String]
+        @test static_stmt.names !== static_cur.names
+        @test static_stmt.types !== static_cur.types
+        @test static_stmt.lookup !== static_cur.lookup
 
         dynamic_stmt = DBInterface.prepare(conn, "CALL dynamic_metadata()")
         dynamic_cur = DBInterface.execute(dynamic_stmt; mysql_date_and_time=true)

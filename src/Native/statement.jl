@@ -31,6 +31,7 @@ mutable struct Statement <: DBInterface.Statement
     long_data::Vector{LongDataChunk}
     date_and_time::Bool
     dynamic_metadata::Bool
+    metadata_date_and_time::Bool
     closed::Bool
     reap::StatementReapEntry
 end
@@ -38,12 +39,30 @@ end
 DBInterface.getconnection(stmt::Statement) = stmt.conn
 Base.show(io::IO, stmt::Statement) = print(io, "MySQL.Native.Statement(", repr(stmt.sql), ")")
 
-function statement_schema(conn::Connection, ok::P.PrepareOK, date_and_time::Bool)
+function statement_schema(conn::Connection, columns::Vector{P.ColumnDef}, date_and_time::Bool)
     opts = ResultOptions(; date_and_time=date_and_time, zero_dates=conn.results.zero_dates, time_type=conn.results.time_type)
-    names = [Symbol(col.name) for col in ok.columns]
-    types = Type[juliatype(col, opts) for col in ok.columns]
+    names = [Symbol(col.name) for col in columns]
+    types = Type[juliatype(col, opts) for col in columns]
     lookup = Dict{Symbol, Int}(nm => i for (i, nm) in enumerate(names))
     return names, types, lookup
+end
+
+statement_schema(conn::Connection, ok::P.PrepareOK, date_and_time::Bool) =
+    statement_schema(conn, ok.columns, date_and_time)
+
+function same_column_definition(a::P.ColumnDef, b::P.ColumnDef)
+    return a.catalog == b.catalog && a.schema == b.schema && a.table == b.table &&
+           a.org_table == b.org_table && a.name == b.name && a.org_name == b.org_name &&
+           a.charset == b.charset && a.length == b.length && a.type == b.type &&
+           a.flags == b.flags && a.decimals == b.decimals
+end
+
+function same_column_definitions(a::Vector{P.ColumnDef}, b::Vector{P.ColumnDef})
+    length(a) == length(b) || return false
+    for i in eachindex(a, b)
+        same_column_definition(a[i], b[i]) || return false
+    end
+    return true
 end
 
 """
@@ -74,6 +93,7 @@ function DBInterface.prepare(conn::Connection, sql::AbstractString; mysql_date_a
             LongDataChunk[],
             mysql_date_and_time,
             isempty(ok.columns),
+            mysql_date_and_time,
             false,
             StatementReapEntry(ok.statement_id, generation, nothing, false),
         )
@@ -103,6 +123,7 @@ function reprepare!(conn::Connection, s::P.Session, stmt::Statement; close_previ
     stmt.columns = ok.columns
     stmt.names, stmt.types, stmt.lookup = statement_schema(conn, ok, stmt.date_and_time)
     stmt.dynamic_metadata = isempty(ok.columns)
+    stmt.metadata_date_and_time = stmt.date_and_time
     empty!(stmt.last_signature)
     if replay_long_data
         validate_long_data_ids(stmt)
@@ -277,14 +298,16 @@ function DBInterface.execute(stmt::Statement, params=(); mysql_store_result::Boo
             time_type=conn.results.time_type,
         )
         cursor = make_cursor(conn, stmt.sql, token, resp, true, mysql_store_result, opts, 1)
-        if resp isa P.ResultHeader
-            # Execute-time definitions are authoritative. Reuse the cursor's immutable
-            # schema arrays so a METADATA_CHANGED response cannot leave the Statement cache
-            # stale. `dynamic_metadata` retains the prepare-time keyword-dispatch contract.
+        if resp isa P.ResultHeader &&
+                (!same_column_definitions(stmt.columns, resp.columns) ||
+                 stmt.metadata_date_and_time != date_and_time)
+            # Execute-time definitions are authoritative. Keep the Statement's mutable
+            # containers independent from the returned cursor so neither can alter the
+            # other's schema. `dynamic_metadata` retains the keyword-dispatch contract.
             stmt.columns = resp.columns
-            stmt.names = cursor.names
-            stmt.types = cursor.types
-            stmt.lookup = cursor.lookup
+            stmt.names, stmt.types, stmt.lookup =
+                statement_schema(conn, resp.columns, date_and_time)
+            stmt.metadata_date_and_time = date_and_time
         end
         return cursor
     end
