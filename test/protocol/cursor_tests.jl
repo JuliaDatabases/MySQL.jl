@@ -265,10 +265,40 @@ end
         @test r.x == 10
         DBInterface.close!(cur)
         @test iterate(cur, st) === nothing
+        @test_throws ArgumentError r.x
         @test isopen(conn)
         cur = DBInterface.execute(conn, "select"; mysql_store_result=false)
-        @test [r.x for r in cur] == [5, 6]
-        @test DBInterface.execute(conn, "after").rows_affected == 0
+        r5, st = iterate(cur)
+        r6, st = iterate(cur, st)
+        @test r6.x == 6
+        @test_throws ArgumentError r5.x
+        @test iterate(cur, st) === nothing
+        @test r6.x == 6                                                     # the last row remains current
+        other = errormonitor(Threads.@spawn DBInterface.execute(conn, "after"))
+        @test fetch(other).rows_affected == 0
+        @test_throws P.ProtocolError r6.x                                   # a competing task invalidated it
+    end
+
+    release_rows = Channel{Nothing}(1)
+    with_native(c -> begin
+        expect_query(c)
+        send_packet(c, 1, column_count(1))
+        send_packet(c, 2, cols[1])
+        seq = send_logical(c, 3, text_row("11"))
+        take!(release_rows)
+        seq = send_logical(c, seq, text_row("12"))
+        send_packet(c, seq, ok_payload(; header=0xFE))
+        expect_query(c); send_ok(c, 1)
+    end) do conn
+        cur = DBInterface.execute(conn, "select blocked"; mysql_store_result=false)
+        row, _ = iterate(cur)
+        @test row.x == 11
+        other = errormonitor(Threads.@spawn DBInterface.execute(conn, "other"))
+        waited = timedwait(() -> (@atomic conn.active_token) == 0, 2; pollint=0.001)
+        @test waited == :ok
+        @test_throws P.ProtocolError row.x                                  # invalid before draining touches the wire
+        put!(release_rows, nothing)
+        @test fetch(other).rows_affected == 0
     end
 end
 
@@ -310,6 +340,21 @@ end
         r2, _ = iterate(c2)
         @test r2.a == 9 && r2[1] == "s"
         @test iterate(tc, st) === nothing
+    end
+    # an outer advance also stales the last row of a result that was already exhausted
+    with_native(c -> begin
+        expect_query(c)
+        seq = send_resultset(c, 1, cols, [text_row("1")]; more=true)
+        send_resultset(c, seq, cols, [text_row("2")])
+    end; connect_kw=(; multi_statements=true)) do conn
+        tc = DBInterface.executemultiple(conn, "select; select"; mysql_store_result=false)
+        c1, outer = iterate(tc)
+        r1, inner = iterate(c1)
+        @test iterate(c1, inner) === nothing
+        @test r1.x == 1
+        c2, _ = iterate(tc, outer)
+        @test_throws ArgumentError r1.x
+        @test first(c2).x == 2
     end
     # a later ERR ends the iteration with Error, connection usable
     with_native(c -> begin
@@ -500,36 +545,38 @@ end
 @testset "reconnect rule and closed connections" begin
     cols = [coldef("x"; type=P.MYSQL_TYPE_LONG, flags=NOT_NULL)]
     # reconnect=false: a dead session is reported as "server has gone away"
-    with_native(c -> (expect_query(c); send_resultset(c, 1, cols, [text_row("1")]); close(c))) do conn
+    with_native(c -> (expect_query(c); send_resultset(c, 1, cols, [text_row("1")]))) do conn
         cur = DBInterface.execute(conn, "select")
-        @test Tables.columntable(cur).x == [1]                                   # buffered rows survive the peer closing
-        sleep(0.2)
+        @test Tables.columntable(cur).x == [1]
+        P.close!(conn.handle.session)                                         # deterministic known-closed transport
         err = try; DBInterface.execute(conn, "again"); nothing; catch e; e; end
-        @test err isa P.Error && err.errno == P.CR_SERVER_GONE_ERROR || err isa P.ProtocolError
+        @test err isa P.Error && err.errno == P.CR_SERVER_GONE_ERROR
+        @test first(cur).x == 1                                               # buffered rows survive transport close
         @test_throws ErrorException (DBInterface.close!(conn); DBInterface.execute(conn, "after close"))
         @test sprint(show, conn) == "MySQL.Native.Connection(disconnected)"
     end
     # reconnect=true: a new session before the next send once the old one is known dead,
-    # old cursors invalidated, never inside a transaction
-    accepted = Ref(0)
+    # old cursors invalidated, never inside a transaction and never after a protocol fault
+    accepted = Threads.Atomic{Int}(0)
     listener = Reseau.TCP.listen(Reseau.TCP.loopback_addr(0))
     port = Int(Reseau.TCP.addr(listener).port)
     errormonitor(Threads.@spawn begin
         while true
             c = try; Reseau.TCP.accept(listener); catch; break; end
-            accepted[] += 1
-            n = accepted[]
+            n = Threads.atomic_add!(accepted, 1) + 1
             errormonitor(Threads.@spawn begin
                 try
                     plain_peer_connect!(c; caps=MYSQL8_SERVER_CAPS & ~P.CLIENT_SSL, after=cc -> begin
                         if n == 1
                             expect_query(cc); send_resultset(cc, 1, cols, [text_row("1")])
-                            expect_query(cc)                                     # hang up without answering
-                        else
-                            expect_query(cc); send_ok(cc, 1; affected=4)
-                            expect_query(cc); send_ok(cc, 1)
-                            expect_query(cc); send_ok(cc, 1)
                             stall_until_eof(cc)
+                        else
+                            expect_query(cc); send_ok(cc, 1; status=P.SERVER_STATUS_AUTOCOMMIT | P.SERVER_STATUS_IN_TRANS)
+                            expect_query(cc); send_ok(cc, 1; affected=4, status=P.SERVER_STATUS_AUTOCOMMIT | P.SERVER_STATUS_IN_TRANS)
+                            expect_query(cc); send_ok(cc, 1)
+                            expect_query(cc); send_ok(cc, 1; status=P.SERVER_STATUS_AUTOCOMMIT | P.SERVER_STATUS_IN_TRANS)
+                            expect_query(cc); send_ok(cc, 1)
+                            expect_query(cc)                                  # close mid-command: the session becomes BROKEN
                         end
                     end)
                 catch
@@ -544,11 +591,13 @@ end
         cur = DBInterface.execute(conn, "select"; mysql_store_result=false)
         r, _ = iterate(cur)
         @test r.x == 1
-        @test_throws P.ProtocolError DBInterface.execute(conn, "peer hangs up")  # EOF mid-protocol: broken
-        @test !isopen(conn)
-        gen = conn.generation
-        @test DBInterface.execute(conn, "after").rows_affected == 4              # reconnected before the send
-        @test conn.generation > gen && accepted[] == 2 && isopen(conn)
+        P.close!(conn.handle.session)
+        gen = @atomic conn.generation
+        @test DBInterface.transaction(conn) do
+            @test DBInterface.execute(conn, "inside reconnect").rows_affected == 4
+            42
+        end == 42                                                              # START reconnects before entering the transaction
+        @test (@atomic conn.generation) > gen && accepted[] == 2 && isopen(conn)
         @test_throws P.ProtocolError r.x
         # never inside a transaction
         DBInterface.transaction(conn) do
@@ -557,9 +606,38 @@ end
             @test err isa P.Error && err.errno == P.CR_SERVER_GONE_ERROR
             conn.handle.session.phase = P.READY
         end
+        # A raw transaction is also protected by the server status, without task ownership.
+        conn.handle.session.status = P.SERVER_STATUS_AUTOCOMMIT | P.SERVER_STATUS_IN_TRANS
+        conn.handle.session.phase = P.CLOSED
+        err = try; DBInterface.execute(conn, "in raw tx"); nothing; catch e; e; end
+        @test err isa P.Error && err.errno == P.CR_SERVER_GONE_ERROR
+        @test accepted[] == 2
+        conn.handle.session.status = P.SERVER_STATUS_AUTOCOMMIT
+        conn.handle.session.phase = P.READY
+        @test_throws P.ProtocolError DBInterface.execute(conn, "peer hangs up")
+        @test !isopen(conn)
+        err = try; DBInterface.execute(conn, "after broken"); nothing; catch e; e; end
+        @test err isa P.Error && err.errno == P.CR_SERVER_GONE_ERROR
+        @test accepted[] == 2                                                  # BROKEN never reconnects
         DBInterface.close!(conn)
     finally
         close(listener)
+    end
+end
+
+@testset "command read timeout faults the connection" begin
+    with_native(c -> begin
+        expect_query(c)
+        sleep(2)
+        try
+            send_ok(c, 1)
+        catch
+        end
+    end; connect_kw=(; read_timeout=1)) do conn
+        started = time_ns()
+        @test_throws P.TimeoutError DBInterface.execute(conn, "slow")
+        @test time_ns() - started < 5_000_000_000
+        @test !isopen(conn)
     end
 end
 
@@ -595,6 +673,30 @@ end
         end
     end
     @test seen == ["START TRANSACTION", "insert 1", "COMMIT", "START TRANSACTION", "ROLLBACK"]
+
+    seen = String[]
+    with_native(c -> begin
+        for _ in 1:4
+            push!(seen, expect_query(c)); send_ok(c, 1)
+        end
+    end) do conn
+        entered = Channel{Nothing}(1)
+        release = Channel{Nothing}(1)
+        tx = errormonitor(Threads.@spawn DBInterface.transaction(conn) do
+            DBInterface.execute(conn, "inside")
+            put!(entered, nothing)
+            take!(release)
+            7
+        end)
+        take!(entered)
+        outside = errormonitor(Threads.@spawn DBInterface.execute(conn, "outside"))
+        yield()
+        @test !istaskdone(outside)
+        put!(release, nothing)
+        @test fetch(tx) == 7
+        @test fetch(outside).rows_affected == 0
+    end
+    @test seen == ["START TRANSACTION", "inside", "COMMIT", "outside"]
 end
 
 @testset "connection keyword surface and show" begin

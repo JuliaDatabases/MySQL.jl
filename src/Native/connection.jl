@@ -19,7 +19,7 @@ mutable struct Connection <: DBInterface.Connection
     port::String
     db::String
     lock::ReentrantLock
-    generation::Int
+    @atomic generation::Int
     @atomic active_token::Int
     next_token::Int
     buffered_bytes::Int
@@ -49,8 +49,10 @@ function DBInterface.connect(::Type{Connection}, host::AbstractString, user::Abs
 end
 
 function Base.show(io::IO, conn::Connection)
-    opts = conn.handle === nothing ? "disconnected" : "host=\"$(conn.host)\", user=\"$(conn.user)\", port=\"$(conn.port)\", db=\"$(conn.db)\""
-    print(io, "MySQL.Native.Connection($opts)")
+    lock(conn.lock) do
+        opts = conn.handle === nothing ? "disconnected" : "host=\"$(conn.host)\", user=\"$(conn.user)\", port=\"$(conn.port)\", db=\"$(conn.db)\""
+        print(io, "MySQL.Native.Connection($opts)")
+    end
     return nothing
 end
 
@@ -69,7 +71,11 @@ session(conn::Connection) = (checkconn(conn); conn.handle.session)
 A local check (the transport is open and the session is not closed or broken); it does not
 detect a peer that went away silently — use `MySQL.Native.ping`.
 """
-Base.isopen(conn::Connection) = conn.handle !== nothing && isopen(conn.handle)
+function Base.isopen(conn::Connection)
+    return lock(conn.lock) do
+        conn.handle !== nothing && isopen(conn.handle)
+    end
+end
 
 """
     DBInterface.close!(conn)
@@ -94,7 +100,7 @@ Base.close(conn::Connection) = DBInterface.close!(conn)
 # ---- response ownership ----
 
 function invalidate_cursors!(conn::Connection)
-    conn.generation += 1
+    @atomic conn.generation += 1
     @atomic conn.active_token = 0
     return nothing
 end
@@ -109,20 +115,21 @@ end
 # withdraws ownership from the cursor that was consuming it.
 function drain_pending!(conn::Connection)
     s = session(conn)
+    @atomic conn.active_token = 0
     if !P.is_terminal(s.phase) && s.phase != P.READY
         P.drain!(s)
     end
-    @atomic conn.active_token = 0
     return nothing
 end
 
-# Reconnect only before a send, only on a session known to be closed or broken, never
-# inside a transaction. Statements and cursors of the old session are invalidated by the
-# generation bump.
+# Reconnect only before a send, only on a transport known to be closed, never from a
+# protocol fault and never inside a transaction. Statements and cursors of the old session
+# are invalidated by the generation bump.
 function ensure_live!(conn::Connection)
     h = conn.handle
     isopen(h.session) && return nothing
-    (conn.options.reconnect && conn.transaction_owner === nothing) || throw(P.Error(P.CR_SERVER_GONE_ERROR, "MySQL server has gone away", "HY000"))
+    can_reconnect = conn.options.reconnect && conn.transaction_owner === nothing && h.session.phase != P.BROKEN && !P.in_transaction(h.session.status)
+    can_reconnect || throw(P.Error(P.CR_SERVER_GONE_ERROR, "MySQL server has gone away", "HY000"))
     conn.handle = nothing
     close!(h)
     conn.handle = connect(conn.options)
@@ -136,8 +143,11 @@ function begin_command!(conn::Connection)
     checkconn(conn)
     drain_pending!(conn)
     ensure_live!(conn)
+    s = conn.handle.session
+    P.set_read_deadline!(s.transport, deadline_from(conn.options.read_timeout))
+    P.set_write_deadline!(s.transport, deadline_from(conn.options.write_timeout))
     conn.buffered_bytes = 0
-    return conn.handle.session
+    return s
 end
 
 # Runs a statement that must answer with OK (no result set) and returns the OK packet.
@@ -180,8 +190,8 @@ function DBInterface.transaction(f, conn::Connection)
     lock(conn.lock)
     try
         conn.transaction_owner === nothing || throw(MySQLInterfaceError("a transaction is already active on this connection"))
-        conn.transaction_owner = current_task()
         execute_ok!(conn, "START TRANSACTION")
+        conn.transaction_owner = current_task()
         try
             result = f()
             execute_ok!(conn, "COMMIT")
@@ -209,8 +219,10 @@ Escapes `str` for use inside a single-quoted SQL literal on this connection's ch
 under the session's `NO_BACKSLASH_ESCAPES` mode only `'` is doubled.
 """
 function escape(conn::Connection, str::AbstractString)
-    s = session(conn)
-    return escape_literal(str, (s.status & P.SERVER_STATUS_NO_BACKSLASH_ESCAPES) != 0)
+    return lock(conn.lock) do
+        s = session(conn)
+        escape_literal(str, (s.status & P.SERVER_STATUS_NO_BACKSLASH_ESCAPES) != 0)
+    end
 end
 
 function escape_literal(str::AbstractString, no_backslash_escapes::Bool)

@@ -134,10 +134,11 @@ source are never read.
   atomic `active_token` plus the connection `generation`; a foreign command drains the
   response and the cursor's rows raise `ProtocolError("cursor invalidated …")`. Buffered
   cursors own their bytes and survive later commands.
-- **Cursor-owned buffers**: streaming rows are read into the cursor's buffer
-  (`read_row!(s; dest)`), buffered results into one contiguous buffer plus row offsets; the
-  per-command `max_buffered_bytes` budget is charged across every retained result of the
-  command (multi-results included) and exceeding it faults the session.
+- **Cursor-owned buffers**: streaming packets alternate between two cursor-owned buffers so
+  a terminator cannot overwrite the last current row; buffered results use one contiguous
+  buffer plus row offsets. The per-command `max_buffered_bytes` budget is charged across
+  every retained result of the command (multi-results included) and exceeding it faults the
+  session.
 - **Multi-results**: `executemultiple` yields a distinct cursor per result (DML/OK results
   and CALL's final OK yield empty cursors with their own snapshot); advancing past an
   unconsumed streaming result drains it and stales its rows; a later ERR ends iteration with
@@ -158,8 +159,8 @@ source are never read.
   any data (including the source's first read) is re-raised after resynchronizing; an error,
   size-limit crossing or write fault after data closes the connection; an unsolicited `0xFB`
   is a `ProtocolError`. Later results of the same COM_QUERY can request another upload.
-- **Reconnect** is narrow: only before a send, only when the session is known closed or
-  broken, never inside a transaction; it bumps the generation so older cursors invalidate.
+- **Reconnect** is narrow: only before a send, only when the transport is known closed,
+  never from `BROKEN` and never inside a transaction; it bumps the generation so older cursors invalidate.
   `transaction` holds the connection lock across `f`.
 - Handle-level facts from the 8.4 lane: the terminator OK of a SELECT carries
   `last_insert_id = 0`; mariadb:11.4 and mysql:8.4 both serve the fixture identically.

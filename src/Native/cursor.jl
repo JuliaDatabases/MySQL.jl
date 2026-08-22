@@ -25,6 +25,7 @@ mutable struct TextCursor{buffered} <: DBInterface.Cursor
     ok::Union{Nothing, P.OKPacket}
     status::UInt16
     buf::Vector{UInt8}
+    spare::Vector{UInt8}
     rowstarts::Vector{Int}
     offsets::Vector{Int}
     lengths::Vector{Int}
@@ -52,8 +53,8 @@ getepoch(r::TextRow) = getfield(r, :epoch)
 # in-flight response and belong to the current session generation.
 function check_active(c::TextCursor{false})
     conn = c.conn
-    c.generation == conn.generation || cursor_invalidated()
-    (c.finished || c.token == (@atomic conn.active_token)) || cursor_invalidated()
+    c.generation == (@atomic conn.generation) || cursor_invalidated()
+    c.token == (@atomic conn.active_token) || cursor_invalidated()
     return nothing
 end
 
@@ -85,7 +86,7 @@ Base.length(c::TextCursor) = c.nrows
 # ---- construction from a command response ----
 
 function empty_cursor(conn::Connection, sql::String, token::Int, ok::P.OKPacket, buffered::Bool, opts::ResultOptions, number::Int)
-    c = TextCursor{buffered}(conn, sql, token, conn.generation, Symbol[], Type[], Dict{Symbol, Int}(), 0, 0, Core.bitcast(Int64, ok.affected_rows), ok, ok.status, UInt8[], Int[], Int[], Int[], 0, 0, number, true, opts)
+    c = TextCursor{buffered}(conn, sql, token, @atomic(conn.generation), Symbol[], Type[], Dict{Symbol, Int}(), 0, 0, Core.bitcast(Int64, ok.affected_rows), ok, ok.status, UInt8[], UInt8[], Int[], Int[], Int[], 0, 0, number, true, opts)
     P.more_results(ok) || release_token!(c)
     return c
 end
@@ -97,7 +98,7 @@ function result_cursor(conn::Connection, sql::String, token::Int, header::P.Resu
     names = [Symbol(col.name) for col in header.columns]
     types = Type[juliatype(col, opts) for col in header.columns]
     lookup = Dict{Symbol, Int}(nm => i for (i, nm) in enumerate(names))
-    c = TextCursor{buffered}(conn, sql, token, conn.generation, names, types, lookup, n, buffered ? 0 : -1, Int64(0), nothing, UInt16(0), UInt8[], Int[], Vector{Int}(undef, n), Vector{Int}(undef, n), 0, 0, number, false, opts)
+    c = TextCursor{buffered}(conn, sql, token, @atomic(conn.generation), names, types, lookup, n, buffered ? 0 : -1, Int64(0), nothing, UInt16(0), UInt8[], UInt8[], Int[], Vector{Int}(undef, n), Vector{Int}(undef, n), 0, 0, number, false, opts)
     buffered && buffer_rows!(c, s)
     return c
 end
@@ -107,13 +108,14 @@ function make_cursor(conn::Connection, sql::String, token::Int, resp, buffered::
     return result_cursor(conn, sql, token, resp::P.ResultHeader, buffered, opts, number)
 end
 
-# The terminator of this cursor's result set: snapshot, and give up the response when
-# nothing follows.
-function finish!(c::TextCursor, r::P.ResultEnd)
+# The terminator of this cursor's result set. Buffered cursors can release response
+# ownership immediately. A streaming cursor retains its token so that its last row can
+# distinguish a later foreign command from an ordinary stale-row error.
+function finish!(c::TextCursor{buffered}, r::P.ResultEnd) where {buffered}
     c.status = r.status
     c.ok = r.ok
     c.finished = true
-    r.more_results || release_token!(c)
+    (!r.more_results && buffered) && release_token!(c)
     return nothing
 end
 
@@ -164,14 +166,13 @@ end
 function drain_rows!(c::TextCursor{false}, s::P.Session)
     try
         while !c.finished
-            r = P.read_row!(s; dest=c.buf)
+            r = P.read_row!(s; dest=c.spare)
             r isa P.ResultEnd && finish!(c, r)
         end
     catch
         c.finished = true
         rethrow()
     end
-    c.epoch += 1
     return nothing
 end
 
@@ -203,7 +204,7 @@ function Base.iterate(c::TextCursor{false}, i::Int=1)
         check_active(c)
         s = session(conn)
         r = try
-            P.read_row!(s; dest=c.buf)
+            P.read_row!(s; dest=c.spare)
         catch
             c.finished = true
             rethrow()
@@ -212,6 +213,7 @@ function Base.iterate(c::TextCursor{false}, i::Int=1)
             finish!(c, r)
             return nothing
         end
+        c.buf, c.spare = c.spare, c.buf
         scan_current!(c, r, i, s)
         return (TextRow{false}(c, i, c.epoch), i + 1)
     end
@@ -236,7 +238,8 @@ function DBInterface.close!(c::TextCursor)
     conn = c.conn
     lock(conn.lock) do
         conn.handle === nothing && return nothing
-        (c.generation == conn.generation && c.token == (@atomic conn.active_token)) || return nothing
+        (c.generation == (@atomic conn.generation) && c.token == (@atomic conn.active_token)) || return nothing
+        c isa TextCursor{false} && (c.epoch += 1)
         drain_pending!(conn)
         c.finished = true
         return nothing
@@ -355,7 +358,8 @@ function Base.iterate(tc::TextCursors{buffered}, first::Bool=true) where {buffer
     lock(conn.lock) do
         cur = tc.current
         conn.handle === nothing && return nothing
-        cur.generation == conn.generation || return nothing
+        cur.generation == (@atomic conn.generation) || return nothing
+        buffered || (cur.epoch += 1)  # advancing the outer iterator stales this result's row
         if !cur.finished
             # an unconsumed streaming result: it must still own the response, then it is drained
             cur.token == (@atomic conn.active_token) || cursor_invalidated()
