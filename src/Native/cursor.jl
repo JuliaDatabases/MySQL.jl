@@ -274,16 +274,24 @@ function resync_local_infile!(s::P.Session)
     end
 end
 
+@noinline function throw_with_server_cause(err, cause::P.ServerError)
+    try
+        throw(cause)
+    catch
+        throw(err)
+    end
+end
+
 function handle_local_infile!(conn::Connection, s::P.Session, req::P.LocalInfileRequest)
     handler = conn.options.local_infile_handler
     handler === nothing && throw(P.fault!(s, P.ProtocolError("the server requested a LOCAL INFILE upload but no local_infile_handler is configured")))
     filename = req.filename isa AbstractString ? String(req.filename) : String(copy(req.filename))
     source = try
         handler(filename)
-    catch
+    catch handler_err
         # nothing sent yet: resynchronize with the empty packet, then raise the handler error
         reply = resync_local_infile!(s)
-        reply isa P.ServerError && @debug "LOCAL INFILE refused after a handler error" filename=filename server=reply
+        reply isa P.ServerError && throw_with_server_cause(handler_err, reply)
         rethrow()
     end
     if source === nothing
@@ -298,14 +306,16 @@ function handle_local_infile!(conn::Connection, s::P.Session, req::P.LocalInfile
     end
     if !(source isa IO)
         err = ArgumentError("local_infile_handler must return an IO or nothing, got $(typeof(source))")
-        resync_local_infile!(s)
+        reply = resync_local_infile!(s)
+        reply isa P.ServerError && throw_with_server_cause(err, reply)
         throw(err)
     end
     try
         P.send_local_infile!(s, source; max_bytes=conn.options.max_local_infile_bytes)
     catch err
         if !P.is_terminal(s.phase)
-            resync_local_infile!(s)
+            reply = resync_local_infile!(s)
+            reply isa P.ServerError && throw_with_server_cause(err, reply)
         end
         rethrow()
     end

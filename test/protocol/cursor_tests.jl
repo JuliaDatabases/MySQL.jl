@@ -578,7 +578,7 @@ end
     end
     uploads = Vector{Vector{UInt8}}[]
     handler_calls = String[]
-    handler = name -> (push!(handler_calls, name); name == "refuse" ? nothing : name == "boom" ? error("handler exploded") : IOBuffer(name == "empty" ? "" : "line1\nline2\n"))
+    handler = name -> (push!(handler_calls, name); name == "refuse" ? nothing : startswith(name, "boom") ? error("handler exploded") : IOBuffer(name == "empty" ? "" : "line1\nline2\n"))
     with_native(c -> begin
         # 1. upload accepted
         expect_query(c); seq = infile_request(c, 1, "data.csv"); seq, chunks = read_upload(c); push!(uploads, chunks); send_ok(c, seq + 1; affected=2)
@@ -590,6 +590,8 @@ end
         expect_query(c); seq = infile_request(c, 1, "refuse"); seq, chunks = read_upload(c); push!(uploads, chunks); send_err(c, seq + 1, 1148, "not allowed")
         # 5. handler throws before any data: resynchronized, the handler error surfaces, connection usable
         expect_query(c); seq = infile_request(c, 1, "boom"); seq, chunks = read_upload(c); push!(uploads, chunks); send_ok(c, seq + 1)
+        # 6. a refusal ERR is retained in the handler error's exception chain
+        expect_query(c); seq = infile_request(c, 1, "boom-err"); seq, chunks = read_upload(c); push!(uploads, chunks); send_err(c, seq + 1, 1148, "not allowed")
         expect_query(c); send_ok(c, 1; affected=9)
     end; connect_kw=(; local_files=true, local_infile_handler=handler)) do conn
         @test DBInterface.execute(conn, "load data local infile 'data.csv'").rows_affected == 2
@@ -600,11 +602,19 @@ end
         @test err isa P.LocalInfileRefused && occursin("(1148)", err.msg) && err.cause isa P.Error && err.cause.errno == 1148
         err = try; DBInterface.execute(conn, "load data local infile 'boom'"); nothing; catch e; e; end
         @test err isa ErrorException && err.msg == "handler exploded"
+        err, stack = try
+            DBInterface.execute(conn, "load data local infile 'boom-err'")
+            (nothing, current_exceptions())
+        catch e
+            (e, current_exceptions())
+        end
+        @test err isa ErrorException && err.msg == "handler exploded"
+        @test any(item -> item.exception isa P.Error && item.exception.errno == 1148, stack)
         @test DBInterface.execute(conn, "ok").rows_affected == 9
         @test isopen(conn)
     end
-    @test uploads[1] == [Vector{UInt8}(codeunits("line1\nline2\n"))] && uploads[2] == [] && uploads[3] == [] && uploads[4] == [] && uploads[5] == []
-    @test handler_calls == ["data.csv", "empty", "refuse", "refuse", "boom"]
+    @test uploads[1] == [Vector{UInt8}(codeunits("line1\nline2\n"))] && uploads[2] == [] && uploads[3] == [] && uploads[4] == [] && uploads[5] == [] && uploads[6] == []
+    @test handler_calls == ["data.csv", "empty", "refuse", "refuse", "boom", "boom-err"]
     # an IO failure before its first byte follows the same recoverable refusal path
     with_native(c -> begin
         expect_query(c); seq = infile_request(c, 1, "before"); seq, chunks = read_upload(c); @test isempty(chunks); send_ok(c, seq + 1)
