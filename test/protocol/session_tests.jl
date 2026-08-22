@@ -743,6 +743,29 @@ end
             P.set_read_deadline!(ft, time_ns() + 100_000_000)
             @test_throws P.TimeoutError P.read_greeting!(s)
         end
+        # A deadline in an active result stream makes the connection unusable.
+        with_peer(conn -> begin
+            server_handshake!(conn)
+            read_command(conn)
+            send_packet(conn, 1, column_count(1))
+            send_packet(conn, 2, COL1)
+            await_eof(conn)
+        end) do client
+            s = P.Session(client)
+            client_handshake!(s)
+            P.query!(s, "SELECT 1")
+            @test P.read_command_response!(s) isa P.ResultHeader
+            P.set_read_deadline!(client, time_ns() + 100_000_000)
+            err = try
+                P.read_row!(s)
+                nothing
+            catch caught
+                caught
+            end
+            @test err isa P.TimeoutError
+            @test occursin("phase ROWS", err.msg)
+            @test s.phase == P.BROKEN && !isopen(s)
+        end
     end
 
     @testset "quit!, no-response commands, drain!, sequence wrap" begin
