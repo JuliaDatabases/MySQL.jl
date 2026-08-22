@@ -154,6 +154,10 @@ const TYPED_COLS = [
     @test N.juliatype(wiredef(P.MYSQL_TYPE_YEAR; flags=NOT_NULL | UNSIGNED), N.DEFAULT_RESULT_OPTIONS) === unsigned(Clong)
     @test N.juliatype(wiredef(P.MYSQL_TYPE_DATETIME), N.ResultOptions(; date_and_time=true)) === DateAndTime
     @test N.juliatype(wiredef(P.MYSQL_TYPE_DATE), N.ResultOptions(; zero_dates=:missing)) === Union{Missing, Date}
+    # hostile flags must not reach `unsigned(String)` (fuzz finding): a wire-supplied
+    # NUM_FLAG is not trusted, and MYSQL_TYPE_NULL maps to String
+    @test N.juliatype(wiredef(P.MYSQL_TYPE_VAR_STRING; flags=NOT_NULL | UNSIGNED | P.NUM_FLAG), N.DEFAULT_RESULT_OPTIONS) === String
+    @test N.juliatype(wiredef(P.MYSQL_TYPE_NULL; flags=NOT_NULL | UNSIGNED), N.DEFAULT_RESULT_OPTIONS) === String
 
     for (T, value, expected) in (
             (Int8, "-128", Int8(-128)), (UInt8, "255", UInt8(255)),
@@ -166,6 +170,8 @@ const TYPED_COLS = [
         @test decode_text(T, value) === expected
     end
     @test decode_text(Dec64, "12.345") == d64"12.345"
+    # an embedded NUL must be a ConversionError, not an ArgumentError from DecFP's Cstring (fuzz finding)
+    @test_throws P.ConversionError decode_text(Dec64, "12.\x0045")
     @test decode_text(MySQL.API.Bit, "\x01\x02") == MySQL.API.Bit(0x0102)
     @test decode_text(Vector{UInt8}, "\x00\xff") == UInt8[0x00, 0xff]
     @test decode_text(String, "héllo") == "héllo"

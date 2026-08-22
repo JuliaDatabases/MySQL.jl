@@ -51,13 +51,16 @@ end
 has_flag(def::ColumnDef, flag::UInt16) = (def.flags & flag) != 0
 is_not_null(def::ColumnDef) = has_flag(def, NOT_NULL_FLAG)
 # `NUM_FLAG` is not sent on the wire: libmysqlclient sets it client-side for the numeric
-# wire types (`IS_NUM` in mysql_com.h), and that is what the 1.x type mapping observed.
+# wire types (`IS_NUM` in mysql_com.h), and that is what the 1.x type mapping observed. A
+# wire-supplied NUM_FLAG is not trusted either — the unsigned mapping applies only to wire
+# types whose Julia type has an unsigned counterpart (`MYSQL_TYPE_NULL` maps to `String`),
+# so a malicious column definition cannot reach `unsigned(String)`.
 function is_numeric_type(type::UInt8)
-    (type <= MYSQL_TYPE_INT24 && type != MYSQL_TYPE_TIMESTAMP) && return true
+    (type <= MYSQL_TYPE_INT24 && type != MYSQL_TYPE_TIMESTAMP && type != MYSQL_TYPE_NULL) && return true
     return type == MYSQL_TYPE_YEAR || type == MYSQL_TYPE_NEWDECIMAL
 end
 
-is_unsigned(def::ColumnDef) = has_flag(def, UNSIGNED_FLAG) && (has_flag(def, NUM_FLAG) || is_numeric_type(def.type))
+is_unsigned(def::ColumnDef) = has_flag(def, UNSIGNED_FLAG) && is_numeric_type(def.type)
 is_binary(def::ColumnDef) = has_flag(def, BINARY_FLAG)
 is_blob(def::ColumnDef) = has_flag(def, BLOB_FLAG)
 

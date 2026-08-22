@@ -86,6 +86,9 @@ decode_value(::Type{Vector{UInt8}}, buf::Vector{UInt8}, pos::Int, len::Int, ::Re
 
 function decode_value(::Type{Dec64}, buf::Vector{UInt8}, pos::Int, len::Int, opts::ResultOptions)
     s = decode_value(String, buf, pos, len, opts)
+    # DecFP parses through a Cstring; an embedded NUL would raise an ArgumentError from the
+    # ccall conversion instead of a ConversionError
+    occursin('\0', s) && conversion_error(Dec64, buf, pos, len)
     x = tryparse(Dec64, s)
     x === nothing && conversion_error(Dec64, buf, pos, len)
     return x

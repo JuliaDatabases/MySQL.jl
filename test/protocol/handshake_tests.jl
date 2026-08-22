@@ -110,6 +110,10 @@ pview(payload::Vector{UInt8}; seq=0x00) = P.PacketView(payload, 1, length(payloa
         @test P.detect_kind("8.0.30-Vitess", MYSQL8_SERVER_CAPS) == :vitess
         @test P.detect_kind("8.4.3", MYSQL8_SERVER_CAPS) == :mysql
         @test P.detect_kind("10.6.1-xyz", MYSQL8_SERVER_CAPS & ~P.CLIENT_MYSQL) == :mariadb
+        # the version string is untrusted bytes: invalid UTF-8 must not throw (fuzz finding)
+        @test P.detect_kind("8.4.\xf5-w\xbfird", MYSQL8_SERVER_CAPS) == :mysql
+        @test P.detect_kind("11.4.\xbf-MARIADB", MYSQL8_SERVER_CAPS) == :mariadb
+        @test P.normalize_version("5.5.5-\xbf0.6.1-MariaDB", :mariadb) == v"0.0.0"
     end
 
     @testset "initial ERR keeps the whole message and no SQLSTATE" begin

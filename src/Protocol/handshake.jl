@@ -26,8 +26,19 @@ end
 is_mariadb(info::ServerInfo) = info.kind == :mariadb
 has_capability(caps::UInt64, flag::UInt64) = (caps & flag) == flag
 
+# ASCII-only lowering: the version string is untrusted wire bytes, and `lowercase` throws
+# `InvalidCharError` on invalid UTF-8.
+function ascii_lowercase(s::String)
+    bytes = Vector{UInt8}(codeunits(s))
+    for i in eachindex(bytes)
+        b = bytes[i]
+        (UInt8('A') <= b <= UInt8('Z')) && (bytes[i] = b + 0x20)
+    end
+    return String(bytes)
+end
+
 function detect_kind(raw_version::String, caps::UInt64)
-    lower = lowercase(raw_version)
+    lower = ascii_lowercase(raw_version)
     occursin("mariadb", lower) && return :mariadb
     has_capability(caps, CLIENT_MYSQL) || return :mariadb
     occursin("tidb", lower) && return :tidb
