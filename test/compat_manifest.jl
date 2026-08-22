@@ -70,15 +70,12 @@ const TEXT_ROW_TUPLE = (
             iterate(cur, st)
             try; r1.ID; "no error"; catch e; (typeof(e) <: ArgumentError, e.msg); end
         end),
-    Row("DML cursor: rows_affected, lastrowid, and empty schema", :preserve,
+    Row("DML cursor: rows_affected, lastrowid, length, and empty schema", :preserve,
         conn -> let cur = DBInterface.execute(conn, "INSERT INTO manifest_employee (Name) VALUES ('x'), ('y')")
-            res = (cur.rows_affected, Int(DBInterface.lastrowid(cur)) > 0, isempty(Tables.columntable(cur)), Tables.schema(cur).names)
+            res = (cur.rows_affected, Int(DBInterface.lastrowid(cur)) > 0, length(cur), isempty(Tables.columntable(cur)), Tables.schema(cur).names)
             DBInterface.execute(conn, "DELETE FROM manifest_employee WHERE Name IN ('x', 'y')")
             res
         end),
-    Row("DML cursor length is zero (1.x kept the -1 streaming sentinel)", :fix,
-        conn -> length(DBInterface.execute(conn, "UPDATE manifest_employee SET Name = Name WHERE ID = 1"));
-        native=0, legacy=-1),
     Row("lastrowid on a SELECT cursor: snapshot of the cursor's own terminator (1.x: sticky connection state)", :fix,
         conn -> begin
             DBInterface.execute(conn, "INSERT INTO manifest_employee (Name) VALUES ('z')")

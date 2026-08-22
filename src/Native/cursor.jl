@@ -88,7 +88,7 @@ Base.length(c::TextCursor) = c.nrows
 # ---- construction from a command response ----
 
 function empty_cursor(conn::Connection, sql::String, token::Int, ok::P.OKPacket, buffered::Bool, opts::ResultOptions, number::Int)
-    c = TextCursor{buffered}(conn, sql, token, @atomic(conn.generation), Symbol[], Type[], Dict{Symbol, Int}(), 0, 0, Core.bitcast(Int64, ok.affected_rows), ok, ok.status, ok.warnings, UInt8[], UInt8[], Int[], Int[], Int[], 0, 0, number, true, false, opts)
+    c = TextCursor{buffered}(conn, sql, token, @atomic(conn.generation), Symbol[], Type[], Dict{Symbol, Int}(), 0, -1, Core.bitcast(Int64, ok.affected_rows), ok, ok.status, ok.warnings, UInt8[], UInt8[], Int[], Int[], Int[], 0, 0, number, true, false, opts)
     P.more_results(ok) || release_token!(c)
     return c
 end

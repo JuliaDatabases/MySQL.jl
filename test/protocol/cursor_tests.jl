@@ -255,7 +255,7 @@ end
         expect_query(c); send_resultset(c, 1, [coldef("x"; type=P.MYSQL_TYPE_LONG)], [text_row("1")]; terminator=ok_payload(; header=0xFE, insert_id=41))
     end) do conn
         cur = DBInterface.execute(conn, "insert")
-        @test cur.rows_affected == 3 && DBInterface.lastrowid(cur) == 41 && length(cur) == 0 && isempty(Tables.columntable(cur))
+        @test cur.rows_affected == 3 && DBInterface.lastrowid(cur) == 41 && length(cur) == -1 && isempty(Tables.columntable(cur))
         @test Tables.schema(cur) == Tables.Schema(Symbol[], Type[])
         cur = DBInterface.execute(conn, "update")
         @test cur.rows_affected == -1                                          # preserved Int64 bitcast of UInt64

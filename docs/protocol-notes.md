@@ -147,7 +147,7 @@ source are never read.
 - **Snapshots**: `rows_affected` is the preserved `Int64` bitcast; `lastrowid` comes from the
   cursor's own OK/terminator (a SELECT cursor reports 0 under DEPRECATE_EOF, where 1.x
   reported the connection's sticky value); status and warning counts are retained for both
-  OK and legacy EOF terminators; a DML cursor has `length == 0` (1.x: -1).
+  OK and legacy EOF terminators; a DML cursor keeps the 1.x `length == -1` sentinel.
 - **Decoding policies** (`ResultOptions`): BIT is the big-endian value of all bytes (1.x read
   the first byte only); TIME decodes to `Dates.Time` for `0 ≤ t < 24h` and raises
   `ConversionError` otherwise, `time_type=Dates.Microsecond` is lossless; `zero_dates`
