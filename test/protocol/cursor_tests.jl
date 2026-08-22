@@ -341,6 +341,36 @@ end
         err = try; DBInterface.execute(conn, "select"); nothing; catch e; e; end   # broken session, reconnect=false
         @test err isa P.Error && err.errno == P.CR_SERVER_GONE_ERROR
     end
+    # metadata, the reusable offset/NULL state and every row-start entry are charged
+    col = coldef("s")
+    nullrows = [text_row(nothing), text_row(nothing)]
+    with_native(c -> (expect_query(c); send_resultset(c, 1, [col], nullrows))) do conn
+        @test length(DBInterface.execute(conn, "select")) == 2
+        @test conn.buffered_bytes == length(col) + 3 * sizeof(Int) + sum(length(row) + sizeof(Int) for row in nullrows)
+    end
+    # metadata alone can exceed the buffered budget, while streaming ignores that budget
+    with_native(c -> (expect_query(c); try; send_resultset(c, 1, [col], Vector{UInt8}[]); catch; end); connect_kw=(; max_buffered_bytes=1)) do conn
+        @test_throws P.ProtocolError DBInterface.execute(conn, "select")
+        @test !isopen(conn)
+    end
+    with_native(c -> (expect_query(c); send_resultset(c, 1, [col], [big, big, big, big])); connect_kw=(; max_buffered_bytes=1)) do conn
+        cur = DBInterface.execute(conn, "select"; mysql_store_result=false)
+        @test length(collect(cur)) == 4 && conn.buffered_bytes == 0 && isopen(conn)
+    end
+end
+
+@testset "malformed text rows fault the connection" begin
+    col = coldef("s")
+    malformed = UInt8[0x02, UInt8('x')]
+    with_native(c -> (expect_query(c); try; send_resultset(c, 1, [col], [malformed]); catch; end)) do conn
+        @test_throws P.ProtocolError DBInterface.execute(conn, "select")
+        @test !isopen(conn)
+    end
+    with_native(c -> (expect_query(c); try; send_resultset(c, 1, [col], [malformed]); catch; end)) do conn
+        cur = DBInterface.execute(conn, "select"; mysql_store_result=false)
+        @test_throws P.ProtocolError iterate(cur)
+        @test !isopen(conn)
+    end
 end
 
 @testset "server errors keep the connection usable" begin

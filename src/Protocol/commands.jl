@@ -5,11 +5,13 @@
 """
     ResultHeader
 
-Column definitions of one result set (execute-time metadata is authoritative).
+Column definitions of one result set (execute-time metadata is authoritative) and their
+wire payload size for retained-buffer accounting.
 """
 struct ResultHeader
     columns::Vector{ColumnDef}
     binary::Bool
+    metadata_bytes::Int
 end
 
 """
@@ -180,6 +182,7 @@ function read_result_header!(s::Session, p::PacketView, binary::Bool)
     ncols = Int(ncols_wire)
     transition!(s, :column_count, COLUMN_DEFS)
     columns = Vector{ColumnDef}(undef, ncols)
+    metadata_start = s.metadata_bytes
     for i in 1:ncols
         cp = readpacket!(s; packet_limit=s.limits.max_metadata_bytes - s.metadata_bytes)
         s.metadata_bytes += payload_length(cp)
@@ -195,7 +198,7 @@ function read_result_header!(s::Session, p::PacketView, binary::Bool)
         s.status = guarded(() -> parse_eof(ep, s.capabilities), s).status
         transition!(s, :metadata_eof, ROWS)
     end
-    return ResultHeader(columns, binary)
+    return ResultHeader(columns, binary, s.metadata_bytes - metadata_start)
 end
 
 """

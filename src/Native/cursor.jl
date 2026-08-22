@@ -91,12 +91,14 @@ function empty_cursor(conn::Connection, sql::String, token::Int, ok::P.OKPacket,
 end
 
 function result_cursor(conn::Connection, sql::String, token::Int, header::P.ResultHeader, buffered::Bool, opts::ResultOptions, number::Int)
+    n = length(header.columns)
+    s = session(conn)
+    buffered && charge_buffered!(conn, s, header.metadata_bytes + (2 * n + 1) * sizeof(Int))
     names = [Symbol(col.name) for col in header.columns]
     types = Type[juliatype(col, opts) for col in header.columns]
     lookup = Dict{Symbol, Int}(nm => i for (i, nm) in enumerate(names))
-    n = length(names)
     c = TextCursor{buffered}(conn, sql, token, conn.generation, names, types, lookup, n, buffered ? 0 : -1, Int64(0), nothing, UInt16(0), UInt8[], Int[], Vector{Int}(undef, n), Vector{Int}(undef, n), 0, 0, number, false, opts)
-    buffered && buffer_rows!(c, session(conn))
+    buffered && buffer_rows!(c, s)
     return c
 end
 
@@ -123,11 +125,18 @@ end
 
 @noinline buffered_limit_exceeded(limit) = P.ProtocolError("buffered result exceeded max_buffered_bytes=$limit bytes; use mysql_store_result=false or raise max_buffered_bytes")
 
+function charge_buffered!(conn::Connection, s::P.Session, n::Int)
+    current = conn.buffered_bytes
+    limit = s.limits.max_buffered_bytes
+    (n <= typemax(Int) - current && (limit === nothing || current + n <= limit)) || throw(P.fault!(s, buffered_limit_exceeded(limit)))
+    conn.buffered_bytes = current + n
+    return nothing
+end
+
 # Reads every row of the result into the cursor's contiguous buffer, charging the
 # connection's per-command budget (earlier results of the same command count too).
 function buffer_rows!(c::TextCursor{true}, s::P.Session)
     conn = c.conn
-    limit = s.limits.max_buffered_bytes
     try
         while true
             r = P.read_row!(s)
@@ -135,9 +144,9 @@ function buffer_rows!(c::TextCursor{true}, s::P.Session)
                 finish!(c, r)
                 break
             end
+            P.guarded(() -> P.scan_text_row!(r, c.nfields, c.offsets, c.lengths), s)
             n = P.payload_length(r)
-            conn.buffered_bytes += n + sizeof(Int)
-            (limit === nothing || conn.buffered_bytes <= limit) || throw(P.fault!(s, buffered_limit_exceeded(limit)))
+            charge_buffered!(conn, s, n + sizeof(Int))
             push!(c.rowstarts, length(c.buf) + 1)
             append!(c.buf, view(r.buf, r.lo:r.hi))
             c.nrows += 1
@@ -168,8 +177,12 @@ end
 
 # ---- iteration ----
 
-function scan_current!(c::TextCursor, p::P.PacketView, i::Int)
-    P.scan_text_row!(p, c.nfields, c.offsets, c.lengths)
+function scan_current!(c::TextCursor, p::P.PacketView, i::Int, s::Union{Nothing, P.Session}=nothing)
+    if s === nothing
+        P.scan_text_row!(p, c.nfields, c.offsets, c.lengths)
+    else
+        P.guarded(() -> P.scan_text_row!(p, c.nfields, c.offsets, c.lengths), s)
+    end
     c.epoch += 1
     c.current_rownumber = i
     return nothing
@@ -199,7 +212,7 @@ function Base.iterate(c::TextCursor{false}, i::Int=1)
             finish!(c, r)
             return nothing
         end
-        scan_current!(c, r, i)
+        scan_current!(c, r, i, s)
         return (TextRow{false}(c, i, c.epoch), i + 1)
     end
 end
