@@ -90,6 +90,17 @@ end
     return nothing
 end
 
+# Whether the packet reader may batch reads through its read buffer (Reseau's `unsafe_read`
+# costs one `recv` per call, so per-packet exact reads dominate large scans; §8.9). The
+# test-only `FaultTransport` stays byte-exact so fault byte offsets remain deterministic.
+supports_buffered_reads(::Union{Reseau.TCP.Conn, Reseau.TLS.Conn}) = true
+supports_buffered_reads(::FaultTransport) = false
+
+# Reads 1..n available bytes into `buf[offset:end]` (one transport read); 0 means EOF.
+function transport_read_some!(t::Union{Reseau.TCP.Conn, Reseau.TLS.Conn}, buf::Vector{UInt8}, offset::Int, n::Int)
+    return Base.readbytes!(t, view(buf, offset:lastindex(buf)), n; all=false)
+end
+
 @inline transport_write(t::Transport, bytes::Vector{UInt8}) = (write(t, bytes); nothing)
 
 transport_isopen(t::Transport) = isopen(t)

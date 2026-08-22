@@ -107,7 +107,9 @@ the same buffer.
 """
 function readpacket!(s::Session; packet_limit::Int=max_payload(s), dest::Vector{UInt8}=s.io.inbuf)
     try
-        p = readpacket!(s.io, s.transport, min(packet_limit, max_payload(s)); max_response=s.authenticated ? s.limits.max_response_bytes : nothing, dest=dest)
+        # buffered reads only after authentication: the connection phase stays byte-exact
+        # so STARTTLS never has bytes stranded in the reader
+        p = readpacket!(s.io, s.transport, min(packet_limit, max_payload(s)); max_response=s.authenticated ? s.limits.max_response_bytes : nothing, dest=dest, buffered=s.authenticated)
         s.debug && @debug "MySQL.Protocol read" phase=s.phase length=payload_length(p) header=first_byte(p) seq=p.seq chunks=p.nchunks
         return p
     catch err
@@ -178,6 +180,8 @@ never reach the TLS decoder), so only the sequence counter and accounting surviv
 """
 function replace_transport!(s::Session, transport::Transport)
     require_phase(s, TLS_UPGRADE)
+    # reads are unbuffered until authentication completes, so nothing can be stranded here
+    buffered_bytes_available(s.io) == 0 || protocol_error("internal error: buffered reader bytes at STARTTLS")
     s.transport = transport
     transition!(s, :tls_established, HANDSHAKE)
     return nothing

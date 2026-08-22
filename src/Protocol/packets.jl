@@ -29,12 +29,15 @@ PacketCursor(p::PacketView) = PacketCursor(p.buf, p.lo, p.hi)
 first_byte(p::PacketView) = payload_length(p) == 0 ? nothing : (@inbounds p.buf[p.lo])
 payload(p::PacketView) = p.buf[p.lo:p.hi]
 
+const READBUF_SIZE = 64 * 1024
+
 """
     PacketIO
 
 Reader/writer state: one shared sequence counter, a reusable reassembly buffer, a reusable
-output buffer, and the count of payload bytes consumed since the last `newcommand!` (fed to
-`max_response_bytes`).
+output buffer, the count of payload bytes consumed since the last `newcommand!` (fed to
+`max_response_bytes`), and the read buffer that batches small transport reads during the
+command phase (`readbuf[readpos:readlim]` holds bytes already taken from the transport).
 """
 mutable struct PacketIO
     seq::UInt8
@@ -42,9 +45,61 @@ mutable struct PacketIO
     header::Vector{UInt8}
     outbuf::Vector{UInt8}
     response_bytes::Int
+    readbuf::Vector{UInt8}
+    readpos::Int
+    readlim::Int
 end
 
-PacketIO() = PacketIO(0x00, UInt8[], zeros(UInt8, PACKET_HEADER_LEN), UInt8[], 0)
+PacketIO() = PacketIO(0x00, UInt8[], zeros(UInt8, PACKET_HEADER_LEN), UInt8[], 0, Vector{UInt8}(undef, READBUF_SIZE), 1, 0)
+
+buffered_bytes_available(io::PacketIO) = io.readlim - io.readpos + 1
+
+# Refills the (empty) read buffer with at least `needed` bytes using large partial reads.
+function fill_readbuf!(io::PacketIO, transport::Transport, needed::Int)
+    io.readpos = 1
+    io.readlim = 0
+    total = 0
+    while total < needed
+        got = transport_read_some!(transport, io.readbuf, total + 1, length(io.readbuf) - total)
+        got == 0 && throw(EOFError())
+        total += got
+    end
+    io.readlim = total
+    return nothing
+end
+
+"""
+    packet_read!(io, transport, dest, offset, n, buffered)
+
+Reads exactly `n` bytes into `dest[offset:offset+n-1]`. With `buffered=true` (command
+phase: the byte stream can only carry this connection's current response) small reads are
+served from `io.readbuf`, which is refilled with large partial reads; reads of half the
+buffer or more bypass it. `buffered=false` (connection phase) reads byte-exact from the
+transport, so the STARTTLS empty-reader invariant is untouched.
+"""
+function packet_read!(io::PacketIO, transport::Transport, dest::Vector{UInt8}, offset::Int, n::Int, buffered::Bool)
+    if !buffered || !supports_buffered_reads(transport)
+        transport_read!(transport, dest, offset, n)
+        return nothing
+    end
+    avail = buffered_bytes_available(io)
+    take = min(avail, n)
+    if take > 0
+        copyto!(dest, offset, io.readbuf, io.readpos, take)
+        io.readpos += take
+        offset += take
+        n -= take
+    end
+    n == 0 && return nothing
+    if n >= length(io.readbuf) >> 1
+        transport_read!(transport, dest, offset, n)
+        return nothing
+    end
+    fill_readbuf!(io, transport, n)
+    copyto!(dest, offset, io.readbuf, io.readpos, n)
+    io.readpos += n
+    return nothing
+end
 
 function newcommand!(io::PacketIO)
     io.seq = 0x00
@@ -55,20 +110,21 @@ end
 @noinline sequence_mismatch(expected::UInt8, got::UInt8) = protocol_error("sequence id mismatch: expected $(Int(expected)), got $(Int(got))")
 
 """
-    readpacket!(io, transport, max_payload; max_response=nothing, dest=io.inbuf) -> PacketView
+    readpacket!(io, transport, max_payload; max_response=nothing, dest=io.inbuf, buffered=false) -> PacketView
 
 Reads one logical packet, reassembling continuation chunks, validating sequence ids, and
 bounding the reassembled size by `max_payload` *before* growing the buffer. `max_response`
 bounds the cumulative payload bytes since `newcommand!`. `dest` is the buffer the payload is
 read into (a cursor passes its own buffer so rows never alias the shared reader buffer).
+`buffered=true` batches transport reads through `io.readbuf` (command phase only).
 """
-function readpacket!(io::PacketIO, transport::Transport, max_payload::Int; max_response::Union{Nothing, Int}=nothing, dest::Vector{UInt8}=io.inbuf)
+function readpacket!(io::PacketIO, transport::Transport, max_payload::Int; max_response::Union{Nothing, Int}=nothing, dest::Vector{UInt8}=io.inbuf, buffered::Bool=false)
     total = 0
     nchunks = 0
     first_chunk_len = -1
     seq = io.seq
     while true
-        transport_read!(transport, io.header, 1, PACKET_HEADER_LEN)
+        packet_read!(io, transport, io.header, 1, PACKET_HEADER_LEN, buffered)
         len = Int(io.header[1]) | (Int(io.header[2]) << 8) | (Int(io.header[3]) << 16)
         got = io.header[4]
         got == io.seq || sequence_mismatch(io.seq, got)
@@ -78,7 +134,7 @@ function readpacket!(io::PacketIO, transport::Transport, max_payload::Int; max_r
         check_limit("packet length", total + len, max_payload)
         check_limit("response bytes", io.response_bytes + len, max_response)
         length(dest) < total + len && resize!(dest, total + len)
-        transport_read!(transport, dest, total + 1, len)
+        packet_read!(io, transport, dest, total + 1, len, buffered)
         total += len
         io.response_bytes += len
         len < MAX_CHUNK && break
