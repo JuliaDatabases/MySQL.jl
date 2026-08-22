@@ -88,7 +88,6 @@ const REAPER_SETUP_LOCK = ReentrantLock()
 # Starts the timer once. A ReentrantLock (not the finalizer-safe spinlock) because creating a
 # Timer and registering the atexit hook may yield.
 function ensure_reaper!()
-    REAPER_TIMER[] === nothing || return nothing
     lock(REAPER_SETUP_LOCK)
     try
         REAPER_TIMER[] === nothing || return nothing
