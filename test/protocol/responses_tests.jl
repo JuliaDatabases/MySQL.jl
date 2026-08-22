@@ -74,6 +74,8 @@ end
         @test_throws P.ProtocolError P.parse_ok(pv(payload), CAPS_TRACK, P.Limits(; max_session_state_bytes=8))
         # truncated state block
         @test_throws P.ProtocolError P.parse_ok(pv(ok_payload(; status=P.SERVER_SESSION_STATE_CHANGED, info="", state=UInt8[0x00, 0x05, 0x01], track=true)), CAPS_TRACK, P.Limits())
+        tracked = ok_payload(; info="x", track=true)
+        @test_throws P.ProtocolError P.parse_ok(pv(vcat(tracked, 0x00)), CAPS_TRACK, P.Limits())
     end
 
     @testset "ERR" begin
@@ -101,6 +103,7 @@ end
         @test !P.more_results(eof)
         @test P.more_results(P.EOFPacket(0, P.SERVER_MORE_RESULTS_EXISTS | P.SERVER_STATUS_AUTOCOMMIT))
         @test_throws P.ProtocolError P.parse_eof(pv(UInt8[0xFE, 0x00]), CAPS41)
+        @test_throws P.ProtocolError P.parse_eof(pv(vcat(Vectors.payload(Vectors.EOF_EXAMPLE), 0x00)), CAPS41)
     end
 
     @testset "column definitions (vendor vectors)" begin
@@ -122,6 +125,7 @@ end
             fixed > 0x0C && append!(bad, zeros(UInt8, fixed - 0x0C))
             @test_throws P.ProtocolError P.parse_column_def(pv(bad))
         end
+        @test_throws P.ProtocolError P.parse_column_def(pv(vcat(Vectors.payload(Vectors.COLUMN_DEF_COL1), 0x00)))
         # MariaDB extended metadata is skipped only when negotiated
         ext = copy(Vectors.payload(Vectors.COLUMN_DEF_COL1))
         insert!(ext, 14, 0x04)

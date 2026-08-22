@@ -34,6 +34,11 @@ function command_payload(command::UInt8, payload::AbstractVector{UInt8})
     return buf
 end
 
+function check_command_size!(s::Session, payload::AbstractVector{UInt8})
+    length(payload) <= max_payload(s) - 1 || throw(fault!(s, ProtocolError("command packet length $(length(payload) + 1) exceeds limit $(max_payload(s))")))
+    return nothing
+end
+
 """
     send_command!(s, command, payload=UInt8[])
 
@@ -42,6 +47,7 @@ at 0 and per-command accounting is reset.
 """
 function send_command!(s::Session, command::UInt8, payload::AbstractVector{UInt8}=UInt8[])
     require_phase(s, READY)
+    check_command_size!(s, payload)
     newcommand!(s.io)
     s.result_sets = 0
     s.metadata_bytes = 0
@@ -58,6 +64,7 @@ session stays READY and must not read.
 """
 function send_noresponse!(s::Session, command::UInt8, payload::AbstractVector{UInt8}=UInt8[])
     require_phase(s, READY)
+    check_command_size!(s, payload)
     newcommand!(s.io)
     sendpacket!(s, command_payload(command, payload))
     transition!(s, :send_noresponse, READY)

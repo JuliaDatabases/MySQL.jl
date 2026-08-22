@@ -86,7 +86,8 @@ function parse_ok(p::PacketView, caps::UInt64, limits::Limits)
     state = SessionStateChange[]
     if has_capability(caps, CLIENT_SESSION_TRACK)
         remaining(c) > 0 && (info = read_lenenc_string!(c, "info"))
-        if (status & SERVER_SESSION_STATE_CHANGED) != 0 && remaining(c) > 0
+        if (status & SERVER_SESSION_STATE_CHANGED) != 0
+            remaining(c) > 0 || truncated("session state info")
             len = read_lenenc_length!(c, "session state info")
             check_limit("session state bytes", len, limits.max_session_state_bytes)
             parse_session_state!(state, PacketCursor(c.buf, c.pos, c.pos + len - 1))
@@ -95,6 +96,7 @@ function parse_ok(p::PacketView, caps::UInt64, limits::Limits)
     else
         info = read_eof_string!(c)
     end
+    atend(c) || protocol_error("malformed OK packet: $(remaining(c)) trailing bytes")
     return OKPacket(header == EOF_HEADER, affected_rows, last_insert_id, status, warnings, info, state)
 end
 
@@ -143,6 +145,7 @@ function parse_eof(p::PacketView, caps::UInt64)
     has_capability(caps, CLIENT_PROTOCOL_41) || return EOFPacket(0x0000, 0x0000)
     warnings = read_u16!(c)
     status = read_u16!(c)
+    atend(c) || protocol_error("malformed EOF packet: $(remaining(c)) trailing bytes")
     return EOFPacket(warnings, status)
 end
 

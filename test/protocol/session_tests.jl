@@ -569,6 +569,12 @@ end
             @test_throws P.ProtocolError P.read_command_response!(s)
             @test s.phase == P.BROKEN
         end
+        with_peer(conn -> (server_handshake!(conn); await_eof(conn))) do client
+            s = P.Session(client; limits=P.Limits(; max_packet=128))
+            client_handshake!(s)
+            @test_throws P.ProtocolError P.query!(s, "x"^128)
+            @test s.phase == P.BROKEN && !isopen(s)
+        end
         with_peer(conn -> (server_handshake!(conn); read_command(conn); send_packet(conn, 1, vcat(UInt8[0xFE], fill(0xFF, 8))); await_eof(conn))) do client
             s = P.Session(client)
             client_handshake!(s)

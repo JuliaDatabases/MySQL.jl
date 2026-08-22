@@ -44,6 +44,7 @@ function parse_column_def(p::PacketView; extended_metadata::Bool=false)
     flags = read_u16!(c)
     decimals = read_u8!(c)
     skip!(c, 2, "column definition reserved bytes")
+    atend(c) || protocol_error("malformed column definition: $(remaining(c)) trailing bytes")
     return ColumnDef(catalog, schema, table, org_table, name, org_name, charset, length, type, flags, decimals)
 end
 

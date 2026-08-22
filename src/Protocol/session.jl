@@ -108,6 +108,7 @@ leaves the amount actually sent unknown).
 """
 function sendpacket!(s::Session, payload::AbstractVector{UInt8})
     try
+        check_limit("packet length", length(payload), max_payload(s))
         s.debug && @debug "MySQL.Protocol write" phase=s.phase length=length(payload) seq=s.io.seq
         sendpacket!(s.io, s.transport, payload)
     catch err
