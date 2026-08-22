@@ -32,6 +32,7 @@ const TRANSITIONS = Set{Tuple{Phase, Symbol, Phase}}([
     (CMD_SENT, :ok, READY),
     (CMD_SENT, :ok_more, RESULT_END),
     (CMD_SENT, :err, READY),
+    (CMD_SENT, :prepare_ok, READY),
     (CMD_SENT, :local_infile, LOCAL_INFILE),
     (CMD_SENT, :column_count, COLUMN_DEFS),
     (COLUMN_DEFS, :column_def, COLUMN_DEFS),

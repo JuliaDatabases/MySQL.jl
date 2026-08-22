@@ -1,0 +1,134 @@
+# Prepared-statement command phase at the framing level: COM_STMT_PREPARE and its
+# PREPARE_OK response (statement id, parameter and column definitions), COM_STMT_EXECUTE
+# (the driver layer serialises the parameter block; here we only frame it), COM_STMT_RESET,
+# COM_STMT_SEND_LONG_DATA and COM_STMT_CLOSE. Binary row *values* are decoded by the driver
+# layer; here rows are raw `PacketView`s, exactly as for the text protocol.
+
+"""
+    PrepareOK
+
+The result of `COM_STMT_PREPARE`: the server-assigned `statement_id`, the parameter and
+result-column definitions (execute-time metadata stays authoritative for decoding), and the
+prepare-time warning count.
+"""
+struct PrepareOK
+    statement_id::UInt32
+    params::Vector{ColumnDef}
+    columns::Vector{ColumnDef}
+    warnings::UInt16
+end
+
+num_params(ok::PrepareOK) = length(ok.params)
+num_columns(ok::PrepareOK) = length(ok.columns)
+
+"""
+    stmt_prepare!(s, sql)
+
+Sends `COM_STMT_PREPARE`; read the answer with `read_prepare_response!`.
+"""
+stmt_prepare!(s::Session, sql::AbstractString) = send_command!(s, COM_STMT_PREPARE, codeunits(sql); kind=CMD_STMT_PREPARE)
+
+# Reads one metadata block (`n` column definitions, then the EOF that closes it unless
+# DEPRECATE_EOF), bounded by `max_metadata_bytes` before every allocation.
+function read_definition_block!(s::Session, n::Int)
+    defs = Vector{ColumnDef}(undef, n)
+    for i in 1:n
+        cp = readpacket!(s; packet_limit=s.limits.max_metadata_bytes - s.metadata_bytes)
+        s.metadata_bytes += payload_length(cp)
+        s.metadata_bytes <= s.limits.max_metadata_bytes || throw(fault!(s, ProtocolError("prepared-statement metadata exceeded $(s.limits.max_metadata_bytes) bytes")))
+        defs[i] = guarded(() -> parse_column_def(cp), s)
+    end
+    if !deprecate_eof(s)
+        ep = readpacket!(s)
+        is_eof_packet(ep) || throw(fault!(s, ProtocolError("expected EOF after prepared-statement definitions")))
+        s.status = guarded(() -> parse_eof(ep, s.capabilities), s).status
+    end
+    return defs
+end
+
+"""
+    read_prepare_response!(s) -> PrepareOK
+
+Reads the `COM_STMT_PREPARE` response: the PREPARE_OK header, then (when present) the
+parameter definitions and their EOF, then the column definitions and their EOF. Returns the
+session to `READY`. A server ERR is thrown as `StmtError`.
+"""
+function read_prepare_response!(s::Session)
+    require_phase(s, CMD_SENT)
+    p = readpacket!(s)
+    b = first_byte(p)
+    if b == ERR_HEADER
+        e = guarded(() -> parse_err(p, s.capabilities), s)
+        transition!(s, :err, READY)
+        throw(StmtError(e))
+    end
+    b == OK_HEADER || throw(fault!(s, ProtocolError("expected COM_STMT_PREPARE_OK, got header 0x$(string(something(b, 0xFF), base=16, pad=2))")))
+    header = guarded(() -> parse_prepare_ok_header(p), s)
+    statement_id, ncols, nparams, warnings = header
+    (ncols <= s.limits.max_columns && nparams <= s.limits.max_columns) || throw(fault!(s, ProtocolError("prepared statement declares $ncols columns / $nparams parameters, above max_columns=$(s.limits.max_columns)")))
+    s.metadata_bytes = 0
+    params = nparams > 0 ? read_definition_block!(s, nparams) : ColumnDef[]
+    columns = ncols > 0 ? read_definition_block!(s, ncols) : ColumnDef[]
+    transition!(s, :prepare_ok, READY)
+    return PrepareOK(statement_id, params, columns, warnings)
+end
+
+# PREPARE_OK fixed header: status(1) statement_id(4) num_columns(2) num_params(2)
+# reserved(1) [warning_count(2) metadata_follows(1)]. `metadata_follows` only appears with
+# CLIENT_OPTIONAL_RESULTSET_METADATA, which 2.0 never negotiates.
+function parse_prepare_ok_header(p::PacketView)
+    c = PacketCursor(p)
+    read_u8!(c) == OK_HEADER || protocol_error("malformed COM_STMT_PREPARE_OK header")
+    statement_id = read_u32!(c)
+    ncols = Int(read_u16!(c))
+    nparams = Int(read_u16!(c))
+    skip!(c, 1, "COM_STMT_PREPARE_OK reserved byte")
+    warnings = remaining(c) >= 2 ? read_u16!(c) : UInt16(0)
+    return (statement_id, ncols, nparams, warnings)
+end
+
+"""
+    build_stmt_execute(statement_id, param_block) -> Vector{UInt8}
+
+Frames a `COM_STMT_EXECUTE` payload: `statement_id`, `flags=CURSOR_TYPE_NO_CURSOR`,
+`iteration_count=1`, then the caller-built parameter block (NULL bitmap, the
+`new_params_bind_flag`, the per-parameter type signature when it is set, and the non-NULL
+values — all produced by the driver layer's binary encoders).
+"""
+function build_stmt_execute(statement_id::Integer, param_block::AbstractVector{UInt8})
+    buf = UInt8[]
+    write_u32!(buf, statement_id)
+    write_u8!(buf, CURSOR_TYPE_NO_CURSOR)
+    write_u32!(buf, 1)
+    append!(buf, param_block)
+    return buf
+end
+
+stmt_execute!(s::Session, statement_id::Integer, param_block::AbstractVector{UInt8}) =
+    send_command!(s, COM_STMT_EXECUTE, build_stmt_execute(statement_id, param_block); kind=CMD_STMT_EXECUTE)
+
+"""
+    stmt_reset!(s, statement_id)
+
+`COM_STMT_RESET`: drops any accumulated long data and closes an open cursor. Answered with a
+single OK/ERR (read with `read_command_response!(s; kind=CMD_SIMPLE)`).
+"""
+function stmt_reset!(s::Session, statement_id::Integer)
+    buf = UInt8[]
+    write_u32!(buf, statement_id)
+    return send_command!(s, COM_STMT_RESET, buf; kind=CMD_SIMPLE)
+end
+
+"""
+    stmt_send_long_data!(s, statement_id, param_id, data)
+
+`COM_STMT_SEND_LONG_DATA`: appends `data` to parameter `param_id` of a prepared statement
+before it is executed. The server never answers, so the session stays `READY`.
+"""
+function stmt_send_long_data!(s::Session, statement_id::Integer, param_id::Integer, data::AbstractVector{UInt8})
+    buf = UInt8[]
+    write_u32!(buf, statement_id)
+    write_u16!(buf, param_id)
+    append!(buf, data)
+    return send_noresponse!(s, COM_STMT_SEND_LONG_DATA, buf)
+end

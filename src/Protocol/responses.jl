@@ -314,3 +314,82 @@ function scan_text_row!(p::PacketView, ncols::Int, offsets::Vector{Int}, lengths
     atend(c) || protocol_error("malformed text row: $(remaining(c)) trailing bytes after $ncols columns")
     return nothing
 end
+
+# Width of a fixed-size binary value; `nothing` for the length-encoded and self-describing
+# (temporal) types, which are measured from the wire.
+function fixed_binary_width(type::UInt8)
+    (type == MYSQL_TYPE_TINY) && return 1
+    (type == MYSQL_TYPE_SHORT || type == MYSQL_TYPE_YEAR) && return 2
+    (type == MYSQL_TYPE_LONG || type == MYSQL_TYPE_INT24 || type == MYSQL_TYPE_FLOAT) && return 4
+    (type == MYSQL_TYPE_LONGLONG || type == MYSQL_TYPE_DOUBLE) && return 8
+    return nothing
+end
+
+is_binary_temporal(type::UInt8) = type == MYSQL_TYPE_DATE || type == MYSQL_TYPE_DATETIME ||
+    type == MYSQL_TYPE_TIMESTAMP || type == MYSQL_TYPE_TIME || type == MYSQL_TYPE_NEWDATE
+
+# Advances `c` past one binary value of wire `type` and returns the (offset, length) window
+# of its *content* bytes: the fixed-width little-endian bytes for numbers, the raw bytes of a
+# `string<lenenc>` for everything else, and — for the temporal types — the bytes that follow
+# the one-byte length prefix (so `length ∈ {0,4,7,11}` for date/datetime, `{0,8,12}` for time
+# and the driver re-reads the same length from the window).
+function binary_value_span!(c::PacketCursor, type::UInt8)
+    w = fixed_binary_width(type)
+    if w !== nothing
+        need!(c, w, "binary value")
+        off = c.pos
+        c.pos += w
+        return (off, w)
+    end
+    if is_binary_temporal(type)
+        len = Int(read_u8!(c))
+        off = c.pos
+        need!(c, len, "binary temporal value")
+        c.pos += len
+        return (off, len)
+    end
+    return read_lenenc_window_len!(c, "binary value")
+end
+
+# Like `read_lenenc_window!` but returns (offset, length) instead of (lo, hi).
+function read_lenenc_window_len!(c::PacketCursor, what::String)
+    len = read_lenenc_length!(c, what)
+    off = c.pos
+    c.pos += len
+    return (off, len)
+end
+
+"""
+    scan_binary_row!(coltypes, p, offsets, lengths)
+
+Splits a binary protocol resultset row into per-column content windows of the packet buffer,
+just like `scan_text_row!` does for text rows: `offsets[i]`/`lengths[i]` describe column `i`,
+`lengths[i] == -1` marks a NULL (its bit is set in the row's NULL bitmap, which uses bit
+offset 2). `coltypes` supplies each column's wire type so the self-describing temporal and
+fixed-width values can be measured. Both vectors are resized to the column count and reused.
+"""
+function scan_binary_row!(coltypes::Vector{UInt8}, p::PacketView, offsets::Vector{Int}, lengths::Vector{Int})
+    ncols = length(coltypes)
+    resize!(offsets, ncols)
+    resize!(lengths, ncols)
+    c = PacketCursor(p)
+    read_u8!(c) == OK_HEADER || protocol_error("malformed binary row: header byte is not 0x00")
+    nullbytes = (ncols + 7 + 2) >> 3
+    need!(c, nullbytes, "binary row NULL bitmap")
+    nullmap_pos = c.pos
+    c.pos += nullbytes
+    for i in 1:ncols
+        bit = i - 1 + 2
+        isnull = (@inbounds p.buf[nullmap_pos + (bit >> 3)] >> (bit & 7)) & 0x01 != 0
+        if isnull
+            offsets[i] = c.pos
+            lengths[i] = -1
+        else
+            off, len = binary_value_span!(c, coltypes[i])
+            offsets[i] = off
+            lengths[i] = len
+        end
+    end
+    atend(c) || protocol_error("malformed binary row: $(remaining(c)) trailing bytes after $ncols columns")
+    return nothing
+end
