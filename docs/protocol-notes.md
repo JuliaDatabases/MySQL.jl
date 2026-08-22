@@ -224,6 +224,66 @@ source are never read.
   is drained first). One-shot `execute(conn, sql, params)` prepares, executes and parks the
   statement the same way.
 
+## M5 decisions worth remembering
+
+- **Fuzzing found three real parser escapes** (all fixed with regression tests): `lowercase`
+  on the untrusted server version string threw `InvalidCharError` on invalid UTF-8
+  (`detect_kind` now ASCII-lowers bytes); a wire-supplied `NUM_FLAG` on a non-numeric
+  column (or `UNSIGNED` on `MYSQL_TYPE_NULL`, whose Julia type is `String`) reached
+  `unsigned(String)` (`is_unsigned` now trusts only the wire type); a DECIMAL value with an
+  embedded NUL raised `ArgumentError` from DecFP's `Cstring` conversion instead of
+  `ConversionError`. The fuzz contract: any mutated transcript must fail as a
+  `Protocol.MySQLError`, never a crash. The harness (`test/protocol/fuzz.jl`) drives the
+  real packet reader/classifiers/scanners/decoders and the handshake/auth parsers over an
+  in-memory transport, deterministically from `(entry, seed)`; a bounded smoke batch runs
+  in every CI lane and `scripts/fuzz.jl` runs budgeted batches in isolated worker
+  processes (wall-clock + heap bounds, crash bisection, saved repros).
+- **The per-row hot path is allocation-free** (§8.9 gate: allocations per row ≤
+  String/Vector columns + 1, asserted serverless in `test/protocol/perf_tests.jl` and
+  against live servers in `test/perf/perf_gates.jl`). Four per-row allocations were
+  eliminated: the closure passed to `guarded` per scanned row; the `lock(l) do` closure
+  and the `Union{Nothing, Tuple}` iteration-protocol return of the streaming `iterate`
+  (now a thin `@inline` wrapper over a `Bool`-returning `stream_advance!`); the mutable
+  `PacketCursor` per scan (cursors own a scratch one, rebound per row); and the
+  `Union{PacketView, ResultEnd}` return box of `read_row!` (`@inline` + no internal `try`
+  so the union splits at the caller).
+- **Command-phase reads are batched through a 64 KiB read buffer** (`PacketIO.readbuf`).
+  Reseau's `unsafe_read` costs one `recv` per call, so per-packet exact reads dominated
+  large scans (native was 0.3–0.5× Connector/C; with batching ≥ 0.9×). Reads stay
+  byte-exact until authentication completes, so the STARTTLS empty-reader invariant is
+  untouched (`replace_transport!` asserts it), and `FaultTransport` is never buffered so
+  fault byte offsets stay deterministic. Buffered bytes are always bytes of the same
+  connection's current response; a read of ≥ half the buffer bypasses it.
+- **The `(ROWS, :row, ROWS)` self-transition skips the `TRANSITIONS` set lookup**
+  (`row_transition!`): it is statically legal (`read_row!` already required phase ROWS)
+  and the membership hash cost ~15% of a 1M-row scan. Coverage recording and the
+  transition log are preserved.
+- **§8.9 measurements** (Chairmarks; mysql:8.4 in Docker, Apple Silicon host, quiet run):
+  text scan 0.98×, binary (prepared) scan 1.09×, tiny/NULL scan 0.93×, 10k round trips
+  plain 0.75× / TLS 1.00×, 100k `executemany` 0.80×, 64 MiB blob 0.86× of Connector/C —
+  all gates met. **Round-trip-bound gates sit near a transport latency floor**: bare
+  COM_PING — identical bytes, no protocol-layer work — measures ~165 µs/rt native vs
+  ~130 µs/rt Connector/C, because Reseau's event-loop read wake adds a fixed latency over
+  a blocking `recv`; on a loaded host even a zero-overhead client can miss 0.75× on that
+  floor (an earlier loaded run measured `executemany` at 0.68× with a 35 µs/rt ping gap
+  explaining the whole shortfall). When a round-trip-bound gate misses its raw ratio, the
+  harness measures the COM_PING floor of both backends, asserts the protocol-layer cost
+  net of the floor difference, and records the raw ratio as an explicit `@test_skip`
+  (never a fake pass). Closing the floor gap needs a Reseau-level read-wake improvement
+  (spin-before-park or same-thread poll).
+- **§8.10 leak/lifecycle soak** (`test/protocol/leak_soak.jl`, primary live lane):
+  10k statements and 10k cursors abandoned across tasks under GC thrash plus 100 abandoned
+  connections all return `Prepared_stmt_count`/`Threads_connected` to baseline with the
+  reaper queue empty, weak refs cleared, fds and RSS stable; finalizers provably park
+  without I/O (server-side counts cannot move without a command on the owning
+  connection); a parked statement never disturbs the active streaming cursor; a read
+  deadline closes the connection deterministically.
+- **Deferred (not faked)**: Windows named-pipe lane (§8.12, needs a Windows runner);
+  external interop matrix ProxySQL/TiDB/Vitess/Aurora (§8.5, needs those servers);
+  MYSQL_TYPE_VECTOR classic framing (undocumented); server cursors / COM_STMT_FETCH /
+  query attributes / bulk execute / compression; OUT-param round trips beyond CALL result
+  sets; the 60–90-day preview soak (calendar). See `docs/src/migration.md`.
+
 ## Third-party consultations
 
 None.
