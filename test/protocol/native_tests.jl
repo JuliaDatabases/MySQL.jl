@@ -120,6 +120,11 @@ end
         @test parsed[:user] == "domain\\Suser"
         @test parsed[:password] == "pound#value\tend"
         @test parsed[:ssl_ca] == "C:\\new path"
+        unicode = joinpath(dir, "unicode.cnf")
+        write(unicode, "[clïent]\nuser=\"Zoë\"\npassword='sëcret'\n")
+        parsed = N.read_option_file(unicode; group="clïent")
+        @test parsed[:user] == "Zoë"
+        @test parsed[:password] == "sëcret"
         reversed = joinpath(dir, "reversed.cnf")
         write(reversed, "[extra]\nport=3308\n[client]\nport=3307\n")
         @test N.ConnectOptions("h", "u"; option_file=reversed, option_group="extra").port == 3308

@@ -215,8 +215,10 @@ end
 
 function parse_option_value(value::AbstractString)
     parsed = strip_option_comment(value)
-    if length(parsed) >= 2 && ((parsed[1] == '"' && parsed[end] == '"') || (parsed[1] == '\'' && parsed[end] == '\''))
-        parsed = parsed[2:(end - 1)]
+    first = firstindex(parsed)
+    last = lastindex(parsed)
+    if length(parsed) >= 2 && ((parsed[first] == '"' && parsed[last] == '"') || (parsed[first] == '\'' && parsed[last] == '\''))
+        parsed = SubString(parsed, nextind(parsed, first), prevind(parsed, last))
     end
     return unescape_option_value(parsed)
 end
@@ -239,7 +241,7 @@ function read_option_file(path::AbstractString; group::AbstractString="client")
         (startswith(line, '!') || startswith(lowercase(line), "?includedir")) && throw(ArgumentError("$path:$lineno: `$(first(split(line)))` directives are not supported (fail closed)"))
         if startswith(line, '[')
             endswith(line, ']') || throw(ArgumentError("$path:$lineno: malformed group header"))
-            current = lowercase(strip(line[2:(end - 1)]))
+            current = lowercase(strip(SubString(line, nextind(line, firstindex(line)), prevind(line, lastindex(line)))))
             continue
         end
         target = current == "client" ? client_opts : current == requested_group ? group_opts : nothing
