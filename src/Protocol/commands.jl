@@ -270,17 +270,24 @@ Streams `source` as LOCAL INFILE data packets followed by the empty terminator p
 level — the connection layer turns it into `LocalInfileRefused`). Returns the number of
 bytes sent. Any failure after the first data packet faults the session.
 """
-function send_local_infile!(s::Session, source::Union{Nothing, IO}; max_bytes::Union{Nothing, Integer}=nothing, chunk_size::Integer=MAX_CHUNK - 1)
+function send_local_infile!(s::Session, source::Union{Nothing, IO}; max_bytes::Union{Nothing, Integer}=nothing, chunk_size::Integer=min(MAX_CHUNK - 1, s.limits.max_packet))
     require_phase(s, LOCAL_INFILE)
+    1 <= chunk_size <= min(MAX_CHUNK - 1, s.limits.max_packet) || throw(ArgumentError("LOCAL INFILE chunk_size must be in 1:$(min(MAX_CHUNK - 1, s.limits.max_packet))"))
+    max_bytes === nothing || max_bytes >= 0 || throw(ArgumentError("LOCAL INFILE max_bytes must be nonnegative or nothing"))
     sent = 0
     if source !== nothing
         chunk = Vector{UInt8}(undef, chunk_size)
-        while !eof(source)
-            n = readbytes!(source, chunk, chunk_size)
-            n == 0 && break
-            max_bytes === nothing || sent + n <= max_bytes || throw(fault!(s, ProtocolError("LOCAL INFILE upload exceeded $max_bytes bytes")))
-            sendpacket!(s, view(chunk, 1:n))
-            sent += n
+        try
+            while !eof(source)
+                n = readbytes!(source, chunk, chunk_size)
+                n == 0 && break
+                max_bytes === nothing || (sent <= max_bytes && n <= max_bytes - sent) || throw(fault!(s, ProtocolError("LOCAL INFILE upload exceeded $max_bytes bytes")))
+                sendpacket!(s, view(chunk, 1:n))
+                sent += n
+            end
+        catch err
+            sent == 0 && rethrow()
+            throw(fault!(s, err))
         end
     end
     sendpacket!(s, UInt8[])

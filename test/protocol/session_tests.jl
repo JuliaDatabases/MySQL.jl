@@ -60,6 +60,19 @@ end
 
 const COL1 = Vectors.payload(Vectors.COLUMN_DEF_COL1)
 
+mutable struct FailingUpload <: IO
+    source::IOBuffer
+    reads::Int
+end
+
+Base.eof(io::FailingUpload) = eof(io.source)
+
+function Base.readbytes!(io::FailingUpload, buffer::AbstractVector{UInt8}, n::Integer=length(buffer))
+    io.reads += 1
+    io.reads == 2 && error("injected upload source failure")
+    return readbytes!(io.source, buffer, n)
+end
+
 @testset "session scenarios" begin
     @testset "greeting, handshake response, auth OK" begin
         seen = Vector{UInt8}[]
@@ -504,6 +517,31 @@ const COL1 = Vectors.payload(Vectors.COLUMN_DEF_COL1)
             P.read_command_response!(s)
             @test_throws P.ProtocolError P.send_local_infile!(s, IOBuffer("12345678"); max_bytes=4, chunk_size=4)
             @test s.phase == P.BROKEN
+        end
+        # A local source failure after a data packet makes the wire position unusable.
+        with_peer(conn -> begin
+            server_handshake!(conn)
+            read_command(conn)
+            send_packet(conn, 1, vcat(UInt8[0xFB], codeunits("f")))
+            read_chunk(conn)
+            await_eof(conn)
+        end) do client
+            s = P.Session(client; capabilities=CAPS_WITH_LOCAL_FILES)
+            client_handshake!(s)
+            P.query!(s, "LOAD DATA LOCAL INFILE 'f' INTO TABLE t")
+            P.read_command_response!(s)
+            source = FailingUpload(IOBuffer("12345678"), 0)
+            @test_throws ErrorException P.send_local_infile!(s, source; chunk_size=4)
+            @test s.phase == P.BROKEN && !isopen(s)
+        end
+        # Invalid buffer sizes fail before allocation or protocol I/O.
+        with_peer(conn -> (server_handshake!(conn); read_command(conn); send_packet(conn, 1, vcat(UInt8[0xFB], codeunits("f"))); await_eof(conn))) do client
+            s = P.Session(client; capabilities=CAPS_WITH_LOCAL_FILES, limits=P.Limits(; max_packet=1024))
+            client_handshake!(s)
+            P.query!(s, "LOAD DATA LOCAL INFILE 'f' INTO TABLE t")
+            P.read_command_response!(s)
+            @test_throws ArgumentError P.send_local_infile!(s, IOBuffer("x"); chunk_size=1025)
+            @test s.phase == P.LOCAL_INFILE
         end
         # unsolicited 0xFB without CLIENT_LOCAL_FILES
         with_peer(conn -> (server_handshake!(conn); read_command(conn); send_packet(conn, 1, vcat(UInt8[0xFB], codeunits("/etc/passwd"))); await_eof(conn))) do client
