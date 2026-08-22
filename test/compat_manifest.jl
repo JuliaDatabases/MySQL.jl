@@ -113,6 +113,10 @@ const TEXT_ROW_TUPLE = (
         native=Union{Missing, DateTime}[DateTime(2021, 1, 2, 1, 2, 3, 456)], legacy=:error),
     Row("mysql_date_and_time=true maps DATETIME(6) to DateAndTime", :preserve,
         conn -> Tables.columntable(DBInterface.execute(conn, "SELECT CAST('2021-01-02 01:02:03.456789' AS DATETIME(6)) AS dt"; mysql_date_and_time=true)).dt),
+    Row("DateAndTime scales DATETIME(1) fractions to microseconds (1.x treated the digits as microseconds)", :fix,
+        conn -> Tables.columntable(DBInterface.execute(conn, "SELECT CAST('2021-01-02 01:02:03.4' AS DATETIME(1)) AS dt"; mysql_date_and_time=true)).dt;
+        native=Union{Missing, DateAndTime}[DateAndTime(Date(2021, 1, 2), Time(1, 2, 3, 400))],
+        legacy=Union{Missing, DateAndTime}[DateAndTime(Date(2021, 1, 2), Time(1, 2, 3, 0, 4))]),
     Row("transaction returns f()'s value and commits", :preserve,
         conn -> begin
             v = DBInterface.transaction(conn) do

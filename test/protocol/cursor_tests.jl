@@ -24,6 +24,13 @@ const NOT_NULL = P.NOT_NULL_FLAG
 const UNSIGNED = P.UNSIGNED_FLAG
 const BINARY = P.BINARY_FLAG
 
+wiredef(type; flags=NOT_NULL, charset=0x2D) = P.ColumnDef("def", "db", "t", "t", "x", "x", UInt16(charset), UInt32(255), UInt8(type), UInt16(flags), UInt8(0))
+
+function decode_text(T, value; opts=N.DEFAULT_RESULT_OPTIONS)
+    buf = Vector{UInt8}(codeunits(value))
+    return N.decode(T, buf, 1, length(buf), opts)
+end
+
 # Sends a complete text result set: column count, definitions, rows, OK terminator.
 function send_resultset(conn, seq, cols::Vector{Vector{UInt8}}, rows::Vector{Vector{UInt8}}; status=P.SERVER_STATUS_AUTOCOMMIT, more::Bool=false, terminator=nothing)
     send_packet(conn, seq, column_count(length(cols)))
@@ -76,6 +83,63 @@ const TYPED_COLS = [
     coldef("tm"; type=P.MYSQL_TYPE_TIME),
     coldef("y"; type=P.MYSQL_TYPE_YEAR, flags=UNSIGNED),
 ]
+
+@testset "text decoder: every 1.x mapped type" begin
+    mapped = (
+        P.MYSQL_TYPE_BIT => MySQL.API.Bit,
+        P.MYSQL_TYPE_TINY => Cchar,
+        P.MYSQL_TYPE_ENUM => Cchar,
+        P.MYSQL_TYPE_SHORT => Cshort,
+        P.MYSQL_TYPE_LONG => Cint,
+        P.MYSQL_TYPE_INT24 => Cint,
+        P.MYSQL_TYPE_LONGLONG => Int64,
+        P.MYSQL_TYPE_FLOAT => Cfloat,
+        P.MYSQL_TYPE_DECIMAL => Dec64,
+        P.MYSQL_TYPE_NEWDECIMAL => Dec64,
+        P.MYSQL_TYPE_DOUBLE => Cdouble,
+        P.MYSQL_TYPE_YEAR => Clong,
+        P.MYSQL_TYPE_TIMESTAMP => DateTime,
+        P.MYSQL_TYPE_DATE => Date,
+        P.MYSQL_TYPE_TIME => Time,
+        P.MYSQL_TYPE_DATETIME => DateTime,
+        P.MYSQL_TYPE_SET => String,
+        P.MYSQL_TYPE_NULL => String,
+        P.MYSQL_TYPE_VARCHAR => String,
+        P.MYSQL_TYPE_VAR_STRING => String,
+        P.MYSQL_TYPE_STRING => String,
+        P.MYSQL_TYPE_JSON => String,
+    )
+    for (wire, T) in mapped
+        @test N.juliatype(wiredef(wire), N.DEFAULT_RESULT_OPTIONS) === T
+        @test N.juliatype(wiredef(wire; flags=0), N.DEFAULT_RESULT_OPTIONS) === Union{Missing, T}
+    end
+    for wire in (P.MYSQL_TYPE_TINY_BLOB, P.MYSQL_TYPE_MEDIUM_BLOB, P.MYSQL_TYPE_LONG_BLOB, P.MYSQL_TYPE_BLOB, P.MYSQL_TYPE_GEOMETRY)
+        @test N.juliatype(wiredef(wire; flags=NOT_NULL | BINARY), N.DEFAULT_RESULT_OPTIONS) === Vector{UInt8}
+        @test N.juliatype(wiredef(wire), N.DEFAULT_RESULT_OPTIONS) === String
+    end
+    @test N.juliatype(wiredef(P.MYSQL_TYPE_LONGLONG; flags=NOT_NULL | UNSIGNED), N.DEFAULT_RESULT_OPTIONS) === UInt64
+    @test N.juliatype(wiredef(P.MYSQL_TYPE_YEAR; flags=NOT_NULL | UNSIGNED), N.DEFAULT_RESULT_OPTIONS) === unsigned(Clong)
+    @test N.juliatype(wiredef(P.MYSQL_TYPE_DATETIME), N.ResultOptions(; date_and_time=true)) === DateAndTime
+    @test N.juliatype(wiredef(P.MYSQL_TYPE_DATE), N.ResultOptions(; zero_dates=:missing)) === Union{Missing, Date}
+
+    for (T, value, expected) in (
+            (Int8, "-128", Int8(-128)), (UInt8, "255", UInt8(255)),
+            (Int16, "-32768", Int16(-32768)), (UInt16, "65535", UInt16(65535)),
+            (Int32, "-2147483648", typemin(Int32)), (UInt32, "4294967295", typemax(UInt32)),
+            (Int64, "-9223372036854775808", typemin(Int64)),
+            (UInt64, "18446744073709551615", typemax(UInt64)),
+            (Float32, "1.25", 1.25f0), (Float64, "-2.5", -2.5),
+        )
+        @test decode_text(T, value) === expected
+    end
+    @test decode_text(Dec64, "12.345") == d64"12.345"
+    @test decode_text(MySQL.API.Bit, "\x01\x02") == MySQL.API.Bit(0x0102)
+    @test decode_text(Vector{UInt8}, "\x00\xff") == UInt8[0x00, 0xff]
+    @test decode_text(String, "héllo") == "héllo"
+    @test N.decode(Union{Missing, Int32}, UInt8[], 1, -1, N.DEFAULT_RESULT_OPTIONS) === missing
+    @test_throws P.ConversionError N.decode(Int32, UInt8[], 1, -1, N.DEFAULT_RESULT_OPTIONS)
+    @test_throws P.ConversionError decode_text(Int32, "1x")
+end
 
 @testset "text cursor: values, NULLs and the row-validity contract" begin
     rows = [text_row("-7", "18446744073709551615", "1.5", "12.345", "héllo", "\x00\x01", "\x01\x02", "2024-02-29 13:14:15.250500", "2024-02-29", "838:59:59", "2024"),
@@ -132,6 +196,19 @@ end
     end
     @test_throws ArgumentError N.ConnectOptions("h", "u"; zero_dates=:nope)
     @test_throws ArgumentError N.ConnectOptions("h", "u"; time_type=Int)
+
+    missing_dates = N.ResultOptions(; zero_dates=:missing)
+    duration = N.ResultOptions(; time_type=Dates.Microsecond)
+    @test decode_text(Union{Missing, DateTime}, "0000-05-01 00:00:00"; opts=missing_dates) === missing
+    @test_throws P.ConversionError decode_text(DateTime, "0000-05-01 00:00:00")
+    @test_throws P.ConversionError decode_text(Union{Missing, DateTime}, "xxxx-00-xx 00:00:00"; opts=missing_dates)
+    @test_throws P.ConversionError decode_text(DateTime, "0000-00-00::::")
+    @test_throws P.ConversionError decode_text(DateTime, "2024-01-01 00:00:00.")
+    @test_throws P.ConversionError decode_text(DateTime, "2024-01-01 00:00:00.1234567")
+    @test_throws P.ConversionError decode_text(Dates.Microsecond, "839:00:00"; opts=duration)
+    @test_throws P.ConversionError decode_text(Dates.Microsecond, "01:02:03."; opts=duration)
+    @test_throws P.ConversionError decode_text(Dates.Microsecond, "01:02:03.1234567"; opts=duration)
+    @test decode_text(DateAndTime, "2024-01-01 00:00:00.1") == DateAndTime(Date(2024, 1, 1), Time(0, 0, 0, 100))
 end
 
 @testset "DML cursors, lastrowid snapshots, rows_affected bitcast" begin

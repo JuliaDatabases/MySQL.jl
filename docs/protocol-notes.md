@@ -151,7 +151,8 @@ source are never read.
   (`:sentinel` default → `Date(0)`/`DateTime(0)`, `:missing` → `missing` and every date
   column typed `Union{Missing,T}`, `:error`); partial zero dates are errors unless
   `:missing`; DATETIME values with sub-millisecond digits warn once and truncate (1.x warned,
-  then failed).
+  then failed). `DateAndTime` scales one-to-six fractional digits to microseconds (1.x
+  treated the digits as an unscaled microsecond count, which was correct only at precision 6).
 - **LOCAL INFILE** follows the plan's state table: refusal (`nothing`) always raises
   `LocalInfileRefused` even when the server accepts the empty upload; a handler error before
   any data is re-raised after resynchronizing; an error, size-limit crossing or write fault

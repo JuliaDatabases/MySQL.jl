@@ -69,8 +69,9 @@ decode(::Type{Missing}, buf::Vector{UInt8}, pos::Int, len::Int, opts::ResultOpti
 # Under `zero_dates=:missing` a zero date decodes to `missing` even though the column type
 # says `T`; this is the only place the decoder may answer `missing` for a non-NULL value.
 function decode_missing_aware(::Type{T}, buf::Vector{UInt8}, pos::Int, len::Int, opts::ResultOptions) where {T}
-    if is_date_type(T) && opts.zero_dates == :missing && (is_zero_date(buf, pos, len) || is_partial_zero_date(buf, pos, len))
-        return missing
+    if is_date_type(T) && opts.zero_dates == :missing
+        parts = parse_date_parts(T, buf, pos, len)
+        parts !== nothing && zero_date_kind(parts) != :none && return missing
     end
     return decode_value(T, buf, pos, len, opts)
 end
@@ -105,31 +106,11 @@ end
 function decode_value(::Type{T}, buf::Vector{UInt8}, pos::Int, len::Int, ::ResultOptions) where {T <: Union{Integer, AbstractFloat}}
     len == 0 && conversion_error(T, buf, pos, len)
     x, code, _ = Parsers.typeparser(T, buf, pos, pos + len - 1, buf[pos], Int16(0), Parsers.OPTIONS)
-    Parsers.ok(code) || conversion_error(T, buf, pos, len)
+    (Parsers.ok(code) && Parsers.eof(code)) || conversion_error(T, buf, pos, len)
     return x
 end
 
 # ---- dates and times ----
-
-const ZERO_DATE_BYTES = codeunits("0000-00-00")
-
-function is_zero_date(buf::Vector{UInt8}, pos::Int, len::Int)
-    len >= 10 || return false
-    @inbounds for i in 1:10
-        buf[pos + i - 1] == ZERO_DATE_BYTES[i] || return false
-    end
-    @inbounds for i in 11:len
-        b = buf[pos + i - 1]
-        (b == UInt8('0') || b == UInt8(' ') || b == UInt8(':') || b == UInt8('.')) || return false
-    end
-    return true
-end
-
-# `YYYY-MM-00` / `YYYY-00-DD` with a non-zero year: a partial zero date.
-function is_partial_zero_date(buf::Vector{UInt8}, pos::Int, len::Int)
-    len >= 10 || return false
-    @inbounds return (buf[pos + 5] == UInt8('0') && buf[pos + 6] == UInt8('0')) || (buf[pos + 8] == UInt8('0') && buf[pos + 9] == UInt8('0'))
-end
 
 # Reads `n` ASCII digits at `i`; returns (value, next index) or (-1, i) on a non-digit.
 function digits_at(buf::Vector{UInt8}, i::Int, stop::Int, n::Int)
@@ -143,16 +124,19 @@ function digits_at(buf::Vector{UInt8}, i::Int, stop::Int, n::Int)
     return (v, i + n)
 end
 
-# Fraction digits after a '.', scaled to microseconds (at most 6 digits are significant).
+# One to six fraction digits after a '.', scaled to microseconds.
 function fraction_micros(buf::Vector{UInt8}, i::Int, stop::Int)
     micros = 0
     ndigits = 0
     while i <= stop
         b = @inbounds buf[i]
         (UInt8('0') <= b <= UInt8('9')) || return (-1, i)
-        ndigits < 6 && (micros = micros * 10 + (b - UInt8('0')); ndigits += 1)
+        ndigits < 6 || return (-1, i)
+        micros = micros * 10 + (b - UInt8('0'))
+        ndigits += 1
         i += 1
     end
+    ndigits > 0 || return (-1, i)
     while ndigits < 6
         micros *= 10
         ndigits += 1
@@ -184,6 +168,24 @@ function parse_datetime_parts(buf::Vector{UInt8}, pos::Int, len::Int)
     return (y, mo, d, h, mi, s, micros)
 end
 
+function parse_date_parts(::Type{Date}, buf::Vector{UInt8}, pos::Int, len::Int)
+    len == 10 || return nothing
+    return parse_datetime_parts(buf, pos, len)
+end
+
+function parse_date_parts(::Type{T}, buf::Vector{UInt8}, pos::Int, len::Int) where {T <: Union{DateTime, DateAndTime}}
+    len >= 19 || return nothing
+    return parse_datetime_parts(buf, pos, len)
+end
+
+function zero_date_kind(parts)
+    y, mo, d, h, mi, s, micros = parts
+    if y == 0 && mo == 0 && d == 0 && h == 0 && mi == 0 && s == 0 && micros == 0
+        return :zero
+    end
+    return y == 0 || mo == 0 || d == 0 ? :partial : :none
+end
+
 function zero_date_value(::Type{T}, buf::Vector{UInt8}, pos::Int, len::Int, opts::ResultOptions) where {T}
     opts.zero_dates == :error && conversion_error(T, "zero dates are rejected (zero_dates=:error)")
     T === Date && return Date(0)
@@ -192,20 +194,22 @@ function zero_date_value(::Type{T}, buf::Vector{UInt8}, pos::Int, len::Int, opts
 end
 
 function decode_value(::Type{Date}, buf::Vector{UInt8}, pos::Int, len::Int, opts::ResultOptions)
-    is_zero_date(buf, pos, len) && return zero_date_value(Date, buf, pos, len, opts)
-    parts = parse_datetime_parts(buf, pos, len)
-    (parts === nothing || len != 10) && conversion_error(Date, buf, pos, len)
-    is_partial_zero_date(buf, pos, len) && conversion_error(Date, "partial zero date \"$(String(buf[pos:(pos + len - 1)]))\" (use zero_dates=:missing)")
+    parts = parse_date_parts(Date, buf, pos, len)
+    parts === nothing && conversion_error(Date, buf, pos, len)
+    kind = zero_date_kind(parts)
+    kind == :zero && return zero_date_value(Date, buf, pos, len, opts)
+    kind == :partial && conversion_error(Date, "partial zero date \"$(String(buf[pos:(pos + len - 1)]))\" (use zero_dates=:missing)")
     y, mo, d = parts
     Dates.validargs(Date, y, mo, d) === nothing || conversion_error(Date, buf, pos, len)
     return Date(y, mo, d)
 end
 
 function decode_value(::Type{DateTime}, buf::Vector{UInt8}, pos::Int, len::Int, opts::ResultOptions)
-    is_zero_date(buf, pos, len) && return zero_date_value(DateTime, buf, pos, len, opts)
-    parts = parse_datetime_parts(buf, pos, len)
+    parts = parse_date_parts(DateTime, buf, pos, len)
     parts === nothing && conversion_error(DateTime, buf, pos, len)
-    is_partial_zero_date(buf, pos, len) && conversion_error(DateTime, "partial zero date \"$(String(buf[pos:(pos + len - 1)]))\" (use zero_dates=:missing)")
+    kind = zero_date_kind(parts)
+    kind == :zero && return zero_date_value(DateTime, buf, pos, len, opts)
+    kind == :partial && conversion_error(DateTime, "partial zero date \"$(String(buf[pos:(pos + len - 1)]))\" (use zero_dates=:missing)")
     y, mo, d, h, mi, s, micros = parts
     micros % 1000 == 0 || API.dateandtime_warning()                       # truncated to milliseconds (1.x warned, then failed)
     Dates.validargs(DateTime, y, mo, d, h, mi, s, micros ÷ 1000) === nothing || conversion_error(DateTime, buf, pos, len)
@@ -213,10 +217,11 @@ function decode_value(::Type{DateTime}, buf::Vector{UInt8}, pos::Int, len::Int, 
 end
 
 function decode_value(::Type{DateAndTime}, buf::Vector{UInt8}, pos::Int, len::Int, opts::ResultOptions)
-    is_zero_date(buf, pos, len) && return zero_date_value(DateAndTime, buf, pos, len, opts)
-    parts = parse_datetime_parts(buf, pos, len)
+    parts = parse_date_parts(DateAndTime, buf, pos, len)
     parts === nothing && conversion_error(DateAndTime, buf, pos, len)
-    is_partial_zero_date(buf, pos, len) && conversion_error(DateAndTime, "partial zero date \"$(String(buf[pos:(pos + len - 1)]))\" (use zero_dates=:missing)")
+    kind = zero_date_kind(parts)
+    kind == :zero && return zero_date_value(DateAndTime, buf, pos, len, opts)
+    kind == :partial && conversion_error(DateAndTime, "partial zero date \"$(String(buf[pos:(pos + len - 1)]))\" (use zero_dates=:missing)")
     y, mo, d, h, mi, s, micros = parts
     Dates.validargs(Date, y, mo, d) === nothing || conversion_error(DateAndTime, buf, pos, len)
     (h < 24 && mi < 60 && s < 60) || conversion_error(DateAndTime, buf, pos, len)
@@ -240,6 +245,7 @@ function parse_time_micros(buf::Vector{UInt8}, pos::Int, len::Int)
         i += 1
     end
     (nd == 0 || nd > 3 || i > stop || buf[i] != UInt8(':')) && return nothing
+    h <= 838 || return nothing
     mi, i = digits_at(buf, i + 1, stop, 2)
     (mi < 0 || mi > 59 || i > stop || buf[i] != UInt8(':')) && return nothing
     s, i = digits_at(buf, i + 1, stop, 2)
