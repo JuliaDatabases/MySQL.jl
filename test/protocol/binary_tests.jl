@@ -185,9 +185,13 @@ end
     @test row[offsets[2]:(offsets[2] + 6)] == UInt8[0xe8, 0x07, 0x02, 0x1d, 0x0d, 0x0e, 0x0f]
     @test String(row[offsets[3]:(offsets[3] + 2)]) == "abc"
 
+    newdate = UInt8[0x00, 0x00, 0x03, 0x6f, 0x6c, 0x64]
+    P.scan_binary_row!(UInt8[P.MYSQL_TYPE_NEWDATE], pv(newdate), offsets, lengths)
+    @test lengths == [3]
+    @test String(newdate[offsets[1]:(offsets[1] + lengths[1] - 1)]) == "old"
+
     @test_throws P.ProtocolError P.scan_binary_row!(UInt8[P.MYSQL_TYPE_DATETIME], pv(UInt8[0x00, 0x00, 0x03, 0x00, 0x00, 0x00]), Int[], Int[])
     @test_throws P.ProtocolError P.scan_binary_row!(UInt8[P.MYSQL_TYPE_TIME], pv(UInt8[0x00, 0x00, 0x07, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]), Int[], Int[])
-    @test_throws P.ProtocolError P.scan_binary_row!(UInt8[P.MYSQL_TYPE_NEWDATE], pv(UInt8[0x00, 0x00, 0x00]), Int[], Int[])
     @test_throws P.ProtocolError P.scan_binary_row!(UInt8[P.MYSQL_TYPE_NULL], pv(UInt8[0x00, 0x00, 0x00]), Int[], Int[])
     @test_throws P.ProtocolError P.scan_binary_row!(UInt8[P.MYSQL_TYPE_LONG], pv(UInt8[0x00, 0x00, 0x01]), Int[], Int[])
     @test_throws P.ProtocolError P.scan_binary_row!(UInt8[P.MYSQL_TYPE_VAR_STRING], pv(UInt8[0x00, 0x00, 0x03, 0x61]), Int[], Int[])

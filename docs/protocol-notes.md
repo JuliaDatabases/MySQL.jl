@@ -183,7 +183,8 @@ source are never read.
   and records each column's *content* window (fixed width for numbers, the bytes after the
   one-byte temporal length prefix, and the bytes after the `string<lenenc>` prefix for
   everything else) so the value decoders stay lazy and the `wrongrow`/cursor-owned-buffer
-  contract is identical to text.
+  contract is identical to text. The obsolete `NEWDATE` wire type also uses the
+  length-encoded byte form and retains the 1.x fallback-to-`String` mapping.
 - **`new_params_bind_flag` / signature**: the client keeps the full last-sent `(type,
   unsigned)` signature per statement (`Statement.last_signature`) and resends the types only
   when the signature changes (a NULL parameter's slot is `MYSQL_TYPE_NULL`, so a value that

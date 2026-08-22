@@ -333,7 +333,8 @@ function is_binary_lenenc(type::UInt8)
     (type == MYSQL_TYPE_STRING || type == MYSQL_TYPE_VARCHAR || type == MYSQL_TYPE_VAR_STRING) && return true
     (type == MYSQL_TYPE_ENUM || type == MYSQL_TYPE_SET || type == MYSQL_TYPE_GEOMETRY) && return true
     (type == MYSQL_TYPE_TINY_BLOB || type == MYSQL_TYPE_MEDIUM_BLOB || type == MYSQL_TYPE_LONG_BLOB || type == MYSQL_TYPE_BLOB) && return true
-    return type == MYSQL_TYPE_BIT || type == MYSQL_TYPE_DECIMAL || type == MYSQL_TYPE_NEWDECIMAL || type == MYSQL_TYPE_JSON
+    return type == MYSQL_TYPE_BIT || type == MYSQL_TYPE_DECIMAL || type == MYSQL_TYPE_NEWDECIMAL ||
+        type == MYSQL_TYPE_NEWDATE || type == MYSQL_TYPE_JSON
 end
 
 function valid_binary_temporal_length(type::UInt8, len::Int)
