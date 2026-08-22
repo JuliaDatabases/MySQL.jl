@@ -25,6 +25,8 @@
     @test_throws P.UnsupportedAuthError N.ConnectOptions("h", "u"; default_auth="client_ed25519")
     @test N.ConnectOptions("h", "u"; default_auth="mysql_clear_password").auth.enable_cleartext_plugin
     @test N.ConnectOptions("h", "u"; server_public_key=certfile("rsa2048.pub")).auth.server_public_key == pem("rsa2048.pub")
+    @test_throws ArgumentError N.ConnectOptions("h", "u"; server_public_key="missing-public-key.pem")
+    @test_throws ArgumentError N.ConnectOptions("h", "u"; max_local_infile_bytes=0)
     @test N.ConnectOptions("h", "u"; max_allowed_packet=1024 * 1024).limits.max_packet == 1024 * 1024
     @test N.ConnectOptions("h", "u"; max_response_bytes=nothing).limits.max_response_bytes === nothing
     @test N.ConnectOptions("h", "u"; can_handle_expired_passwords=true).client_flags & P.CLIENT_CAN_HANDLE_EXPIRED_PASSWORDS != 0
@@ -96,6 +98,9 @@ end
         @test N.ConnectOptions("h", "u"; option_file=path, option_group="extra").port == 3308
         @test N.ConnectOptions("h", "u"; option_file=path, ssl_mode=:disabled).tls.mode == P.SSL_DISABLED
         @test N.read_option_file(path)[:host] == "db.example"
+        reversed = joinpath(dir, "reversed.cnf")
+        write(reversed, "[extra]\nport=3308\n[client]\nport=3307\n")
+        @test N.ConnectOptions("h", "u"; option_file=reversed, option_group="extra").port == 3308
         inc = joinpath(dir, "inc.cnf")
         write(inc, "!include /etc/other.cnf\n")
         @test_throws ArgumentError N.ConnectOptions("h", "u"; option_file=inc)
@@ -121,6 +126,7 @@ end
         @test N.ConnectOptions("h", "u"; read_env=true, port=5).port == 5
     end
     @test N.default_option_files() isa Vector{String}
+    @test any(path -> basename(path) == ".mylogin.cnf", N.default_option_files())
 end
 
 # A loopback server that accepts any number of connections and completes a plaintext

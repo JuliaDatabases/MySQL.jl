@@ -149,9 +149,10 @@ The client option files Oracle's clients read, minus server-only locations. `.my
 function default_option_files()
     if Sys.iswindows()
         windir = get(ENV, "WINDIR", "C:\\Windows")
-        return [joinpath(windir, "my.ini"), joinpath(windir, "my.cnf"), "C:\\my.ini", "C:\\my.cnf"]
+        appdata = get(ENV, "APPDATA", homedir())
+        return [joinpath(windir, "my.ini"), joinpath(windir, "my.cnf"), "C:\\my.ini", "C:\\my.cnf", joinpath(appdata, "MySQL", ".mylogin.cnf")]
     end
-    return ["/etc/my.cnf", "/etc/mysql/my.cnf", joinpath(homedir(), ".my.cnf")]
+    return ["/etc/my.cnf", "/etc/mysql/my.cnf", joinpath(homedir(), ".my.cnf"), joinpath(homedir(), ".mylogin.cnf")]
 end
 
 function world_writable(path::String)
@@ -164,13 +165,15 @@ unquote(v::AbstractString) = (length(v) >= 2 && ((v[1] == '"' && v[end] == '"') 
 """
     read_option_file(path; group="client") -> Dict{Symbol, String}
 
-Parses the `[client]` group plus `group` of a my.cnf/my.ini file. `!include`/`!includedir`
-directives are rejected (fail closed), unknown keys are ignored, later groups override.
+Parses the `[client]` group plus `group` of a my.cnf/my.ini file. The requested group
+overrides `[client]` independent of file order. `!include`/`!includedir` directives are
+rejected (fail closed), and unknown keys are ignored.
 """
 function read_option_file(path::AbstractString; group::AbstractString="client")
-    opts = Dict{Symbol, String}()
+    client_opts = Dict{Symbol, String}()
+    group_opts = Dict{Symbol, String}()
     current = ""
-    wanted = Set([lowercase(group), "client"])
+    requested_group = lowercase(group)
     for (lineno, raw) in enumerate(eachline(path))
         line = strip(raw)
         (isempty(line) || startswith(line, '#') || startswith(line, ';')) && continue
@@ -180,13 +183,15 @@ function read_option_file(path::AbstractString; group::AbstractString="client")
             current = lowercase(strip(line[2:(end - 1)]))
             continue
         end
-        current in wanted || continue
+        target = current == "client" ? client_opts : current == requested_group ? group_opts : nothing
+        target === nothing && continue
         key, value = occursin('=', line) ? (strip(first(split(line, '='; limit=2))), strip(last(split(line, '='; limit=2)))) : (line, "")
         sym = get(OPTION_FILE_KEYS, lowercase(replace(key, '_' => '-')), nothing)
         sym === nothing && continue
-        opts[sym] = unquote(value)
+        target[sym] = unquote(value)
     end
-    return opts
+    requested_group == "client" || merge!(client_opts, group_opts)
+    return client_opts
 end
 
 function load_option_files(; option_file=nothing, read_default_file=nothing, option_group=nothing, read_default_group=nothing)
@@ -269,7 +274,13 @@ function ConnectOptions(host::AbstractString, user::AbstractString, password::Un
     default_auth = get(kwd, :default_auth, nothing)
     default_auth === nothing || P.is_supported_plugin(default_auth) || throw(P.UnsupportedAuthError(String(default_auth)))
     pubkey = get(kwd, :server_public_key, nothing)
-    pem = pubkey === nothing ? nothing : pubkey isa AbstractString && isfile(pubkey) ? read(pubkey) : pubkey
+    if pubkey === nothing
+        pem = nothing
+    else
+        pubkey isa AbstractString || throw(ArgumentError("server_public_key must be a PEM file path"))
+        isfile(pubkey) || throw(ArgumentError("server_public_key does not name a readable file: $(repr(pubkey))"))
+        pem = read(pubkey)
+    end
     auth = P.AuthPolicy(; server_public_key=pem, get_server_public_key=get(kwd, :get_server_public_key, false), enable_cleartext_plugin=get(kwd, :enable_cleartext_plugin, false) || default_auth == P.PLUGIN_CLEAR_PASSWORD, insecure_cleartext_auth=get(kwd, :insecure_cleartext_auth, false))
     local_files = get(kwd, :local_files, false)
     handler = get(kwd, :local_infile_handler, nothing)
@@ -280,5 +291,7 @@ function ConnectOptions(host::AbstractString, user::AbstractString, password::Un
     attrs = Vector{Pair{String, String}}(get(kwd, :attrs, default_attrs()))
     ct = pick(:connect_timeout, nothing)
     ct = ct isa AbstractString ? parse(Int, ct) : ct
-    return ConnectOptions(host_s, port, user_s, pw, String(pick(:db, "")), positive_or_nothing(ct, "connect_timeout"), positive_or_nothing(get(kwd, :read_timeout, nothing), "read_timeout"), positive_or_nothing(get(kwd, :write_timeout, nothing), "write_timeout"), pick(:bind, nothing) === nothing ? nothing : String(pick(:bind, nothing)), get(kwd, :init_command, nothing) === nothing ? nothing : String(kwd[:init_command]), get(kwd, :reconnect, false), flags, tls, auth, default_auth === nothing ? nothing : String(default_auth), get(kwd, :can_handle_expired_passwords, false), limits, attrs, handler, Int(get(kwd, :max_local_infile_bytes, 1024 * 1024 * 1024)), get(kwd, :debug, false))
+    max_local_infile_bytes = Int(get(kwd, :max_local_infile_bytes, 1024 * 1024 * 1024))
+    max_local_infile_bytes > 0 || throw(ArgumentError("max_local_infile_bytes must be positive"))
+    return ConnectOptions(host_s, port, user_s, pw, String(pick(:db, "")), positive_or_nothing(ct, "connect_timeout"), positive_or_nothing(get(kwd, :read_timeout, nothing), "read_timeout"), positive_or_nothing(get(kwd, :write_timeout, nothing), "write_timeout"), pick(:bind, nothing) === nothing ? nothing : String(pick(:bind, nothing)), get(kwd, :init_command, nothing) === nothing ? nothing : String(kwd[:init_command]), get(kwd, :reconnect, false), flags, tls, auth, default_auth === nothing ? nothing : String(default_auth), get(kwd, :can_handle_expired_passwords, false), limits, attrs, handler, max_local_infile_bytes, get(kwd, :debug, false))
 end
