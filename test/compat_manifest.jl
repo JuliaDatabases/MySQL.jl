@@ -145,6 +145,15 @@ function prepared_zero_datetime(conn)
     end
 end
 
+function prepared_call_results(conn)
+    stmt = DBInterface.prepare(conn, "CALL manifest_proc()")
+    try
+        return [Tables.columntable(cur) for cur in DBInterface.executemultiple(stmt)]
+    finally
+        DBInterface.close!(stmt)
+    end
+end
+
 # A tuple, not an array literal: `end` inside `[...]` is the last-index token, which breaks
 # `begin ... end` closure bodies.
 const TEXT_ROW_TUPLE = (
@@ -287,6 +296,10 @@ const BINARY_ROW_TUPLE = (
             DBInterface.execute(conn, "DROP TEMPORARY TABLE manifest_many")
             r
         end),
+    Row("prepared executemultiple over CALL returns each result and the final OK", :fix,
+        prepared_call_results;
+        native=[(ID = Int32[1, 2, 3],), (Name = Union{Missing, String}["John", "Tom", missing],), NamedTuple()],
+        skip_legacy="1.6.0 does not provide the prepared multi-result contract and can call mysql_num_rows(NULL) on CALL's final OK"),
     Row("prepared DATETIME(6) → DateTime warns and truncates to ms (1.x prepared quirk; the text path fails)", :preserve,
         conn -> let stmt = DBInterface.prepare(conn, "SELECT CAST('2021-01-02 01:02:03.456789' AS DATETIME(6)) AS dt")
             v = try; Tables.columntable(DBInterface.execute(stmt)).dt; catch; :error; end
