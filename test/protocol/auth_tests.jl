@@ -69,6 +69,7 @@ const POLICY_TLS_VERIFIED = P.AuthPolicy(; secure_transport=true, identity_verif
     @testset "caching_sha2 continuation state machine" begin
         st = P.AuthState(P.CachingSha2Password(), NONCE)
         @test P.step!(st, UInt8[0x03], PW, POLICY_PLAIN) === nothing
+        @test_throws P.ProtocolError P.step!(st, UInt8[0x04], PW, POLICY_TLS)
         @test P.step!(P.AuthState(P.CachingSha2Password(), NONCE), UInt8[0x04], PW, POLICY_TLS) == vcat(PW, 0x00)
         ct = P.step!(P.AuthState(P.CachingSha2Password(), NONCE), UInt8[0x04], PW, P.AuthPolicy(; server_public_key=pem("rsa2048.pub")))
         @test length(ct) == 256
@@ -88,7 +89,10 @@ const POLICY_TLS_VERIFIED = P.AuthPolicy(; secure_transport=true, identity_verif
         @test_throws P.ProtocolError P.step!(P.AuthState(P.CachingSha2Password(), NONCE), UInt8[0x04, 0x00], PW, POLICY_TLS)
         @test_throws P.ProtocolError P.step!(P.AuthState(P.NativePassword(), NONCE), UInt8[0x04], PW, POLICY_PLAIN)
         @test_throws P.ProtocolError P.step!(P.AuthState(P.Sha256Password(), NONCE), UInt8[0x04], PW, POLICY_PLAIN)
-        @test length(P.step!(P.AuthState(P.Sha256Password(), NONCE), pem("rsa3072.pub"), PW, POLICY_PLAIN)) == 384
+        sha = P.AuthState(P.Sha256Password(), NONCE)
+        @test_throws P.ProtocolError P.step!(sha, pem("rsa3072.pub"), PW, POLICY_PLAIN)
+        sha.awaiting_public_key = true
+        @test length(P.step!(sha, pem("rsa3072.pub"), PW, POLICY_PLAIN)) == 384
     end
 end
 
@@ -170,6 +174,18 @@ end
             send_packet(conn, 0, greeting())
             seq, _ = read_packet(conn)
             send_packet(conn, seq + 1, UInt8[0x01, 0x05])
+            await_eof(conn)
+        end) do client
+            s = P.Session(client)
+            P.read_greeting!(s)
+            @test_throws P.ProtocolError P.authenticate!(s, "root", "pw", POLICY_PLAIN)
+            @test s.phase == P.BROKEN && !isopen(s)
+        end
+        with_peer(conn -> begin
+            send_packet(conn, 0, greeting())
+            seq, _ = read_packet(conn)
+            send_packet(conn, seq + 1, UInt8[0x01, P.CACHING_SHA2_FAST_AUTH_SUCCESS])
+            send_packet(conn, seq + 2, UInt8[0x01, P.CACHING_SHA2_PERFORM_FULL_AUTH])
             await_eof(conn)
         end) do client
             s = P.Session(client)

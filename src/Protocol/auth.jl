@@ -204,8 +204,12 @@ function step!(::CachingSha2Password, state::AuthState, data::AbstractVector{UIn
         state.awaiting_public_key = false
         return rsa_encrypt_password(password, state.nonce, data)
     end
+    state.full_auth && protocol_error("caching_sha2_password received continuation data after its authentication response was complete")
     length(data) == 1 || protocol_error("caching_sha2_password status packet must contain exactly one byte, got $(length(data))")
-    data[1] == CACHING_SHA2_FAST_AUTH_SUCCESS && return nothing
+    if data[1] == CACHING_SHA2_FAST_AUTH_SUCCESS
+        state.full_auth = true
+        return nothing
+    end
     data[1] == CACHING_SHA2_PERFORM_FULL_AUTH || protocol_error("unexpected caching_sha2_password status byte 0x$(string(data[1], base=16, pad=2))")
     state.full_auth = true
     policy.secure_transport && return cleartext_password(password)
@@ -218,7 +222,9 @@ function step!(::CachingSha2Password, state::AuthState, data::AbstractVector{UIn
 end
 
 function step!(::Sha256Password, state::AuthState, data::AbstractVector{UInt8}, password::AbstractVector{UInt8}, policy::AuthPolicy)
+    state.awaiting_public_key || protocol_error("sha256_password received an RSA public key that was not requested")
     is_pem(data) || protocol_error("expected the server RSA public key, got $(length(data)) bytes")
+    state.awaiting_public_key = false
     return rsa_encrypt_password(password, state.nonce, data)
 end
 
@@ -249,6 +255,13 @@ function select_plugin(server::ServerInfo, default_auth::Union{Nothing, Abstract
     return plugin_for(server.auth_plugin)
 end
 
+function record_initial_auth_state!(state::AuthState, response::Vector{UInt8})
+    state.plugin isa Sha256Password || return nothing
+    state.full_auth = true
+    state.awaiting_public_key = response == UInt8[SHA256_REQUEST_PUBLIC_KEY]
+    return nothing
+end
+
 function send_wiped!(s::Session, reply::Vector{UInt8})
     try
         send_auth_data!(s, reply)
@@ -277,6 +290,7 @@ function authenticate!(s::Session, user::AbstractString, password::Union{Nothing
         state = AuthState(plugin, s.server.auth_plugin_data)
         note(Symbol("initial_", plugin_name(plugin)))
         response = initial_response(plugin, pw, state.nonce, policy)
+        record_initial_auth_state!(state, response)
         try
             send_handshake_response!(s, user, response, plugin_name(plugin); db=db, attrs=attrs)
         finally
@@ -296,7 +310,9 @@ function authenticate!(s::Session, user::AbstractString, password::Union{Nothing
             elseif kind == :auth_switch
                 state = AuthState(plugin_for(value.plugin), strip_nonce(value.data))
                 note(Symbol("switch_", value.plugin))
-                send_wiped!(s, initial_response(state.plugin, pw, state.nonce, policy))
+                reply = initial_response(state.plugin, pw, state.nonce, policy)
+                record_initial_auth_state!(state, reply)
+                send_wiped!(s, reply)
             else
                 data = kind == :auth_more ? value.data : value
                 reply = step!(state, data, pw, policy)
