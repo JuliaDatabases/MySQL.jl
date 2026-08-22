@@ -76,6 +76,12 @@ end
 
 send_ok(conn, seq; affected=0, insert_id=0, status=P.SERVER_STATUS_AUTOCOMMIT, more::Bool=false) = (send_packet(conn, seq, ok_payload(; affected=affected, insert_id=insert_id, status=more ? status | P.SERVER_MORE_RESULTS_EXISTS : status)); seq + 1)
 send_err(conn, seq, code, msg; sqlstate="HY000") = (send_packet(conn, seq, vcat(UInt8[0xFF], reinterpret(UInt8, [UInt16(code)]), UInt8['#'], codeunits(sqlstate), codeunits(msg))); seq + 1)
+function eof_payload(; status=P.SERVER_STATUS_AUTOCOMMIT, warnings=0)
+    buf = UInt8[0xFE]
+    P.write_u16!(buf, warnings)
+    P.write_u16!(buf, status)
+    return buf
+end
 
 # Expects COM_QUERY and returns the SQL text.
 function expect_query(conn)
@@ -254,6 +260,26 @@ end
     end
 end
 
+@testset "pre-DEPRECATE_EOF text cursor" begin
+    cols = [coldef("x"; type=P.MYSQL_TYPE_LONG, flags=NOT_NULL)]
+    caps = MYSQL8_SERVER_CAPS & ~P.CLIENT_SSL & ~P.CLIENT_DEPRECATE_EOF
+    for buffered in (true, false)
+        with_native(c -> begin
+            expect_query(c)
+            send_packet(c, 1, column_count(1))
+            send_packet(c, 2, cols[1])
+            send_packet(c, 3, eof_payload())
+            seq = send_logical(c, 4, text_row("7"))
+            send_packet(c, seq, eof_payload(; warnings=2))
+        end; caps=caps) do conn
+            cur = DBInterface.execute(conn, "select"; mysql_store_result=buffered)
+            @test [r.x for r in cur] == [7]
+            @test cur.ok === nothing && cur.status == P.SERVER_STATUS_AUTOCOMMIT
+            @test DBInterface.lastrowid(cur) == 0
+        end
+    end
+end
+
 @testset "streaming cursor: ownership, invalidation, close!" begin
     cols = [coldef("x"; type=P.MYSQL_TYPE_LONG, flags=NOT_NULL)]
     with_native(c -> begin
@@ -350,6 +376,26 @@ end
             # the streaming middle result was drained when the outer iterator advanced: its rows are gone
             buffered ? (@test [r.x for r in results[2]] == [1, 2]) : (@test collect(results[2]) == [])
             @test DBInterface.execute(conn, "next").rows_affected == 0
+        end
+    end
+    # SELECT → DML → SELECT, with retained per-result snapshots
+    for buffered in (true, false)
+        with_native(c -> begin
+            expect_query(c)
+            seq = send_resultset(c, 1, cols, [text_row("1")]; more=true)
+            seq = send_ok(c, seq; affected=3, insert_id=11, more=true)
+            send_resultset(c, seq, cols, [text_row("4")])
+        end; connect_kw=(; multi_statements=true)) do conn
+            tc = DBInterface.executemultiple(conn, "select; update; select"; mysql_store_result=buffered)
+            c1, outer = iterate(tc)
+            @test [r.x for r in c1] == [1]
+            c2, outer = iterate(tc, outer)
+            @test c2.rows_affected == 3 && DBInterface.lastrowid(c2) == 11
+            c3, outer = iterate(tc, outer)
+            @test [r.x for r in c3] == [4]
+            @test length(unique(objectid.((c1, c2, c3)))) == 3
+            @test c1.names == [:x] && isempty(c2.names) && c3.names == [:x]
+            @test iterate(tc, outer) === nothing
         end
     end
     # SELECT → SELECT with changed metadata and duplicate names; stale row after advancing
@@ -490,6 +536,28 @@ end
         err = try; DBInterface.execute(conn, "select * from x"); nothing; catch e; e; end
         @test err isa P.Error && err.errno == 1146 && err.sqlstate == "42S02" && sprint(showerror, err) == "(1146): Table 'x' doesn't exist"
         @test DBInterface.execute(conn, "ok").rows_affected == 1
+    end
+    cols = [coldef("x"; type=P.MYSQL_TYPE_LONG, flags=NOT_NULL)]
+    for buffered in (true, false)
+        with_native(c -> begin
+            expect_query(c)
+            send_packet(c, 1, column_count(1))
+            send_packet(c, 2, cols[1])
+            seq = send_logical(c, 3, text_row("1"))
+            send_err(c, seq, 1317, "Query execution was interrupted"; sqlstate="70100")
+            expect_query(c); send_ok(c, 1; affected=2)
+        end) do conn
+            if buffered
+                err = try; DBInterface.execute(conn, "select"); nothing; catch e; e; end
+                @test err isa P.Error && err.errno == 1317 && err.sqlstate == "70100"
+            else
+                cur = DBInterface.execute(conn, "select"; mysql_store_result=false)
+                row, state = iterate(cur)
+                err = try; iterate(cur, state); nothing; catch e; e; end
+                @test err isa P.Error && err.errno == 1317 && row.x == 1
+            end
+            @test DBInterface.execute(conn, "ok").rows_affected == 2 && isopen(conn)
+        end
     end
 end
 
