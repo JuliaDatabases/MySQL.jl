@@ -115,7 +115,7 @@ source are never read.
   refused; MySQL 8.4 needs `--mysql-native-password=ON` to create native-password accounts
   and announces `caching_sha2_password` (auth switch for native accounts); MariaDB 11.4
   root uses `mysql_native_password` directly.
-- Option files: `[client]` plus `option_group`, `!include`/`!includedir` rejected (explicit
+- Option files: `[client]` plus `option_group`, `!include`/`!includedir`/`?includedir` rejected (explicit
   error), world-writable files skipped with a warning, `.mylogin.cnf` skipped with a warning
   (obfuscated format; out of scope); `read_env=true` reads `MYSQL_TCP_PORT` only
   (`MYSQL_PWD` is deliberately ignored). Keywords beat files; a named group beats `[client]`.

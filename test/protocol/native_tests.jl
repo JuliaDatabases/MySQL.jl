@@ -126,6 +126,8 @@ end
         inc = joinpath(dir, "inc.cnf")
         write(inc, "!include /etc/other.cnf\n")
         @test_throws ArgumentError N.ConnectOptions("h", "u"; option_file=inc)
+        write(inc, "?includedir /etc/mysql/conf.d\n")
+        @test_throws ArgumentError N.ConnectOptions("h", "u"; option_file=inc)
         bad = joinpath(dir, "bad.cnf")
         write(bad, "[client\nhost=x\n")
         @test_throws ArgumentError N.ConnectOptions("h", "u"; option_file=bad)

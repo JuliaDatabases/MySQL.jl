@@ -236,7 +236,7 @@ function read_option_file(path::AbstractString; group::AbstractString="client")
     for (lineno, raw) in enumerate(eachline(path))
         line = strip(raw)
         (isempty(line) || startswith(line, '#') || startswith(line, ';')) && continue
-        startswith(line, '!') && throw(ArgumentError("$path:$lineno: `$(first(split(line)))` directives are not supported (fail closed)"))
+        (startswith(line, '!') || startswith(lowercase(line), "?includedir")) && throw(ArgumentError("$path:$lineno: `$(first(split(line)))` directives are not supported (fail closed)"))
         if startswith(line, '[')
             endswith(line, ']') || throw(ArgumentError("$path:$lineno: malformed group header"))
             current = lowercase(strip(line[2:(end - 1)]))
