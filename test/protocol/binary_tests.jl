@@ -549,6 +549,24 @@ end
     end
 end
 
+@testset "buffered binary metadata charges its column type table" begin
+    col = coldef("x"; type=P.MYSQL_TYPE_LONG, flags=NOT_NULL)
+    limit = length(col) + 3 * sizeof(Int)
+    with_native(c -> begin
+        expect_prepare(c)
+        send_prepare_ok(c, 1, 70, P.ColumnDef[], P.ColumnDef[])
+        expect_execute(c)
+        try
+            send_resultset(c, 1, [col], Vector{UInt8}[])
+        catch
+        end
+    end; connect_kw=(; max_buffered_bytes=limit)) do conn
+        stmt = DBInterface.prepare(conn, "CALL dynamic_metadata()")
+        @test_throws P.ProtocolError DBInterface.execute(stmt)
+        @test !isopen(conn)
+    end
+end
+
 @testset "pre-DEPRECATE_EOF prepare reads the definition EOFs" begin
     caps = MYSQL8_SERVER_CAPS & ~P.CLIENT_SSL & ~P.CLIENT_DEPRECATE_EOF
     cols = [coldef("x"; type=P.MYSQL_TYPE_LONG, flags=NOT_NULL)]

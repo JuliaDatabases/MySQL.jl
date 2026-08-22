@@ -118,7 +118,10 @@ end
 function result_cursor(conn::Connection, sql::String, token::Int, header::P.ResultHeader, binary::Bool, buffered::Bool, opts::ResultOptions, number::Int)
     n = length(header.columns)
     s = session(conn)
-    buffered && charge_buffered!(conn, s, header.metadata_bytes + (2 * n + 1) * sizeof(Int))
+    if buffered
+        charge_buffered!(conn, s, header.metadata_bytes + (2 * n + 1) * sizeof(Int))
+        binary && charge_buffered!(conn, s, n * sizeof(UInt8))
+    end
     names = [Symbol(col.name) for col in header.columns]
     types = Type[juliatype(col, opts) for col in header.columns]
     lookup = Dict{Symbol, Int}(nm => i for (i, nm) in enumerate(names))
