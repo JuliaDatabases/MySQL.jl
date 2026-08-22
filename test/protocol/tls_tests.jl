@@ -74,6 +74,11 @@ function native_connect(port; host="127.0.0.1", connect_timeout=10, kw...)
     return N.connect(host, "root", "pw"; port=port, get_server_public_key=true, connect_timeout=connect_timeout, kw...)
 end
 
+function abandon_tls_handle(port)
+    h = native_connect(port; ssl_mode=:required)
+    return WeakRef(h), WeakRef(h.session.transport), h.entry
+end
+
 @testset "STARTTLS and ssl_mode matrix" begin
     @testset "preferred: TLS when offered, plaintext when not" begin
         with_server(conn -> tls_peer_connect!(conn)) do port
@@ -183,6 +188,24 @@ end
             end
         end
         @test_throws ArgumentError N.ConnectOptions("h", "u"; ssl_cert=certfile("client.crt"))
+    end
+
+    @testset "an abandoned TLS handle is reclaimed by the reaper" begin
+        with_server(conn -> tls_peer_connect!(conn; after=stall_until_eof)) do port
+            handle_ref, transport_ref, entry = abandon_tls_handle(port)
+            for _ in 1:20
+                GC.gc()
+                N.reap_now!()
+                (@atomic entry.state) == :closed && break
+                yield()
+            end
+            @test handle_ref.value === nothing
+            @test (@atomic entry.state) == :closed
+            @test entry.transport === nothing
+            GC.gc()
+            GC.gc()
+            @test transport_ref.value === nothing
+        end
     end
 
     @testset "a peer that coalesces bytes after the greeting is rejected before TLS" begin
