@@ -324,6 +324,25 @@ end
         end
     end
 
+    @testset "MariaDB COM_SET_OPTION EOF response" begin
+        seen = Tuple{UInt8, Vector{UInt8}}[]
+        with_peer(conn -> begin
+            server_handshake!(conn)
+            _, command, data = read_command(conn)
+            push!(seen, (command, data))
+            send_packet(conn, 1, UInt8[0xFE, 0x00, 0x00, 0x02, 0x00])
+        end) do client
+            s = P.Session(client; capabilities=CAPS_NO_DEPRECATE_EOF)
+            client_handshake!(s)
+            P.set_option!(s, P.MYSQL_OPTION_MULTI_STATEMENTS_ON)
+            response = P.read_command_response!(s; kind=P.CMD_SET_OPTION)
+            @test response isa P.EOFPacket
+            @test response.status == P.SERVER_STATUS_AUTOCOMMIT
+            @test s.phase == P.READY && s.result_sets == 1
+        end
+        @test seen == [(P.COM_SET_OPTION, UInt8[0x00, 0x00])]
+    end
+
     @testset "server ERR keeps the connection usable" begin
         with_peer(conn -> begin
             server_handshake!(conn)

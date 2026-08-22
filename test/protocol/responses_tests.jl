@@ -155,6 +155,8 @@ end
         @test P.classify_command_response(P.CMD_SIMPLE, pv(UInt8[0xFF])) == :err
         @test_throws P.ProtocolError P.classify_command_response(P.CMD_SIMPLE, pv(UInt8[0x01]))
         @test_throws P.ProtocolError P.classify_command_response(P.CMD_SIMPLE, pv(UInt8[]))
+        @test P.classify_command_response(P.CMD_SET_OPTION, pv(UInt8[0x00])) == :ok
+        @test P.classify_command_response(P.CMD_SET_OPTION, pv(UInt8[0xFE, 0x00, 0x00, 0x02, 0x00])) == :eof
         @test P.classify_command_response(P.CMD_QUERY, pv(UInt8[0xFB, 0x2F])) == :local_infile
         @test P.classify_command_response(P.CMD_QUERY, pv(UInt8[0x03])) == :column_count
         @test P.classify_command_response(P.CMD_QUERY, pv(UInt8[0xFC, 0x00, 0x01])) == :column_count

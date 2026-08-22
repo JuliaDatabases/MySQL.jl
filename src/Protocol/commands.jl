@@ -25,7 +25,7 @@ struct ResultEnd
     more_results::Bool
 end
 
-const CommandResponse = Union{OKPacket, ResultHeader, LocalInfileRequest}
+const CommandResponse = Union{OKPacket, EOFPacket, ResultHeader, LocalInfileRequest}
 
 function command_payload(command::UInt8, payload::AbstractVector{UInt8})
     buf = Vector{UInt8}(undef, 1 + length(payload))
@@ -110,7 +110,7 @@ end
 # ---- responses ----
 
 """
-    read_command_response!(s; kind=CMD_QUERY) -> OKPacket | ResultHeader | LocalInfileRequest
+    read_command_response!(s; kind=CMD_QUERY) -> OKPacket | EOFPacket | ResultHeader | LocalInfileRequest
 
 Reads the first packet of a command response and advances the phase: an OK returns to READY
 (or RESULT_END when MORE_RESULTS_EXISTS is set), an ERR returns to READY and is thrown as
@@ -121,12 +121,21 @@ function read_command_response!(s::Session; kind::CommandKind=CMD_QUERY)
     require_phase(s, CMD_SENT)
     p = readpacket!(s)
     what = guarded(() -> classify_command_response(kind, p), s)
-    (what == :ok || what == :column_count) && next_result_set!(s)
+    (what == :ok || what == :eof || what == :column_count) && next_result_set!(s)
     what == :ok && return finish_ok!(s, p)
+    what == :eof && return finish_eof!(s, p)
     what == :err && return throw_command_err!(s, p, kind)
     what == :local_infile && return begin_local_infile!(s, p)
     what == :prepare_ok && throw(fault!(s, ProtocolError("COM_STMT_PREPARE responses are not implemented yet")))
     return read_result_header!(s, p, kind == CMD_STMT_EXECUTE)
+end
+
+function finish_eof!(s::Session, p::PacketView)
+    eof = guarded(() -> parse_eof(p, s.capabilities), s)
+    s.status = eof.status
+    more = more_results(eof)
+    transition!(s, more ? :ok_more : :ok, more ? RESULT_END : READY)
+    return eof
 end
 
 function finish_ok!(s::Session, p::PacketView)

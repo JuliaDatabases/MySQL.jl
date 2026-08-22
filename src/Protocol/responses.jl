@@ -200,6 +200,7 @@ end
     CMD_QUERY         # COM_QUERY: OK | ERR | LOCAL INFILE | text result set
     CMD_STMT_PREPARE  # COM_STMT_PREPARE: PREPARE_OK | ERR
     CMD_STMT_EXECUTE  # COM_STMT_EXECUTE: OK | ERR | binary result set
+    CMD_SET_OPTION    # COM_SET_OPTION: MySQL OK | MariaDB EOF | ERR
 end
 
 @noinline function unexpected_packet(phase::Phase, p::PacketView)
@@ -246,6 +247,10 @@ function classify_command_response(kind::CommandKind, p::PacketView)
     b == ERR_HEADER && return :err
     if kind == CMD_SIMPLE
         b == OK_HEADER && return :ok
+        return unexpected_packet(CMD_SENT, p)
+    elseif kind == CMD_SET_OPTION
+        b == OK_HEADER && return :ok
+        is_eof_packet(p) && return :eof
         return unexpected_packet(CMD_SENT, p)
     elseif kind == CMD_STMT_PREPARE
         b == OK_HEADER && return :prepare_ok
