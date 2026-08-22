@@ -91,8 +91,12 @@ function binary_date_parts(buf::Vector{UInt8}, pos::Int, len::Int)
     micros = 0
     if len >= 7
         h = Int(buf[pos + 4]); mi = Int(buf[pos + 5]); s = Int(buf[pos + 6])
+        (h < 24 && mi < 60 && s < 60) || return nothing
     end
-    len == 11 && (micros = Int(read_u32le(buf, pos + 7)))
+    if len == 11
+        micros = Int(read_u32le(buf, pos + 7))
+        micros < 1_000_000 || return nothing
+    end
     return (y, mo, d, h, mi, s, micros)
 end
 

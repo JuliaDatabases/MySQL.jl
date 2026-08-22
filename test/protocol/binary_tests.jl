@@ -234,6 +234,9 @@ end
     @test_throws P.ConversionError N.decode_binary(Dates.Microsecond, bad_micros, 1, 12, o)
     bad_clock = vcat(UInt8[0xe8, 0x07, 0x02, 0x1d, 0x18, 0x00, 0x00], reinterpret(UInt8, UInt32[0]))
     @test_throws P.ConversionError N.decode_binary(MySQL.DateAndTime, bad_clock, 1, 11, o)
+    @test_throws P.ConversionError N.decode_binary(Date, bad_clock, 1, 11, o)
+    bad_date_micros = vcat(date4, UInt8[0x00, 0x00, 0x00], reinterpret(UInt8, UInt32[1_000_000]))
+    @test_throws P.ConversionError N.decode_binary(Date, bad_date_micros, 1, 11, o)
     # invalid length is a conversion error, not an out-of-bounds read
     @test_throws P.ConversionError N.decode_binary(DateTime, UInt8[0x00, 0x00, 0x00], 1, 3, o)
 end
@@ -247,6 +250,8 @@ end
     partial = UInt8[0x00, 0x00, 0x05, 0x01]   # 0000-05-01
     @test_throws P.ConversionError N.decode_binary(Date, partial, 1, 4, N.DEFAULT_RESULT_OPTIONS)
     @test N.decode_binary(Union{Missing, Date}, partial, 1, 4, N.ResultOptions(; zero_dates=:missing)) === missing
+    malformed_partial = vcat(partial, UInt8[0x18, 0x00, 0x00])
+    @test_throws P.ConversionError N.decode_binary(Union{Missing, Date}, malformed_partial, 1, 7, N.ResultOptions(; zero_dates=:missing))
     @test N.decode_binary(Union{Missing, Int32}, UInt8[], 1, -1, N.DEFAULT_RESULT_OPTIONS) === missing
     @test_throws P.ConversionError N.decode_binary(Int32, UInt8[], 1, -1, N.DEFAULT_RESULT_OPTIONS)
 end
