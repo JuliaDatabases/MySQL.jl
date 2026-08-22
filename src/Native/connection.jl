@@ -25,6 +25,8 @@ mutable struct Connection <: DBInterface.Connection
     buffered_bytes::Int
     transaction_owner::Union{Nothing, Task}
     results::ResultOptions
+    reaplock::Threads.SpinLock
+    stmts_to_close::Vector{Tuple{UInt32, Int}}
 end
 
 # Preserved 1.x quirk: a `mysql://` substring anywhere in the host is stripped.
@@ -45,7 +47,7 @@ function DBInterface.connect(::Type{Connection}, host::AbstractString, user::Abs
     opts = ConnectOptions(strip_scheme(host), user, passwd; db=db, port=port, kw...)
     h = connect(opts)
     results = ResultOptions(; zero_dates=opts.zero_dates, time_type=opts.time_type)
-    return Connection(h, opts, opts.host, opts.user, string(opts.port), opts.db, ReentrantLock(), 1, 0, 0, 0, nothing, results)
+    return Connection(h, opts, opts.host, opts.user, string(opts.port), opts.db, ReentrantLock(), 1, 0, 0, 0, nothing, results, Threads.SpinLock(), Tuple{UInt32, Int}[])
 end
 
 function Base.show(io::IO, conn::Connection)
@@ -146,8 +148,43 @@ function begin_command!(conn::Connection)
     s = conn.handle.session
     P.set_read_deadline!(s.transport, deadline_from(conn.options.read_timeout))
     P.set_write_deadline!(s.transport, deadline_from(conn.options.write_timeout))
+    reap_statements!(conn, s)
     conn.buffered_bytes = 0
     return s
+end
+
+# Parks a prepared statement id for finalizer-free reaping (COM_STMT_CLOSE on the next
+# command). Uses a trylock so a GC finalizer never blocks; a busy lock re-registers.
+function park_statement!(conn::Connection, statement_id::UInt32, generation::Int, reregister=nothing)
+    if trylock(conn.reaplock)
+        try
+            push!(conn.stmts_to_close, (statement_id, generation))
+        finally
+            unlock(conn.reaplock)
+        end
+    elseif reregister !== nothing
+        reregister()
+    end
+    return nothing
+end
+
+# Sends COM_STMT_CLOSE (no response) for every parked statement of the current generation.
+# Called under the connection lock with the session READY (drain/reconnect already ran).
+function reap_statements!(conn::Connection, s::P.Session)
+    isempty(conn.stmts_to_close) && return nothing
+    batch = Tuple{UInt32, Int}[]
+    lock(conn.reaplock)
+    try
+        append!(batch, conn.stmts_to_close)
+        empty!(conn.stmts_to_close)
+    finally
+        unlock(conn.reaplock)
+    end
+    gen = @atomic conn.generation
+    for (id, generation) in batch
+        generation == gen && P.stmt_close!(s, id)
+    end
+    return nothing
 end
 
 # Runs a statement that must answer with OK (no result set) and returns the OK packet.

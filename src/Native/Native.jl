@@ -16,10 +16,12 @@ using Reseau, Dates, DBInterface, Tables, Parsers, DecFP
 const P = Protocol
 
 include("decode.jl")
+include("binary.jl")
 include("options.jl")
 include("reaper.jl")
 include("connect.jl")
 include("connection.jl")
 include("cursor.jl")
+include("statement.jl")
 
 end # module

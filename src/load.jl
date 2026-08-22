@@ -35,7 +35,7 @@ const SQLTYPES = Dict{Type, String}(
 
 checkdupnames(names) = length(unique(map(x->lowercase(String(x)), names))) == length(names) || error("duplicate case-insensitive column names detected; sqlite doesn't allow duplicate column names and treats them case insensitive")
 
-function createtable(conn::Connection, nm::AbstractString, sch::Tables.Schema; debug::Bool=false, quoteidentifiers::Bool=true, createtableclause::AbstractString="CREATE TABLE", coltypes=Dict(), columnsuffix=Dict(), auto_increment_primary_key_name::Union{Nothing,AbstractString}=nothing)
+function createtable(conn::DBInterface.Connection, nm::AbstractString, sch::Tables.Schema; debug::Bool=false, quoteidentifiers::Bool=true, createtableclause::AbstractString="CREATE TABLE", coltypes=Dict(), columnsuffix=Dict(), auto_increment_primary_key_name::Union{Nothing,AbstractString}=nothing)
     names = sch.names
     checkdupnames(names)
     types = [sqltype(T, coltypes, names[i]) for (i, T) in enumerate(sch.types)]
@@ -71,9 +71,9 @@ we can see if there's something we can do to make it easier to use this function
 """
 function load end
 
-load(conn::Connection, table::AbstractString="mysql_"*Random.randstring(5); kw...) = x->load(x, conn, table; kw...)
+load(conn::DBInterface.Connection, table::AbstractString="mysql_"*Random.randstring(5); kw...) = x->load(x, conn, table; kw...)
 
-function load(itr, conn::Connection, name::AbstractString="mysql_"*Random.randstring(5); append::Bool=true, quoteidentifiers::Bool=true, debug::Bool=false, limit::Integer=typemax(Int64), kw...)
+function load(itr, conn::DBInterface.Connection, name::AbstractString="mysql_"*Random.randstring(5); append::Bool=true, quoteidentifiers::Bool=true, debug::Bool=false, limit::Integer=typemax(Int64), kw...)
     isopen(conn) || throw(ArgumentError("`MySQL.Connection` is closed"))
     # get data
     rows = Tables.rows(itr)
