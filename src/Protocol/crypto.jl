@@ -19,7 +19,7 @@ function openssl_error_message()
     buf = Vector{UInt8}(undef, OPENSSL_ERROR_TEXT_LENGTH)
     ccall((:ERR_error_string_n, libcrypto), Cvoid, (Culong, Ptr{UInt8}, Csize_t), code, buf, length(buf))
     openssl_clear_errors()
-    return unsafe_string(pointer(buf))
+    return GC.@preserve buf unsafe_string(pointer(buf))
 end
 
 @noinline openssl_failure(what::String) = throw(AuthError("$what: $(openssl_error_message())"))
@@ -42,19 +42,23 @@ Loads a PEM-encoded public key (SubjectPublicKeyInfo or `BEGIN RSA PUBLIC KEY`),
 it is an RSA key, runs `f` on the `EVP_PKEY*`, and frees it.
 """
 function with_rsa_public_key(f::F, pem::AbstractVector{UInt8}) where {F}
+    bytes = pem isa Vector{UInt8} ? pem : Vector{UInt8}(pem)
     openssl_clear_errors()
-    bio = GC.@preserve pem ccall((:BIO_new_mem_buf, libcrypto), Ptr{Cvoid}, (Ptr{UInt8}, Cint), pointer(pem), length(pem))
-    bio == C_NULL && openssl_failure("OpenSSL could not allocate a memory BIO")
-    pkey = C_NULL
-    try
-        pkey = ccall((:PEM_read_bio_PUBKEY, libcrypto), Ptr{Cvoid}, (Ptr{Cvoid}, Ptr{Ptr{Cvoid}}, Ptr{Cvoid}, Ptr{Cvoid}), bio, C_NULL, C_NULL, C_NULL)
-        pkey == C_NULL && openssl_failure("the server public key is not a valid PEM public key")
-        base_id = ccall((:EVP_PKEY_get_base_id, libcrypto), Cint, (Ptr{Cvoid},), pkey)
-        base_id == EVP_PKEY_RSA || throw(AuthError("the server public key is not an RSA key (OpenSSL key type $base_id)"))
-        return f(pkey)
-    finally
-        pkey == C_NULL || ccall((:EVP_PKEY_free, libcrypto), Cvoid, (Ptr{Cvoid},), pkey)
-        ccall((:BIO_free, libcrypto), Cint, (Ptr{Cvoid},), bio)
+    # the memory BIO keeps pointing into `bytes` until BIO_free: preserve it for the whole scope
+    GC.@preserve bytes begin
+        bio = ccall((:BIO_new_mem_buf, libcrypto), Ptr{Cvoid}, (Ptr{UInt8}, Cint), pointer(bytes), length(bytes))
+        bio == C_NULL && openssl_failure("OpenSSL could not allocate a memory BIO")
+        pkey = C_NULL
+        try
+            pkey = ccall((:PEM_read_bio_PUBKEY, libcrypto), Ptr{Cvoid}, (Ptr{Cvoid}, Ptr{Ptr{Cvoid}}, Ptr{Cvoid}, Ptr{Cvoid}), bio, C_NULL, C_NULL, C_NULL)
+            pkey == C_NULL && openssl_failure("the server public key is not a valid PEM public key")
+            base_id = ccall((:EVP_PKEY_get_base_id, libcrypto), Cint, (Ptr{Cvoid},), pkey)
+            base_id == EVP_PKEY_RSA || throw(AuthError("the server public key is not an RSA key (OpenSSL key type $base_id)"))
+            return f(pkey)
+        finally
+            pkey == C_NULL || ccall((:EVP_PKEY_free, libcrypto), Cvoid, (Ptr{Cvoid},), pkey)
+            ccall((:BIO_free, libcrypto), Cint, (Ptr{Cvoid},), bio)
+        end
     end
 end
 

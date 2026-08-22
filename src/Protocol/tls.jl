@@ -52,8 +52,9 @@ is_ip_literal(host::AbstractString) = occursin(r"^\d{1,3}(\.\d{1,3}){3}$", host)
 # the IP SAN).
 function tls_server_name(opts::TLSOptions, host::AbstractString)
     opts.server_name === nothing || return opts.server_name
-    is_ip_literal(host) || return String(host)
-    (opts.mode == SSL_VERIFY_CA || opts.mode == SSL_VERIFY_IDENTITY) && return String(host)
+    name = (startswith(host, '[') && endswith(host, ']')) ? String(host[2:(end - 1)]) : String(host)
+    is_ip_literal(name) || return name
+    (opts.mode == SSL_VERIFY_CA || opts.mode == SSL_VERIFY_IDENTITY) && return name
     return nothing
 end
 
@@ -96,7 +97,7 @@ function starttls!(s::Session, opts::TLSOptions, host::AbstractString; handshake
     try
         Reseau.TLS.handshake!(tls)
     catch err
-        close(tls)
+        transport_close(tls)
         throw(fault!(s, tls_failure(err)))
     end
     replace_transport!(s, tls)

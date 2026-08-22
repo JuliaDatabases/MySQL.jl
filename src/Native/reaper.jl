@@ -78,15 +78,19 @@ function reap_now!()
         @atomic entry.state = :closed
         n += 1
     end
-    n > 0 && (REAPER_STATS[] = (enqueued=REAPER_STATS[].enqueued, closed=REAPER_STATS[].closed + n))
+    n > 0 && lock(() -> (REAPER_STATS[] = (enqueued=REAPER_STATS[].enqueued, closed=REAPER_STATS[].closed + n)), REAPER_LOCK)
     return n
 end
 
 pending_reaps() = lock(() -> length(REAPER_QUEUE), REAPER_LOCK)
 
+const REAPER_SETUP_LOCK = ReentrantLock()
+
+# Starts the timer once. A ReentrantLock (not the finalizer-safe spinlock) because creating a
+# Timer and registering the atexit hook may yield.
 function ensure_reaper!()
     REAPER_TIMER[] === nothing || return nothing
-    lock(REAPER_LOCK)
+    lock(REAPER_SETUP_LOCK)
     try
         REAPER_TIMER[] === nothing || return nothing
         REAPER_TIMER[] = Timer(REAPER_INTERVAL_S; interval=REAPER_INTERVAL_S) do _
@@ -98,7 +102,7 @@ function ensure_reaper!()
         end
         atexit(() -> (try; reap_now!(); catch; end; nothing))
     finally
-        unlock(REAPER_LOCK)
+        unlock(REAPER_SETUP_LOCK)
     end
     return nothing
 end

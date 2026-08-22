@@ -55,6 +55,9 @@ end
     @test length(masked) == length(pw) + 1
     @test [masked[i] ⊻ nonce[mod1(i, 20)] for i in eachindex(masked)] == vcat(pw, 0x00)
     @test_throws P.AuthError P.rsa_encrypt_password(pw, UInt8[], pem("rsa2048.pub"))
+    # a non-Vector PEM (e.g. a packet window) is accepted
+    padded = vcat(UInt8[0x01], pem("rsa2048.pub"))
+    @test rsa_oaep_decrypt(pem("rsa2048.key"), P.rsa_oaep_sha1_encrypt(view(padded, 2:length(padded)), UInt8[0x42])) == UInt8[0x42]
     # repeated encryption must not leak OpenSSL handles
     GC.gc()
     before = Sys.maxrss()

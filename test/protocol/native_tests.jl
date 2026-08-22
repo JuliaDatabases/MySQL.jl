@@ -54,6 +54,8 @@ end
     @test P.tls_server_name(P.TLSOptions(; mode=:verify_identity), "127.0.0.1") == "127.0.0.1"
     @test P.tls_server_name(P.TLSOptions(; mode=:preferred), "db.example.com") == "db.example.com"
     @test P.tls_server_name(P.TLSOptions(; mode=:preferred, server_name="sni.example"), "10.0.0.1") == "sni.example"
+    @test P.tls_server_name(P.TLSOptions(; mode=:verify_identity), "[::1]") == "::1"
+    @test P.tls_server_name(P.TLSOptions(; mode=:preferred), "[::1]") === nothing
     # tls_version pins the protocol versions (libmysqlclient spelling)
     @test N.ConnectOptions("h", "u").tls.min_version === nothing
     o = N.ConnectOptions("h", "u"; tls_version="TLSv1.3")

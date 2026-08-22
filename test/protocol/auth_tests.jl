@@ -169,7 +169,8 @@ end
             P.read_greeting!(s)
             trace = Symbol[]
             @test P.authenticate!(s, "root", "pw", POLICY_TLS; trace=trace) isa P.OKPacket
-            @test trace[end - 1] != :fast_auth && :ok in trace
+            @test trace == [:initial_caching_sha2_password, :full_auth_cleartext, :ok]
+            @test !any(i -> s.io.outbuf[i:(i + 1)] == codeunits("pw"), 1:(length(s.io.outbuf) - 1))   # password wiped from the frame buffer
         end
     end
 
@@ -302,6 +303,7 @@ end
             s = P.Session(client)
             P.read_greeting!(s)
             @test P.authenticate!(s, "root", "pw", P.AuthPolicy(; enable_cleartext_plugin=true, insecure_cleartext_auth=true)) isa P.OKPacket
+            @test !any(i -> s.io.outbuf[i:(i + 2)] == UInt8[0x70, 0x77, 0x00], 1:(length(s.io.outbuf) - 2))   # "pw\0" wiped after the send
         end
         c = P.PacketCursor(seen[1])
         P.skip!(c, 32)

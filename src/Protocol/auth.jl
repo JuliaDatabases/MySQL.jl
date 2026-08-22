@@ -218,20 +218,40 @@ end
 
 # ---- the exchange ----
 
-function trace_event(state::AuthState, data::AbstractVector{UInt8}, reply)
-    state.plugin isa CachingSha2Password || return is_pem(data) ? :rsa_response : :continue
+# Names one continuation round for the optional trace: which caching_sha2 branch ran and
+# whether a public key travelled.
+function trace_event(state::AuthState, data::AbstractVector{UInt8}, policy::AuthPolicy)
     is_pem(data) && return :rsa_response
+    state.plugin isa CachingSha2Password || return :continue
     isempty(data) && return :continue
     data[1] == CACHING_SHA2_FAST_AUTH_SUCCESS && return :fast_auth
     data[1] == CACHING_SHA2_PERFORM_FULL_AUTH || return :continue
-    reply === nothing && return :full_auth
-    return length(reply) == 1 && reply[1] == CACHING_SHA2_REQUEST_PUBLIC_KEY ? :rsa_request : state.awaiting_public_key ? :rsa_request : :full_auth_cleartext_or_rsa
+    policy.secure_transport && return :full_auth_cleartext
+    state.awaiting_public_key && return :rsa_request
+    return :full_auth_rsa
+end
+
+# The packet writer keeps the last frame; during authentication that frame can hold the
+# password, so it is wiped after every send.
+function wipe_outbuf!(s::Session)
+    securezero!(s.io.outbuf)
+    return nothing
 end
 
 function select_plugin(server::ServerInfo, default_auth::Union{Nothing, AbstractString})
     default_auth === nothing || return plugin_for(default_auth)
     is_supported_plugin(server.auth_plugin) && return SUPPORTED_PLUGINS[server.auth_plugin]
     return CachingSha2Password()
+end
+
+function send_wiped!(s::Session, reply::Vector{UInt8})
+    try
+        send_auth_data!(s, reply)
+    finally
+        securezero!(reply)
+        wipe_outbuf!(s)
+    end
+    return nothing
 end
 
 """
@@ -251,7 +271,13 @@ function authenticate!(s::Session, user::AbstractString, password::Union{Nothing
         plugin = select_plugin(s.server, default_auth)
         state = AuthState(plugin, s.server.auth_plugin_data)
         note(Symbol("initial_", plugin_name(plugin)))
-        send_handshake_response!(s, user, initial_response(plugin, pw, state.nonce, policy), plugin_name(plugin); db=db, attrs=attrs)
+        response = initial_response(plugin, pw, state.nonce, policy)
+        try
+            send_handshake_response!(s, user, response, plugin_name(plugin); db=db, attrs=attrs)
+        finally
+            securezero!(response)
+            wipe_outbuf!(s)
+        end
         round_number = 1
         auth_bytes = 0
         while true
@@ -264,13 +290,13 @@ function authenticate!(s::Session, user::AbstractString, password::Union{Nothing
                 auth_bytes += length(value.data)
                 state = AuthState(plugin_for(value.plugin), strip_nonce(value.data))
                 note(Symbol("switch_", value.plugin))
-                send_auth_data!(s, initial_response(state.plugin, pw, state.nonce, policy))
+                send_wiped!(s, initial_response(state.plugin, pw, state.nonce, policy))
             else
                 data = kind == :auth_more ? value.data : value
                 auth_bytes += length(data)
                 reply = step!(state, data, pw, policy)
-                note(trace_event(state, data, reply))
-                reply === nothing || send_auth_data!(s, reply)
+                note(trace_event(state, data, policy))
+                reply === nothing || send_wiped!(s, reply)
             end
         end
     catch err

@@ -92,7 +92,7 @@ function run_live_lane(ref::String)
                 # full auth over TLS is cleartext inside the tunnel
                 exec!(root, "ALTER USER 'plain'@'%' IDENTIFIED WITH caching_sha2_password BY 'plainpw2'")
                 h = N.connect("127.0.0.1", "plain", "plainpw2"; port=port, ssl_mode=:required, connect_timeout=10)
-                @test :full_auth_cleartext_or_rsa in h.auth_trace && P.is_secure_transport(h.session)
+                @test h.auth_trace == [:initial_caching_sha2_password, :full_auth_cleartext, :ok] && P.is_secure_transport(h.session)
                 N.close!(h)
                 # auth switch from the announced caching_sha2 to the account's native plugin
                 h = N.connect("127.0.0.1", "nat", "natpw"; port=port, ssl_mode=:disabled, connect_timeout=10)
