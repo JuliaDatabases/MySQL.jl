@@ -38,6 +38,18 @@ Base.readbytes!(::FailBeforeData, ::Vector{UInt8}, ::Integer) = error("source fa
 mutable struct FailAfterData <: IO
     first::Bool
 end
+
+mutable struct ChunkedSource <: IO
+    chunks::Vector{Vector{UInt8}}
+    next::Int
+end
+Base.eof(io::ChunkedSource) = io.next > length(io.chunks)
+function Base.readbytes!(io::ChunkedSource, buf::Vector{UInt8}, ::Integer)
+    chunk = io.chunks[io.next]
+    copyto!(buf, chunk)
+    io.next += 1
+    return length(chunk)
+end
 Base.eof(::FailAfterData) = false
 function Base.readbytes!(io::FailAfterData, buf::Vector{UInt8}, ::Integer)
     io.first || error("source failed after data")
@@ -565,11 +577,31 @@ end
         @test Tables.columntable(results[3]).x == [3]
     end
     @test later_uploads == [Vector{UInt8}(codeunits("payload"))]
-    # size limit crossed after data was sent: the connection is closed
-    with_native(c -> (expect_query(c); infile_request(c, 1, "big"); try; read_upload(c); catch; end); connect_kw=(; local_files=true, local_infile_handler=name -> IOBuffer(repeat("z", 5000)), max_local_infile_bytes=4096)) do conn
-        @test_throws P.ProtocolError DBInterface.execute(conn, "load data local infile 'big'")
+    # A first chunk above the size limit has sent no data, so refusal can resynchronize.
+    with_native(c -> begin
+        expect_query(c); seq = infile_request(c, 1, "too-big"); seq, chunks = read_upload(c); @test isempty(chunks); send_ok(c, seq + 1)
+        expect_query(c); send_ok(c, 1; affected=8)
+    end; connect_kw=(; local_files=true, local_infile_handler=name -> IOBuffer("12345"), max_local_infile_bytes=4)) do conn
+        @test_throws P.ProtocolError DBInterface.execute(conn, "load data local infile 'too-big'")
+        @test DBInterface.execute(conn, "ok").rows_affected == 8 && isopen(conn)
+    end
+    # Crossing the same limit after a packet was sent makes the stream ambiguous and closes it.
+    sent_before_limit = Vector{UInt8}[]
+    with_native(c -> begin
+        expect_query(c); infile_request(c, 1, "later-too-big")
+        try
+            while true
+                _, data = read_packet(c)
+                isempty(data) && break
+                push!(sent_before_limit, data)
+            end
+        catch
+        end
+    end; connect_kw=(; local_files=true, local_infile_handler=name -> ChunkedSource([UInt8[0x61, 0x62, 0x63], UInt8[0x64, 0x65, 0x66]], 1), max_local_infile_bytes=4)) do conn
+        @test_throws P.ProtocolError DBInterface.execute(conn, "load data local infile 'later-too-big'")
         @test !isopen(conn)
     end
+    @test sent_before_limit == [UInt8[0x61, 0x62, 0x63]]
     # an unsolicited request (LOCAL_FILES not negotiated) is a protocol error; handler never called
     called = Ref(false)
     with_native(c -> (expect_query(c); infile_request(c, 1, "x"))) do conn

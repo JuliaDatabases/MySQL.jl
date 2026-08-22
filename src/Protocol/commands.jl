@@ -304,7 +304,10 @@ function send_local_infile!(s::Session, source::Union{Nothing, IO}; max_bytes::U
             while !eof(source)
                 n = readbytes!(source, chunk, chunk_size)
                 n == 0 && break
-                max_bytes === nothing || (sent <= max_bytes && n <= max_bytes - sent) || throw(fault!(s, ProtocolError("LOCAL INFILE upload exceeded $max_bytes bytes")))
+                if max_bytes !== nothing && !(sent <= max_bytes && n <= max_bytes - sent)
+                    err = ProtocolError("LOCAL INFILE upload exceeded $max_bytes bytes")
+                    sent == 0 ? throw(err) : throw(fault!(s, err))
+                end
                 sendpacket!(s, view(chunk, 1:n))
                 sent += n
             end
