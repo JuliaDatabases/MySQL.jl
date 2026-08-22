@@ -44,7 +44,7 @@ const POLICY_TLS_VERIFIED = P.AuthPolicy(; secure_transport=true, identity_verif
         @test P.select_plugin(info, nothing) isa P.NativePassword
         @test P.select_plugin(info, "caching_sha2_password") isa P.CachingSha2Password
         info = P.parse_handshake_v10(pview(greeting(; plugin="client_ed25519")))
-        @test P.select_plugin(info, nothing) isa P.CachingSha2Password    # unsupported default: announce ours, expect a switch
+        @test_throws P.UnsupportedAuthError P.select_plugin(info, nothing)
         @test_throws P.UnsupportedAuthError P.select_plugin(info, "parsec")
     end
 
@@ -84,6 +84,8 @@ const POLICY_TLS_VERIFIED = P.AuthPolicy(; secure_transport=true, identity_verif
         @test_throws P.AuthError P.step!(P.AuthState(P.CachingSha2Password(), NONCE), UInt8[0x04], PW, POLICY_PLAIN)
         @test_throws P.ProtocolError P.step!(P.AuthState(P.CachingSha2Password(), NONCE), UInt8[0x07], PW, POLICY_PLAIN)
         @test_throws P.ProtocolError P.step!(P.AuthState(P.CachingSha2Password(), NONCE), UInt8[], PW, POLICY_PLAIN)
+        @test_throws P.ProtocolError P.step!(P.AuthState(P.CachingSha2Password(), NONCE), UInt8[0x03, 0x00], PW, POLICY_PLAIN)
+        @test_throws P.ProtocolError P.step!(P.AuthState(P.CachingSha2Password(), NONCE), UInt8[0x04, 0x00], PW, POLICY_TLS)
         @test_throws P.ProtocolError P.step!(P.AuthState(P.NativePassword(), NONCE), UInt8[0x04], PW, POLICY_PLAIN)
         @test_throws P.ProtocolError P.step!(P.AuthState(P.Sha256Password(), NONCE), UInt8[0x04], PW, POLICY_PLAIN)
         @test length(P.step!(P.AuthState(P.Sha256Password(), NONCE), pem("rsa3072.pub"), PW, POLICY_PLAIN)) == 384

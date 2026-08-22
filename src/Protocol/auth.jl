@@ -198,7 +198,7 @@ function step!(::CachingSha2Password, state::AuthState, data::AbstractVector{UIn
         state.awaiting_public_key = false
         return rsa_encrypt_password(password, state.nonce, data)
     end
-    isempty(data) && protocol_error("empty caching_sha2_password continuation packet")
+    length(data) == 1 || protocol_error("caching_sha2_password status packet must contain exactly one byte, got $(length(data))")
     data[1] == CACHING_SHA2_FAST_AUTH_SUCCESS && return nothing
     data[1] == CACHING_SHA2_PERFORM_FULL_AUTH || protocol_error("unexpected caching_sha2_password status byte 0x$(string(data[1], base=16, pad=2))")
     state.full_auth = true
@@ -240,8 +240,7 @@ end
 
 function select_plugin(server::ServerInfo, default_auth::Union{Nothing, AbstractString})
     default_auth === nothing || return plugin_for(default_auth)
-    is_supported_plugin(server.auth_plugin) && return SUPPORTED_PLUGINS[server.auth_plugin]
-    return CachingSha2Password()
+    return plugin_for(server.auth_plugin)
 end
 
 function send_wiped!(s::Session, reply::Vector{UInt8})
@@ -281,19 +280,19 @@ function authenticate!(s::Session, user::AbstractString, password::Union{Nothing
         round_number = 1
         auth_bytes = 0
         while true
+            response_bytes = s.io.response_bytes
             kind, value = read_auth_packet!(s, round_number, auth_bytes)
+            auth_bytes += s.io.response_bytes - response_bytes
             round_number += 1
             if kind == :ok
                 note(:ok)
                 return value
             elseif kind == :auth_switch
-                auth_bytes += length(value.data)
                 state = AuthState(plugin_for(value.plugin), strip_nonce(value.data))
                 note(Symbol("switch_", value.plugin))
                 send_wiped!(s, initial_response(state.plugin, pw, state.nonce, policy))
             else
                 data = kind == :auth_more ? value.data : value
-                auth_bytes += length(data)
                 reply = step!(state, data, pw, policy)
                 note(trace_event(state, data, policy))
                 reply === nothing || send_wiped!(s, reply)

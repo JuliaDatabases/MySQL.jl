@@ -147,6 +147,12 @@ const COL1 = Vectors.payload(Vectors.COLUMN_DEF_COL1)
     end
 
     @testset "unsupported authentication requests" begin
+        with_peer(conn -> (send_packet(conn, 0, greeting(; plugin="client_ed25519")); await_eof(conn))) do client
+            s = P.Session(client)
+            P.read_greeting!(s)
+            @test_throws P.UnsupportedAuthError P.authenticate!(s, "root", "pw", P.AuthPolicy())
+            @test s.phase == P.CLOSED
+        end
         with_peer(conn -> (send_packet(conn, 0, greeting()); read_packet(conn); send_packet(conn, 2, vcat(UInt8[0x02], codeunits("authentication_webauthn_client"), UInt8[0x00])); await_eof(conn))) do client
             s = P.Session(client)
             P.read_greeting!(s)
@@ -190,6 +196,18 @@ const COL1 = Vectors.payload(Vectors.COLUMN_DEF_COL1)
             P.read_greeting!(s)
             P.send_handshake_response!(s, "root", UInt8[], "caching_sha2_password")
             @test_throws P.ProtocolError P.read_auth_packet!(s, 1, 0)
+            @test s.phase == P.BROKEN
+        end
+        with_peer(conn -> begin
+            send_packet(conn, 0, greeting())
+            read_packet(conn)
+            send_packet(conn, 2, UInt8[0x01, 0x03])
+            send_packet(conn, 3, UInt8[0x01, 0x03])
+            await_eof(conn)
+        end) do client
+            s = P.Session(client; limits=P.Limits(; max_auth_bytes=3))
+            P.read_greeting!(s)
+            @test_throws P.ProtocolError P.authenticate!(s, "root", "pw", P.AuthPolicy())
             @test s.phase == P.BROKEN
         end
     end
