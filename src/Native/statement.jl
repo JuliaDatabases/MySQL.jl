@@ -24,6 +24,7 @@ mutable struct Statement <: DBInterface.Statement
     last_signature::Vector{UInt16}
     date_and_time::Bool
     closed::Bool
+    reap::StatementReapEntry
 end
 
 DBInterface.getconnection(stmt::Statement) = stmt.conn
@@ -49,7 +50,23 @@ function DBInterface.prepare(conn::Connection, sql::AbstractString; mysql_date_a
         P.stmt_prepare!(s, sql)
         ok = P.read_prepare_response!(s)
         names, types, lookup = statement_schema(conn, ok, mysql_date_and_time)
-        stmt = Statement(conn, ok.statement_id, String(sql), @atomic(conn.generation), P.num_params(ok), ok.params, ok.columns, names, types, lookup, UInt16[], mysql_date_and_time, false)
+        generation = @atomic conn.generation
+        stmt = Statement(
+            conn,
+            ok.statement_id,
+            String(sql),
+            generation,
+            P.num_params(ok),
+            ok.params,
+            ok.columns,
+            names,
+            types,
+            lookup,
+            UInt16[],
+            mysql_date_and_time,
+            false,
+            StatementReapEntry(ok.statement_id, generation, nothing),
+        )
         finalizer(finalize_statement, stmt)
         return stmt
     end
@@ -62,6 +79,8 @@ function reprepare!(conn::Connection, s::P.Session, stmt::Statement)
     ok = P.read_prepare_response!(s)
     stmt.statement_id = ok.statement_id
     stmt.generation = @atomic conn.generation
+    stmt.reap.statement_id = stmt.statement_id
+    stmt.reap.generation = stmt.generation
     stmt.nparams = P.num_params(ok)
     stmt.params = ok.params
     stmt.columns = ok.columns
@@ -136,7 +155,7 @@ function DBInterface.close!(stmt::Statement)
         stmt.closed && return nothing
         stmt.closed = true
         conn.handle === nothing && return nothing
-        park_statement!(conn, stmt.statement_id, stmt.generation)
+        park_statement!(conn, stmt.reap)
         return nothing
     end
     return nothing
@@ -146,7 +165,7 @@ function finalize_statement(stmt::Statement)
     stmt.closed && return nothing
     conn = stmt.conn
     conn.handle === nothing && return nothing
-    park_statement!(conn, stmt.statement_id, stmt.generation, () -> finalizer(finalize_statement, stmt))
+    try_park_statement!(conn, stmt.reap) || finalizer(finalize_statement, stmt)
     return nothing
 end
 
@@ -162,7 +181,7 @@ function execute_params(conn::Connection, sql::AbstractString, params; mysql_sto
     end
     lock(conn.lock) do
         stmt.closed = true
-        conn.handle === nothing || park_statement!(conn, stmt.statement_id, stmt.generation)
+        conn.handle === nothing || park_statement!(conn, stmt.reap)
     end
     return cursor
 end

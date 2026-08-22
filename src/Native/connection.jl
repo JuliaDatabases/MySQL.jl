@@ -11,6 +11,12 @@ keyword of `MySQL.Connection` is accepted (removed ones explain why they fail).
 Operations are serialized by the connection lock; a streaming cursor and a transaction are
 owned by the task that created them.
 """
+mutable struct StatementReapEntry
+    statement_id::UInt32
+    generation::Int
+    next::Union{Nothing, StatementReapEntry}
+end
+
 mutable struct Connection <: DBInterface.Connection
     handle::Union{Nothing, Handle}
     options::ConnectOptions
@@ -26,7 +32,7 @@ mutable struct Connection <: DBInterface.Connection
     transaction_owner::Union{Nothing, Task}
     results::ResultOptions
     reaplock::Threads.SpinLock
-    stmts_to_close::Vector{Tuple{UInt32, Int}}
+    stmts_to_close::Union{Nothing, StatementReapEntry}
 end
 
 # Preserved 1.x quirk: a `mysql://` substring anywhere in the host is stripped.
@@ -47,7 +53,23 @@ function DBInterface.connect(::Type{Connection}, host::AbstractString, user::Abs
     opts = ConnectOptions(strip_scheme(host), user, passwd; db=db, port=port, kw...)
     h = connect(opts)
     results = ResultOptions(; zero_dates=opts.zero_dates, time_type=opts.time_type)
-    return Connection(h, opts, opts.host, opts.user, string(opts.port), opts.db, ReentrantLock(), 1, 0, 0, 0, nothing, results, Threads.SpinLock(), Tuple{UInt32, Int}[])
+    return Connection(
+        h,
+        opts,
+        opts.host,
+        opts.user,
+        string(opts.port),
+        opts.db,
+        ReentrantLock(),
+        1,
+        0,
+        0,
+        0,
+        nothing,
+        results,
+        Threads.SpinLock(),
+        nothing,
+    )
 end
 
 function Base.show(io::IO, conn::Connection)
@@ -153,36 +175,55 @@ function begin_command!(conn::Connection)
     return s
 end
 
-# Parks a prepared statement id for finalizer-free reaping (COM_STMT_CLOSE on the next
-# command). Uses a trylock so a GC finalizer never blocks; a busy lock re-registers.
-function park_statement!(conn::Connection, statement_id::UInt32, generation::Int, reregister=nothing)
+# The entry is allocated with its Statement, not by its finalizer. Caller holds reaplock.
+function enqueue_statement!(conn::Connection, entry::StatementReapEntry)
+    entry.next = conn.stmts_to_close
+    conn.stmts_to_close = entry
+    return nothing
+end
+
+# Explicit close can block. It must never discard a statement because a finalizer briefly
+# owns the queue lock.
+function park_statement!(conn::Connection, entry::StatementReapEntry)
+    lock(conn.reaplock)
+    try
+        enqueue_statement!(conn, entry)
+    finally
+        unlock(conn.reaplock)
+    end
+    return nothing
+end
+
+# A finalizer may only trylock. The caller re-registers the finalizer when this returns false.
+function try_park_statement!(conn::Connection, entry::StatementReapEntry)
     if trylock(conn.reaplock)
         try
-            push!(conn.stmts_to_close, (statement_id, generation))
+            enqueue_statement!(conn, entry)
         finally
             unlock(conn.reaplock)
         end
-    elseif reregister !== nothing
-        reregister()
+        return true
     end
-    return nothing
+    return false
 end
 
 # Sends COM_STMT_CLOSE (no response) for every parked statement of the current generation.
 # Called under the connection lock with the session READY (drain/reconnect already ran).
 function reap_statements!(conn::Connection, s::P.Session)
-    isempty(conn.stmts_to_close) && return nothing
-    batch = Tuple{UInt32, Int}[]
+    entry = nothing
     lock(conn.reaplock)
     try
-        append!(batch, conn.stmts_to_close)
-        empty!(conn.stmts_to_close)
+        entry = conn.stmts_to_close
+        conn.stmts_to_close = nothing
     finally
         unlock(conn.reaplock)
     end
     gen = @atomic conn.generation
-    for (id, generation) in batch
-        generation == gen && P.stmt_close!(s, id)
+    while entry !== nothing
+        next = entry.next
+        entry.next = nothing
+        entry.generation == gen && P.stmt_close!(s, entry.statement_id)
+        entry = next
     end
     return nothing
 end

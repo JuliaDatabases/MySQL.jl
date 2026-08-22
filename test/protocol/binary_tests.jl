@@ -327,9 +327,22 @@ end
         expect_query(c); send_ok(c, 1)
     end) do conn
         stmt = DBInterface.prepare(conn, "SELECT x FROM t")
-        DBInterface.close!(stmt)
+        # Explicit close must wait for a busy reaper lock. It must not drop the id.
+        lock(conn.reaplock)
+        close_task = errormonitor(Threads.@spawn DBInterface.close!(stmt))
+        try
+            while !islocked(conn.lock)
+                yield()
+            end
+            @test !istaskdone(close_task)
+        finally
+            unlock(conn.reaplock)
+        end
+        wait(close_task)
+        @test conn.stmts_to_close === stmt.reap
         DBInterface.close!(stmt)                                     # idempotent
         @test DBInterface.execute(conn, "SELECT 1").rows_affected == 0
+        @test conn.stmts_to_close === nothing
     end
     @test closed[] == 77
 end

@@ -206,11 +206,11 @@ source are never read.
   applies the `Dates.Time` range policy (Fix), and zero/partial dates follow the unified
   `zero_dates` policy (Fix; 1.x binary mapped zero components to 1970).
 - **Statement reaping is finalizer-free**: `DBInterface.close!(stmt)` and a dropped
-  statement's finalizer both park `(statement_id, generation)` under a per-connection
-  spinlock; `begin_command!` sends `COM_STMT_CLOSE` for the parked ids of the current
-  generation before the next command (after `drain_pending!`, so a streaming result is drained
-  first). One-shot `execute(conn, sql, params)` prepares, executes and parks the statement the
-  same way.
+  statement's finalizer both park a preallocated `(statement_id, generation)` entry under a
+  per-connection spinlock; `begin_command!` sends `COM_STMT_CLOSE` for the parked ids of the
+  current generation before the next command (after `drain_pending!`, so a streaming result
+  is drained first). One-shot `execute(conn, sql, params)` prepares, executes and parks the
+  statement the same way.
 
 ## Third-party consultations
 
