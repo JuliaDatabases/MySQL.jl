@@ -170,7 +170,7 @@ function read_result_header!(s::Session, p::PacketView, binary::Bool)
     transition!(s, :column_count, COLUMN_DEFS)
     columns = Vector{ColumnDef}(undef, ncols)
     for i in 1:ncols
-        cp = readpacket!(s)
+        cp = readpacket!(s; packet_limit=s.limits.max_metadata_bytes - s.metadata_bytes)
         s.metadata_bytes += payload_length(cp)
         s.metadata_bytes <= s.limits.max_metadata_bytes || throw(fault!(s, ProtocolError("column metadata exceeded $(s.limits.max_metadata_bytes) bytes")))
         columns[i] = guarded(() -> parse_column_def(cp), s)

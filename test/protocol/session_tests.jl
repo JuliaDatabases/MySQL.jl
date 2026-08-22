@@ -608,6 +608,20 @@ end
             @test_throws P.ProtocolError P.read_command_response!(s)
             @test s.phase == P.BROKEN
         end
+        # The remaining metadata budget bounds a declared packet before its body is read.
+        with_peer(conn -> begin
+            server_handshake!(conn)
+            read_command(conn)
+            send_packet(conn, 1, column_count(1))
+            send_raw(conn, UInt8[0x20, 0x00, 0x00, 0x02])
+            await_eof(conn)
+        end) do client
+            s = P.Session(client; limits=P.Limits(; max_metadata_bytes=16))
+            client_handshake!(s)
+            P.query!(s, "SELECT col1")
+            @test_throws P.ProtocolError P.read_command_response!(s)
+            @test s.phase == P.BROKEN && !isopen(s)
+        end
         more = ok_payload(; status=P.SERVER_STATUS_AUTOCOMMIT | P.SERVER_MORE_RESULTS_EXISTS)
         with_peer(conn -> (server_handshake!(conn); read_command(conn); for i in 1:3; send_packet(conn, i, more); end; await_eof(conn))) do client
             s = P.Session(client; limits=P.Limits(; max_result_sets=2))
