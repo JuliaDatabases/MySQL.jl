@@ -424,6 +424,21 @@ end
 
     with_native(c -> begin
         expect_prepare(c)
+        send_prepare_ok(c, 1, 64, paramdefs(1), P.ColumnDef[])
+        expect_execute(c)
+        send_resultset(c, 1, [dtcol], Vector{UInt8}[])
+    end) do conn
+        cur = DBInterface.execute(
+            conn,
+            "CALL dynamic_metadata(?)",
+            (1,);
+            mysql_date_and_time=true,
+        )
+        @test Tables.schema(cur).types == (MySQL.DateAndTime,)
+    end
+
+    with_native(c -> begin
+        expect_prepare(c)
         send_prepare_ok(c, 1, 63, paramdefs(2), P.ColumnDef[])
     end) do conn
         stmt = DBInterface.prepare(conn, "SELECT ?, ?")

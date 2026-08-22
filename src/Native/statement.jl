@@ -356,7 +356,12 @@ end
 function execute_params(conn::Connection, sql::AbstractString, params; mysql_store_result::Bool, mysql_date_and_time::Bool)
     stmt = DBInterface.prepare(conn, sql; mysql_date_and_time=mysql_date_and_time)
     cursor = try
-        DBInterface.execute(stmt, params; mysql_store_result=mysql_store_result)
+        DBInterface.execute(
+            stmt,
+            params;
+            mysql_store_result=mysql_store_result,
+            mysql_date_and_time=mysql_date_and_time,
+        )
     catch
         DBInterface.close!(stmt)
         rethrow()
