@@ -55,6 +55,7 @@ end
     @test R(; ssl_mode=MySQL.API.SSL_MODE_VERIFY_IDENTITY) == P.SSL_VERIFY_IDENTITY
     @test R(; ssl_mode=:disabled, ssl_enforce=false, ssl_verify_server_cert=false) == P.SSL_DISABLED   # explicit false never lowers/raises
     @test_throws ArgumentError R(; ssl_mode=:disabled, ssl_enforce=true)
+    @test_throws ArgumentError R(; ssl_mode=:preferred, ssl_enforce=true)
     @test_throws ArgumentError R(; ssl_mode=:required, ssl_verify_server_cert=true)
     @test_throws ArgumentError R(; ssl_mode=:bogus)
     @test N.ConnectOptions("h", "u"; ssl_mode=MySQL.API.SSL_MODE_REQUIRED).tls.mode == P.SSL_REQUIRED

@@ -118,7 +118,7 @@ An explicit `ssl_mode` wins; otherwise `ssl_verify_server_cert=true` ⇒ `:verif
 function resolve_ssl_mode(; ssl_mode=nothing, ssl_enforce=nothing, ssl_verify_server_cert=nothing, has_ca::Bool=false)
     if ssl_mode !== nothing
         mode = P.ssl_mode(ssl_mode)
-        ssl_enforce === true && mode == P.SSL_DISABLED && throw(ArgumentError("ssl_mode=:disabled contradicts ssl_enforce=true"))
+        ssl_enforce === true && mode in (P.SSL_DISABLED, P.SSL_PREFERRED) && throw(ArgumentError("ssl_mode=$(Symbol(lowercase(string(mode)[5:end]))) contradicts ssl_enforce=true"))
         ssl_verify_server_cert === true && mode != P.SSL_VERIFY_IDENTITY && throw(ArgumentError("ssl_verify_server_cert=true contradicts ssl_mode=$(Symbol(lowercase(string(mode)[5:end])))"))
         return mode
     end
