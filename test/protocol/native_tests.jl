@@ -243,10 +243,10 @@ end
             take!(release)
             put!(finished, nothing)
         end
-        return Reseau.TCP.loopback_addr(0)
+        return [Reseau.TCP.loopback_addr(0)]
     end
     warm_deadline = Int64(time_ns()) + 5_000_000_000
-    @test N.resolve_bind("bind.example", warm_deadline, resolver) == Reseau.TCP.loopback_addr(0)
+    @test N.resolve_bind("bind.example", warm_deadline, resolver) == [Reseau.TCP.loopback_addr(0)]
     @test take!(called_with) == ("tcp", "bind.example:0")
     block_resolver[] = true
     before = Int64(time_ns())
@@ -270,7 +270,9 @@ end
     end
 
     multi_accept_server() do port
-        h = native_connect(port; ssl_mode=:disabled, bind="127.0.0.1")
+        # localhost resolves to IPv6 first on dual-stack hosts. The IPv4 endpoint must still
+        # be selected when the remote address is IPv4-only.
+        h = native_connect(port; ssl_mode=:disabled, bind="localhost")
         try
             local_addr = Reseau.TCP.local_addr(h.session.transport)
             @test local_addr.ip == (0x7F, 0x00, 0x00, 0x01)

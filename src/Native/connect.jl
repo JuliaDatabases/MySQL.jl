@@ -66,7 +66,7 @@ end
 function resolve_bind(
         bind::Union{Nothing, String},
         deadline::Int64,
-        resolver::F=Reseau.HostResolvers.resolve_tcp_addr,
+        resolver::F=Reseau.HostResolvers.resolve_tcp_addrs,
     ) where {F}
     bind === nothing && return nothing
     address = hostport(bind, 0)
@@ -95,12 +95,27 @@ function resolve_bind(
     return value
 end
 
+function dial_one(address::String, deadline::Int64, local_addr)
+    deadline == 0 && return Reseau.TCP.connect(address; local_addr=local_addr)
+    return Reseau.TCP.connect(address; timeout_ns=remaining_ns(deadline), local_addr=local_addr)
+end
+
 function dial(opts::ConnectOptions, deadline::Int64)
     address = hostport(opts.host, opts.port)
     try
-        local_addr = resolve_bind(opts.bind, deadline)
-        deadline == 0 && return Reseau.TCP.connect(address; local_addr=local_addr)
-        return Reseau.TCP.connect(address; timeout_ns=remaining_ns(deadline), local_addr=local_addr)
+        local_addrs = resolve_bind(opts.bind, deadline)
+        local_addrs === nothing && return dial_one(address, deadline, nothing)
+        first_err = nothing
+        for local_addr in local_addrs
+            try
+                return dial_one(address, deadline, local_addr)
+            catch err
+                (err isa P.TimeoutError || P.is_deadline_error(err)) && rethrow()
+                first_err === nothing && (first_err = err)
+            end
+        end
+        first_err === nothing && error("bind resolver returned no addresses for $(opts.bind)")
+        throw(first_err::Exception)
     catch err
         P.is_deadline_error(err) && throw(P.TimeoutError("connect_timeout expired while connecting to $address"))
         rethrow()
