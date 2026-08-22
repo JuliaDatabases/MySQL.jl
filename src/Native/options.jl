@@ -160,7 +160,66 @@ function world_writable(path::String)
     return (filemode(path) & 0o002) != 0
 end
 
-unquote(v::AbstractString) = (length(v) >= 2 && ((v[1] == '"' && v[end] == '"') || (v[1] == '\'' && v[end] == '\''))) ? v[2:(end - 1)] : v
+function strip_option_comment(value::AbstractString)
+    quote_char = nothing
+    escaped = false
+    for i in eachindex(value)
+        ch = value[i]
+        if escaped
+            escaped = false
+        elseif ch == '\\'
+            escaped = true
+        elseif quote_char === nothing && (ch == '"' || ch == '\'')
+            quote_char = ch
+        elseif quote_char == ch
+            quote_char = nothing
+        elseif quote_char === nothing && ch == '#'
+            return strip(SubString(value, firstindex(value), prevind(value, i)))
+        end
+    end
+    return strip(value)
+end
+
+function option_escape(ch::Char)
+    ch == 'b' && return '\b'
+    ch == 't' && return '\t'
+    ch == 'n' && return '\n'
+    ch == 'r' && return '\r'
+    ch == 's' && return ' '
+    ch == '\\' && return '\\'
+    ch == '"' && return '"'
+    ch == '\'' && return '\''
+    return nothing
+end
+
+function unescape_option_value(value::AbstractString)
+    out = IOBuffer()
+    i = firstindex(value)
+    while i <= lastindex(value)
+        ch = value[i]
+        if ch == '\\' && i < lastindex(value)
+            j = nextind(value, i)
+            escaped = value[j]
+            replacement = option_escape(escaped)
+            if replacement !== nothing
+                write(out, replacement)
+                i = nextind(value, j)
+                continue
+            end
+        end
+        write(out, ch)
+        i = nextind(value, i)
+    end
+    return String(take!(out))
+end
+
+function parse_option_value(value::AbstractString)
+    parsed = strip_option_comment(value)
+    if length(parsed) >= 2 && ((parsed[1] == '"' && parsed[end] == '"') || (parsed[1] == '\'' && parsed[end] == '\''))
+        parsed = parsed[2:(end - 1)]
+    end
+    return unescape_option_value(parsed)
+end
 
 """
     read_option_file(path; group="client") -> Dict{Symbol, String}
@@ -188,7 +247,7 @@ function read_option_file(path::AbstractString; group::AbstractString="client")
         key, value = occursin('=', line) ? (strip(first(split(line, '='; limit=2))), strip(last(split(line, '='; limit=2)))) : (line, "")
         sym = get(OPTION_FILE_KEYS, lowercase(replace(key, '_' => '-')), nothing)
         sym === nothing && continue
-        target[sym] = unquote(value)
+        target[sym] = parse_option_value(value)
     end
     requested_group == "client" || merge!(client_opts, group_opts)
     return client_opts

@@ -106,6 +106,19 @@ end
         @test N.ConnectOptions("h", "u"; option_file=path, option_group="extra").port == 3308
         @test N.ConnectOptions("h", "u"; option_file=path, ssl_mode=:disabled).tls.mode == P.SSL_DISABLED
         @test N.read_option_file(path)[:host] == "db.example"
+        syntax = joinpath(dir, "syntax.cnf")
+        write(syntax, raw"""
+        [client]
+        host = syntax.example # inline comment
+        user = domain\Suser
+        password = "pound#value\tend" # comment outside the quotes
+        ssl-ca = C:\\new\spath
+        """)
+        parsed = N.read_option_file(syntax)
+        @test parsed[:host] == "syntax.example"
+        @test parsed[:user] == "domain\\Suser"
+        @test parsed[:password] == "pound#value\tend"
+        @test parsed[:ssl_ca] == "C:\\new path"
         reversed = joinpath(dir, "reversed.cnf")
         write(reversed, "[extra]\nport=3308\n[client]\nport=3307\n")
         @test N.ConnectOptions("h", "u"; option_file=reversed, option_group="extra").port == 3308
