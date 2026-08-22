@@ -17,7 +17,6 @@ using .API
 
 # Native wire-protocol backend (no Connector/C); see docs/protocol-notes.md
 include("Protocol/Protocol.jl")
-include("Native/Native.jl")
 
 mutable struct Connection <: DBInterface.Connection
     mysql::API.MYSQL
@@ -344,6 +343,9 @@ end
 include("execute.jl")
 include("prepare.jl")
 include("load.jl")
+
+# The native backend's driver layer reuses `juliatype` and the API types above.
+include("Native/Native.jl")
 
 """
     MySQL.escape(conn::MySQL.Connection, str::AbstractString) -> String

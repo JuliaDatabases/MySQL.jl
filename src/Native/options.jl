@@ -31,6 +31,8 @@ struct ConnectOptions
     local_infile_handler::Union{Nothing, Function}
     max_local_infile_bytes::Int
     debug::Bool
+    zero_dates::Symbol
+    time_type::Type
 end
 
 const REMOVED_KEYWORDS = Dict{Symbol, String}(
@@ -68,7 +70,7 @@ const KNOWN_KEYWORDS = Set{Symbol}([
     :option_group, :read_env, :local_infile_handler, :max_local_infile_bytes, :max_buffered_bytes,
     :max_response_bytes, :max_columns, :max_result_sets, :max_metadata_bytes,
     :max_preauth_packet, :max_auth_rounds, :max_auth_bytes, :max_session_state_bytes,
-    :debug, :attrs, :tls_version,
+    :debug, :attrs, :tls_version, :zero_dates, :time_type,
 ])
 
 const TLS_VERSION_NAMES = Dict{String, UInt16}("tlsv1.2" => P.Reseau.TLS.TLS1_2_VERSION, "tlsv1.3" => P.Reseau.TLS.TLS1_3_VERSION)
@@ -381,5 +383,6 @@ function ConnectOptions(host::AbstractString, user::AbstractString, password::Un
     ct = ct isa AbstractString ? parse(Int, ct) : ct
     max_local_infile_bytes = Int(get(kwd, :max_local_infile_bytes, 1024 * 1024 * 1024))
     max_local_infile_bytes > 0 || throw(ArgumentError("max_local_infile_bytes must be positive"))
-    return ConnectOptions(host_s, port, user_s, pw, db, positive_or_nothing(ct, "connect_timeout"), positive_or_nothing(get(kwd, :read_timeout, nothing), "read_timeout"), positive_or_nothing(get(kwd, :write_timeout, nothing), "write_timeout"), pick(:bind, nothing) === nothing ? nothing : String(pick(:bind, nothing)), get(kwd, :init_command, nothing) === nothing ? nothing : String(kwd[:init_command]), something(get(kwd, :reconnect, nothing), false), flags, tls, auth, default_auth === nothing ? nothing : String(default_auth), get(kwd, :can_handle_expired_passwords, false), limits, attrs, handler, max_local_infile_bytes, get(kwd, :debug, false))
+    results = ResultOptions(; zero_dates=Symbol(something(get(kwd, :zero_dates, nothing), :sentinel)), time_type=something(get(kwd, :time_type, nothing), Dates.Time))
+    return ConnectOptions(host_s, port, user_s, pw, db, positive_or_nothing(ct, "connect_timeout"), positive_or_nothing(get(kwd, :read_timeout, nothing), "read_timeout"), positive_or_nothing(get(kwd, :write_timeout, nothing), "write_timeout"), pick(:bind, nothing) === nothing ? nothing : String(pick(:bind, nothing)), get(kwd, :init_command, nothing) === nothing ? nothing : String(kwd[:init_command]), something(get(kwd, :reconnect, nothing), false), flags, tls, auth, default_auth === nothing ? nothing : String(default_auth), get(kwd, :can_handle_expired_passwords, false), limits, attrs, handler, max_local_infile_bytes, get(kwd, :debug, false), results.zero_dates, results.time_type)
 end

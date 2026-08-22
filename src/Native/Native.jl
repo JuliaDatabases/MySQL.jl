@@ -1,19 +1,19 @@
 """
     MySQL.Native
 
-Connection orchestration for the native wire-protocol backend: option validation (the
-compatibility truth table, option files), the single connection-establishment deadline,
-STARTTLS, authentication, the utf8mb4 bootstrap, and the finalizer-free reaper. The
-DBInterface-facing `Native.Connection` arrives in M3; M2 exposes `Native.connect` returning a
-`Handle` around a `Protocol.Session`.
+The native wire-protocol backend's driver layer: option validation (the compatibility truth
+table, option files), the single connection-establishment deadline, STARTTLS,
+authentication, the utf8mb4 bootstrap, the finalizer-free reaper, and text-protocol value decoding (`decode.jl`).
 """
 module Native
 
 using ..Protocol
-using Reseau
+using ..MySQL: MySQL, API, DateAndTime, MySQLInterfaceError
+using Reseau, Dates, DBInterface, Tables, Parsers, DecFP
 
 const P = Protocol
 
+include("decode.jl")
 include("options.jl")
 include("reaper.jl")
 include("connect.jl")
