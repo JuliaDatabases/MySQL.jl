@@ -94,6 +94,11 @@ execute_null_bitmap(payload, nparams) = payload[10:(9 + ((nparams + 7) >> 3))]
     @test_throws P.ProtocolError P.parse_prepare_ok_header(pv(bad_reserved))
 end
 
+@testset "COM_STMT_EXECUTE header shape" begin
+    @test P.build_stmt_execute(0x01020304, UInt8[0xaa, 0xbb]) ==
+          UInt8[0x04, 0x03, 0x02, 0x01, 0x00, 0x01, 0x00, 0x00, 0x00, 0xaa, 0xbb]
+end
+
 @testset "COM_STMT_PREPARE errors and metadata limits" begin
     with_native(c -> begin
         expect_prepare(c)
@@ -197,6 +202,9 @@ end
     @test_throws P.ConversionError N.decode_binary(Int32, UInt8[0x00, 0x00, 0x00, 0x00], 0, 4, o)
     # string, blob, decimal, BIT (big-endian) share the text content decoders
     @test N.decode_binary(String, Vector{UInt8}(codeunits("héllo")), 1, ncodeunits("héllo"), o) == "héllo"
+    @test N.decode_binary(String, UInt8[], 1, 0, o) == ""
+    @test_throws P.ConversionError N.decode_binary(String, UInt8[0x61], 2, 1, o)
+    @test_throws P.ConversionError N.decode_binary(String, UInt8[0x61], typemax(Int), 0, o)
     @test N.decode_binary(Vector{UInt8}, UInt8[0x00, 0xff], 1, 2, o) == UInt8[0x00, 0xff]
     @test N.decode_binary(Dec64, Vector{UInt8}(codeunits("12.345")), 1, 6, o) == d64"12.345"
     @test N.decode_binary(MySQL.API.Bit, UInt8[0x01, 0x02], 1, 2, o) == MySQL.API.Bit(0x0102)
