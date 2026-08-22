@@ -502,6 +502,13 @@ const COL1 = Vectors.payload(Vectors.COLUMN_DEF_COL1)
             @test_throws P.ProtocolError P.read_command_response!(s)
             @test s.phase == P.BROKEN
         end
+        with_peer(conn -> (server_handshake!(conn); read_command(conn); send_packet(conn, 1, vcat(UInt8[0xFE], fill(0xFF, 8))); await_eof(conn))) do client
+            s = P.Session(client)
+            client_handshake!(s)
+            P.query!(s, "SELECT impossible_column_count")
+            @test_throws P.ProtocolError P.read_command_response!(s)
+            @test s.phase == P.BROKEN
+        end
         with_peer(conn -> (server_handshake!(conn); read_command(conn); send_packet(conn, 1, column_count(1)); send_packet(conn, 2, COL1); await_eof(conn))) do client
             s = P.Session(client; limits=P.Limits(; max_metadata_bytes=20))
             client_handshake!(s)

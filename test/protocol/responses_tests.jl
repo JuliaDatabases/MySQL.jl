@@ -115,10 +115,13 @@ end
         @test P.field_type_name(d.type) == "VAR_STRING"
         @test occursin("col1", sprint(show, d))
         @test_throws P.ProtocolError P.parse_column_def(pv(Vectors.payload(Vectors.COLUMN_DEF_COL1)[1:12]))
-        # fixed-length block shorter than the 10 bytes we need
-        bad = copy(Vectors.payload(Vectors.COLUMN_DEF_COL1))
-        bad[14] = 0x05
-        @test_throws P.ProtocolError P.parse_column_def(pv(bad))
+        # The fixed-length block is exactly 0x0C, not an extensible minimum.
+        for fixed in UInt8[0x0A, 0x0B, 0x0D]
+            bad = copy(Vectors.payload(Vectors.COLUMN_DEF_COL1))
+            bad[14] = fixed
+            fixed > 0x0C && append!(bad, zeros(UInt8, fixed - 0x0C))
+            @test_throws P.ProtocolError P.parse_column_def(pv(bad))
+        end
         # MariaDB extended metadata is skipped only when negotiated
         ext = copy(Vectors.payload(Vectors.COLUMN_DEF_COL1))
         insert!(ext, 14, 0x04)

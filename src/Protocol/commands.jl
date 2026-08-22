@@ -156,9 +156,10 @@ end
 
 function read_result_header!(s::Session, p::PacketView, binary::Bool)
     cc = PacketCursor(p)
-    ncols = guarded(() -> Int(read_lenenc!(cc)), s)
+    ncols_wire = guarded(() -> read_lenenc!(cc), s)
     atend(cc) || throw(fault!(s, ProtocolError("malformed column count packet: $(remaining(cc)) trailing bytes")))
-    0 < ncols <= s.limits.max_columns || throw(fault!(s, ProtocolError("column count $ncols is outside 1:$(s.limits.max_columns)")))
+    0 < ncols_wire <= UInt64(s.limits.max_columns) || throw(fault!(s, ProtocolError("column count $ncols_wire is outside 1:$(s.limits.max_columns)")))
+    ncols = Int(ncols_wire)
     transition!(s, :column_count, COLUMN_DEFS)
     columns = Vector{ColumnDef}(undef, ncols)
     for i in 1:ncols
