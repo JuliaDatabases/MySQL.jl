@@ -112,6 +112,10 @@ end
         bad = joinpath(dir, "bad.cnf")
         write(bad, "[client\nhost=x\n")
         @test_throws ArgumentError N.ConnectOptions("h", "u"; option_file=bad)
+        socket_protocol = joinpath(dir, "socket.cnf")
+        write(socket_protocol, "[client]\nprotocol=socket\n")
+        @test_throws ArgumentError N.ConnectOptions("h", "u"; option_file=socket_protocol)
+        @test N.ConnectOptions("h", "u"; option_file=socket_protocol, protocol=:tcp).host == "h"
         # missing file is skipped; .mylogin.cnf is skipped with a warning
         @test N.ConnectOptions("h", "u"; option_file=joinpath(dir, "missing.cnf")).host == "h"
         login = joinpath(dir, ".mylogin.cnf")

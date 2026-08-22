@@ -248,10 +248,10 @@ function ConnectOptions(host::AbstractString, user::AbstractString, password::Un
         v = get(kwd, k, nothing)
         (v === nothing || v === false) || deferred_keyword(k)
     end
-    protocol_is_tcp(get(kwd, :protocol, nothing)) || throw(ArgumentError("only the TCP protocol is supported at the moment"))
     file = load_option_files(; option_file=get(kwd, :option_file, nothing), read_default_file=get(kwd, :read_default_file, nothing), option_group=get(kwd, :option_group, nothing), read_default_group=get(kwd, :read_default_group, nothing))
-    haskey(file, :unix_socket) && delete!(file, :unix_socket)
     pick(k, default) = haskey(kwd, k) && kwd[k] !== nothing ? kwd[k] : haskey(file, k) ? file[k] : default
+    protocol_is_tcp(pick(:protocol, nothing)) || throw(ArgumentError("only the TCP protocol is supported at the moment"))
+    haskey(file, :unix_socket) && delete!(file, :unix_socket)
     host_s = String(host)
     host_s == "" && haskey(file, :host) && (host_s = file[:host])
     user_s = String(user)
