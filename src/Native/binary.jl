@@ -5,7 +5,22 @@
 # policy). Encoding serialises a bound parameter to its wire `(type, unsigned)` and value
 # bytes for `COM_STMT_EXECUTE`, mirroring the 1.x `mysqltype`/`bind!` mapping.
 
+@noinline function invalid_binary_span(pos, len, n)
+    throw(P.ConversionError(
+        "invalid binary value span: offset=$pos, length=$len, buffer_length=$n",
+    ))
+end
+
+@inline function check_binary_span(buf::Vector{UInt8}, pos::Int, len::Int)
+    if len < 0 || pos < 1 || pos > length(buf) + 1 || len > length(buf) - pos + 1
+        invalid_binary_span(pos, len, length(buf))
+    end
+    return nothing
+end
+
 @inline function read_le_uint(buf::Vector{UInt8}, pos::Int, len::Int)
+    0 <= len <= 8 || invalid_binary_span(pos, len, length(buf))
+    check_binary_span(buf, pos, len)
     v = UInt64(0)
     @inbounds for i in 0:(len - 1)
         v |= UInt64(buf[pos + i]) << (8 * i)
@@ -17,11 +32,13 @@ end
 
 function decode_binary(::Type{Union{Missing, T}}, buf::Vector{UInt8}, pos::Int, len::Int, opts::ResultOptions) where {T}
     len < 0 && return missing
+    check_binary_span(buf, pos, len)
     return decode_binary_missing_aware(T, buf, pos, len, opts)
 end
 
 function decode_binary(::Type{T}, buf::Vector{UInt8}, pos::Int, len::Int, opts::ResultOptions) where {T}
     len < 0 && null_in_not_null(T)
+    check_binary_span(buf, pos, len)
     return decode_binary_value(T, buf, pos, len, opts)
 end
 
@@ -43,12 +60,19 @@ decode_binary_value(::Type{Dec64}, buf::Vector{UInt8}, pos::Int, len::Int, opts:
 decode_binary_value(::Type{API.Bit}, buf::Vector{UInt8}, pos::Int, len::Int, opts::ResultOptions) = decode_value(API.Bit, buf, pos, len, opts)
 
 function decode_binary_value(::Type{T}, buf::Vector{UInt8}, pos::Int, len::Int, ::ResultOptions) where {T <: Base.BitInteger}
-    u = read_le_uint(buf, pos, len)
+    u = read_le_uint(buf, pos, min(len, sizeof(T)))
     return T <: Signed ? Core.bitcast(T, (unsigned(T))(u)) : T(u)
 end
 
-decode_binary_value(::Type{Float32}, buf::Vector{UInt8}, pos::Int, len::Int, ::ResultOptions) = Core.bitcast(Float32, UInt32(read_le_uint(buf, pos, 4)))
-decode_binary_value(::Type{Float64}, buf::Vector{UInt8}, pos::Int, len::Int, ::ResultOptions) = Core.bitcast(Float64, read_le_uint(buf, pos, 8))
+function decode_binary_value(::Type{Float32}, buf::Vector{UInt8}, pos::Int, len::Int, ::ResultOptions)
+    len == 4 || conversion_error(Float32, "binary FLOAT value has width $len instead of 4")
+    return Core.bitcast(Float32, UInt32(read_le_uint(buf, pos, len)))
+end
+
+function decode_binary_value(::Type{Float64}, buf::Vector{UInt8}, pos::Int, len::Int, ::ResultOptions)
+    len == 8 || conversion_error(Float64, "binary DOUBLE value has width $len instead of 8")
+    return Core.bitcast(Float64, read_le_uint(buf, pos, len))
+end
 
 # ---- binary temporal ----
 
@@ -77,12 +101,16 @@ end
 function binary_time_micros(buf::Vector{UInt8}, pos::Int, len::Int)
     len == 0 && return Int64(0)
     (len == 8 || len == 12) || return nothing
-    neg = buf[pos] != 0x00
+    negbyte = buf[pos]
+    negbyte <= 0x01 || return nothing
     days = Int64(read_u32le(buf, pos + 1))
     h = Int64(buf[pos + 5]); mi = Int64(buf[pos + 6]); s = Int64(buf[pos + 7])
     micros = len == 12 ? Int64(read_u32le(buf, pos + 8)) : Int64(0)
-    total = (((days * 24 + h) * 60 + mi) * 60 + s) * 1_000_000 + micros
-    return neg ? -total : total
+    (h < 24 && mi < 60 && s < 60 && micros < 1_000_000) || return nothing
+    hours = days * 24 + h
+    hours <= 838 || return nothing
+    total = ((hours * 60 + mi) * 60 + s) * 1_000_000 + micros
+    return negbyte == 0x01 ? -total : total
 end
 
 # Shared with the `zero_dates=:missing` widening check.
@@ -107,6 +135,7 @@ function decode_binary_value(::Type{DateTime}, buf::Vector{UInt8}, pos::Int, len
     kind == :zero && return zero_date_value(DateTime, buf, pos, len, opts)
     kind == :partial && conversion_error(DateTime, "partial zero date in a binary DATETIME value (use zero_dates=:missing)")
     y, mo, d, h, mi, s, micros = parts
+    micros < 1_000_000 || conversion_error(DateTime, buf, pos, len)
     # Preserve 1.x prepared-statement behaviour: sub-millisecond precision warns and then
     # truncates to milliseconds (the text path warns and fails; both mirror `MYSQL_TIME`).
     micros % 1000 == 0 || API.dateandtime_warning()
@@ -122,6 +151,7 @@ function decode_binary_value(::Type{DateAndTime}, buf::Vector{UInt8}, pos::Int, 
     kind == :partial && conversion_error(DateAndTime, "partial zero date in a binary DATETIME value (use zero_dates=:missing)")
     y, mo, d, h, mi, s, micros = parts
     Dates.validargs(Date, y, mo, d) === nothing || conversion_error(DateAndTime, buf, pos, len)
+    (h < 24 && mi < 60 && s < 60 && micros < 1_000_000) || conversion_error(DateAndTime, buf, pos, len)
     millis, micro = divrem(micros, 1000)
     return DateAndTime(Date(y, mo, d), Time(h, mi, s, millis, micro))
 end

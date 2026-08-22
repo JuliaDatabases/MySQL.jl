@@ -132,9 +132,13 @@ end
     @test N.decode_binary(Int64, reinterpret(UInt8, [typemin(Int64)]) |> collect, 1, 8, o) === typemin(Int64)
     @test N.decode_binary(UInt64, fill(0xFF, 8), 1, 8, o) === typemax(UInt64)
     @test N.decode_binary(UInt64, UInt8[0xE8, 0x07], 1, 2, o) === UInt64(2024)   # YEAR: 2-byte wire → UInt64
+    @test N.decode_binary(Int8, Vector{UInt8}(codeunits("Management")), 1, 10, o) === Int8('M')  # preserved ENUM/Cchar truncation
     # floats
     @test N.decode_binary(Float32, reinterpret(UInt8, [1.25f0]) |> collect, 1, 4, o) === 1.25f0
     @test N.decode_binary(Float64, reinterpret(UInt8, [-2.5]) |> collect, 1, 8, o) === -2.5
+    @test_throws P.ConversionError N.decode_binary(Float64, UInt8[0x00, 0x00, 0x00, 0x00], 1, 4, o)
+    @test_throws P.ConversionError N.decode_binary(Float32, UInt8[0x00, 0x00, 0x00, 0x00], 2, 4, o)
+    @test_throws P.ConversionError N.decode_binary(Int32, UInt8[0x00, 0x00, 0x00, 0x00], 0, 4, o)
     # string, blob, decimal, BIT (big-endian) share the text content decoders
     @test N.decode_binary(String, Vector{UInt8}(codeunits("héllo")), 1, ncodeunits("héllo"), o) == "héllo"
     @test N.decode_binary(Vector{UInt8}, UInt8[0x00, 0xff], 1, 2, o) == UInt8[0x00, 0xff]
@@ -162,6 +166,16 @@ end
     @test_throws P.ConversionError N.decode_binary(Time, time12, 1, 12, o)   # ≥ 24h does not fit Dates.Time
     neg = vcat(UInt8[0x01], reinterpret(UInt8, UInt32[0]), UInt8[0x01, 0x02, 0x03])
     @test N.decode_binary(Dates.Microsecond, neg, 1, 8, N.ResultOptions(; time_type=Dates.Microsecond)) == Dates.Microsecond(-((1 * 3600 + 2 * 60 + 3) * 1_000_000))
+    max_time = vcat(UInt8[0x00], reinterpret(UInt8, UInt32[34]), UInt8[0x16, 0x3b, 0x3b], reinterpret(UInt8, UInt32[999999]))
+    max_micros = ((838 * 60 + 59) * 60 + 59) * 1_000_000 + 999_999
+    @test N.decode_binary(Dates.Microsecond, max_time, 1, 12, N.ResultOptions(; time_type=Dates.Microsecond)) == Dates.Microsecond(max_micros)
+    @test_throws P.ConversionError N.decode_binary(Dates.Microsecond, vcat(UInt8[0x02], max_time[2:end]), 1, 12, o)
+    @test_throws P.ConversionError N.decode_binary(Dates.Microsecond, vcat(UInt8[0x00], reinterpret(UInt8, UInt32[35]), UInt8[0x00, 0x00, 0x00]), 1, 8, o)
+    @test_throws P.ConversionError N.decode_binary(Dates.Microsecond, UInt8[0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x3c, 0x00], 1, 8, o)
+    bad_micros = vcat(time8, reinterpret(UInt8, UInt32[1_000_000]))
+    @test_throws P.ConversionError N.decode_binary(Dates.Microsecond, bad_micros, 1, 12, o)
+    bad_clock = vcat(UInt8[0xe8, 0x07, 0x02, 0x1d, 0x18, 0x00, 0x00], reinterpret(UInt8, UInt32[0]))
+    @test_throws P.ConversionError N.decode_binary(MySQL.DateAndTime, bad_clock, 1, 11, o)
     # invalid length is a conversion error, not an out-of-bounds read
     @test_throws P.ConversionError N.decode_binary(DateTime, UInt8[0x00, 0x00, 0x00], 1, 3, o)
 end
