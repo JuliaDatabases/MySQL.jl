@@ -118,12 +118,12 @@ stmt_execute!(s::Session, statement_id::Integer, param_block::AbstractVector{UIn
     stmt_reset!(s, statement_id)
 
 `COM_STMT_RESET`: drops any accumulated long data and closes an open cursor. Answered with a
-single OK/ERR (read with `read_command_response!(s; kind=CMD_SIMPLE)`).
+single OK/ERR; an ERR is classified as `StmtError`.
 """
 function stmt_reset!(s::Session, statement_id::Integer)
     buf = UInt8[]
     write_u32!(buf, statement_id)
-    return send_command!(s, COM_STMT_RESET, buf; kind=CMD_SIMPLE)
+    return send_command!(s, COM_STMT_RESET, buf; kind=CMD_STMT_RESET)
 end
 
 """

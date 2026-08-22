@@ -155,6 +155,8 @@ end
         @test_throws P.ProtocolError P.classify_auth(pv(UInt8[]), true)
         @test P.classify_command_response(P.CMD_SIMPLE, pv(UInt8[0x00])) == :ok
         @test P.classify_command_response(P.CMD_SIMPLE, pv(UInt8[0xFF])) == :err
+        @test P.classify_command_response(P.CMD_STMT_RESET, pv(UInt8[0x00])) == :ok
+        @test P.classify_command_response(P.CMD_STMT_RESET, pv(UInt8[0xFF])) == :err
         @test_throws P.ProtocolError P.classify_command_response(P.CMD_SIMPLE, pv(UInt8[0x01]))
         @test_throws P.ProtocolError P.classify_command_response(P.CMD_SIMPLE, pv(UInt8[]))
         @test P.classify_command_response(P.CMD_SET_OPTION, pv(UInt8[0x00])) == :ok

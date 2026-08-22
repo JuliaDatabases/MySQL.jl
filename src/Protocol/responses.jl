@@ -199,7 +199,8 @@ end
 # ---- classification ----
 
 @enum CommandKind begin
-    CMD_SIMPLE        # COM_PING, COM_INIT_DB, COM_SET_OPTION, COM_RESET_CONNECTION, COM_STMT_RESET
+    CMD_SIMPLE        # COM_PING, COM_INIT_DB, COM_RESET_CONNECTION
+    CMD_STMT_RESET    # COM_STMT_RESET: OK | statement ERR
     CMD_QUERY         # COM_QUERY: OK | ERR | LOCAL INFILE | text result set
     CMD_LOCAL_INFILE  # upload response: OK | ERR; restores CMD_QUERY before later results
     CMD_STMT_PREPARE  # COM_STMT_PREPARE: PREPARE_OK | ERR
@@ -249,7 +250,7 @@ function classify_command_response(kind::CommandKind, p::PacketView)
     b = first_byte(p)
     b === nothing && return unexpected_packet(CMD_SENT, p)
     b == ERR_HEADER && return :err
-    if kind == CMD_SIMPLE || kind == CMD_LOCAL_INFILE
+    if kind == CMD_SIMPLE || kind == CMD_STMT_RESET || kind == CMD_LOCAL_INFILE
         b == OK_HEADER && return :ok
         return unexpected_packet(CMD_SENT, p)
     elseif kind == CMD_SET_OPTION

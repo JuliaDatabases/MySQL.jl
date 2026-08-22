@@ -437,6 +437,46 @@ end
     @test sent[2] == vcat(reinterpret(UInt8, UInt32[5]), reinterpret(UInt8, UInt16[0]), UInt8[0x63])
 end
 
+@testset "prepared response errors retain StmtError" begin
+    cols = [coldef("x"; type=P.MYSQL_TYPE_LONG, flags=NOT_NULL)]
+    with_native(c -> begin
+        expect_prepare(c)
+        send_prepare_ok(c, 1, 51, P.ColumnDef[], cols)
+        expect_execute(c)
+        send_packet(c, 1, column_count(1))
+        send_packet(c, 2, cols[1])
+        send_err(c, 3, P.ER_QUERY_INTERRUPTED, "row failed")
+
+        _, cmd, payload = read_command(c)
+        @test cmd == P.COM_STMT_RESET
+        @test payload == reinterpret(UInt8, UInt32[51])
+        send_err(c, 1, 1243, "unknown statement")
+    end) do conn
+        stmt = DBInterface.prepare(conn, "SELECT x FROM t")
+        cur = DBInterface.execute(stmt; mysql_store_result=false)
+        rowerr = try
+            iterate(cur)
+            nothing
+        catch err
+            err
+        end
+        @test rowerr isa P.StmtError
+        @test rowerr.errno == P.ER_QUERY_INTERRUPTED
+
+        s = N.session(conn)
+        P.stmt_reset!(s, stmt.statement_id)
+        reseterr = try
+            P.read_command_response!(s)
+            nothing
+        catch err
+            err
+        end
+        @test reseterr isa P.StmtError
+        @test reseterr.errno == 1243
+        DBInterface.close!(stmt)
+    end
+end
+
 @testset "pre-DEPRECATE_EOF prepare reads the definition EOFs" begin
     caps = MYSQL8_SERVER_CAPS & ~P.CLIENT_SSL & ~P.CLIENT_DEPRECATE_EOF
     cols = [coldef("x"; type=P.MYSQL_TYPE_LONG, flags=NOT_NULL)]

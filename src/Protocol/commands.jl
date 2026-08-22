@@ -157,7 +157,9 @@ end
 function throw_command_err!(s::Session, p::PacketView, kind::CommandKind)
     e = guarded(() -> parse_err(p, s.capabilities), s)
     transition!(s, :err, READY)
-    (kind == CMD_STMT_PREPARE || kind == CMD_STMT_EXECUTE) && throw(StmtError(e))
+    if kind == CMD_STMT_PREPARE || kind == CMD_STMT_EXECUTE || kind == CMD_STMT_RESET
+        throw(StmtError(e))
+    end
     throw(Error(e))
 end
 
@@ -206,8 +208,9 @@ end
     read_row!(s; binary=false, dest=s.io.inbuf) -> PacketView | ResultEnd
 
 Reads the next row packet (returned as a view over `dest`, valid until the next read into
-that buffer) or the result-set terminator. A server ERR in row state ends the result set,
-returns the session to READY, and is thrown as `Error`.
+that buffer) or the result-set terminator. A server ERR in row state ends the result set and
+returns the session to READY. It is thrown as `StmtError` for a binary prepared response and
+as `Error` for a text response.
 """
 function read_row!(s::Session; binary::Bool=s.command_kind == CMD_STMT_EXECUTE, dest::Vector{UInt8}=s.io.inbuf)
     require_phase(s, ROWS)
@@ -219,7 +222,7 @@ function read_row!(s::Session; binary::Bool=s.command_kind == CMD_STMT_EXECUTE, 
     elseif what == :err
         e = guarded(() -> parse_err(p, s.capabilities), s)
         transition!(s, :err, READY)
-        throw(Error(e))
+        throw(binary ? StmtError(e) : Error(e))
     end
     return finish_result!(s, p)
 end
