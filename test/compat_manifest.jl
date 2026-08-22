@@ -49,6 +49,62 @@ end
 
 schema_pairs(cur) = collect(zip(Tables.schema(cur).names, Tables.schema(cur).types))
 
+function prepared_parameter_roundtrip(conn)
+    DBInterface.execute(conn, "DROP TEMPORARY TABLE IF EXISTS manifest_params")
+    DBInterface.execute(conn, """CREATE TEMPORARY TABLE manifest_params (
+        i8 TINYINT NOT NULL, u8 TINYINT UNSIGNED NOT NULL,
+        i16 SMALLINT NOT NULL, u16 SMALLINT UNSIGNED NOT NULL,
+        i32 INT NOT NULL, u32 INT UNSIGNED NOT NULL,
+        i64 BIGINT NOT NULL, u64 BIGINT UNSIGNED NOT NULL,
+        f32 FLOAT NOT NULL, f64 DOUBLE NOT NULL,
+        d64 DECIMAL(16, 6) NOT NULL, d128 DECIMAL(35, 6) NOT NULL,
+        s VARCHAR(64) NOT NULL, bytes BLOB NOT NULL, bit_bytes BLOB NOT NULL,
+        d DATE NOT NULL, dt DATETIME(3) NOT NULL, dat DATETIME(6) NOT NULL,
+        tm TIME(6) NOT NULL, m INT NULL, n INT NULL)""")
+    stmt = DBInterface.prepare(conn, """INSERT INTO manifest_params VALUES (
+        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""")
+    try
+        DBInterface.execute(stmt, (
+            typemin(Int8), typemax(UInt8), typemin(Int16), typemax(UInt16),
+            typemin(Int32), typemax(UInt32), typemin(Int64), typemax(UInt64),
+            1.5f0, -2.5, d64"12.345678",
+            Dec128("12345678901234567890123456789.123456"),
+            "héllo", UInt8[0x00, 0xff], MySQL.API.Bit(0x0102),
+            Date(2024, 2, 29), DateTime(2024, 2, 29, 13, 14, 15, 250),
+            MySQL.DateAndTime(Date(2024, 2, 29), Time(13, 14, 15, 250, 500)),
+            Time(13, 14, 15, 250, 500), missing, nothing,
+        ))
+    finally
+        DBInterface.close!(stmt)
+    end
+    values = Tables.columntable(DBInterface.execute(conn, """SELECT
+        i8, u8, i16, u16, i32, u32, i64, u64, f32, f64,
+        CAST(d64 AS CHAR) AS d64, CAST(d128 AS CHAR) AS d128,
+        s, HEX(bytes) AS bytes, HEX(bit_bytes) AS bit_bytes,
+        DATE_FORMAT(d, '%Y-%m-%d') AS d,
+        DATE_FORMAT(dt, '%Y-%m-%d %H:%i:%s.%f') AS dt,
+        DATE_FORMAT(dat, '%Y-%m-%d %H:%i:%s.%f') AS dat,
+        TIME_FORMAT(tm, '%H:%i:%s.%f') AS tm,
+        m IS NULL AS m_null, n IS NULL AS n_null
+        FROM manifest_params"""))
+    DBInterface.execute(conn, "DROP TEMPORARY TABLE manifest_params")
+    return values
+end
+
+function prepared_bool_parameter(conn)
+    DBInterface.execute(conn, "SET SESSION SQL_MODE=''")
+    DBInterface.execute(conn, "CREATE TEMPORARY TABLE manifest_bool (v BOOL)")
+    stmt = DBInterface.prepare(conn, "INSERT INTO manifest_bool VALUES (?)")
+    try
+        DBInterface.execute(stmt, (true,))
+    finally
+        DBInterface.close!(stmt)
+    end
+    value = only(Tables.columntable(DBInterface.execute(conn, "SELECT v FROM manifest_bool")).v)
+    DBInterface.execute(conn, "DROP TEMPORARY TABLE manifest_bool")
+    return value == 1 ? :one : :zero
+end
+
 # A tuple, not an array literal: `end` inside `[...]` is the last-index token, which breaks
 # `begin ... end` closure bodies.
 const TEXT_ROW_TUPLE = (
@@ -167,6 +223,10 @@ const BINARY_ROW_TUPLE = (
             DBInterface.execute(conn, "DELETE FROM manifest_employee WHERE Name = 'prep'")
             r
         end),
+    Row("prepared parameters round-trip every supported non-Bool family", :preserve,
+        prepared_parameter_roundtrip),
+    Row("prepared Bool uses TINY instead of the 1.x empty-STRING fallback", :fix,
+        prepared_bool_parameter; native=:one, legacy=:zero),
     Row("executemany bulk-inserts each parameter row in a transaction", :preserve,
         conn -> begin
             DBInterface.execute(conn, "CREATE TEMPORARY TABLE manifest_many (a INT, b VARCHAR(8))")
