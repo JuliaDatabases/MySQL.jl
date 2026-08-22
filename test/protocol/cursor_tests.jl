@@ -278,7 +278,7 @@ end
         end; caps=caps) do conn
             cur = DBInterface.execute(conn, "select"; mysql_store_result=buffered)
             @test [r.x for r in cur] == [7]
-            @test cur.ok === nothing && cur.status == P.SERVER_STATUS_AUTOCOMMIT
+            @test cur.ok === nothing && cur.status == P.SERVER_STATUS_AUTOCOMMIT && cur.warnings == 2
             @test DBInterface.lastrowid(cur) == 0
         end
     end

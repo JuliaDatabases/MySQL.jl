@@ -146,13 +146,14 @@ source are never read.
   `Error`; whatever a plain `execute` left unread is drained by the next operation.
 - **Snapshots**: `rows_affected` is the preserved `Int64` bitcast; `lastrowid` comes from the
   cursor's own OK/terminator (a SELECT cursor reports 0 under DEPRECATE_EOF, where 1.x
-  reported the connection's sticky value); a DML cursor has `length == 0` (1.x: -1).
+  reported the connection's sticky value); status and warning counts are retained for both
+  OK and legacy EOF terminators; a DML cursor has `length == 0` (1.x: -1).
 - **Decoding policies** (`ResultOptions`): BIT is the big-endian value of all bytes (1.x read
   the first byte only); TIME decodes to `Dates.Time` for `0 ≤ t < 24h` and raises
   `ConversionError` otherwise, `time_type=Dates.Microsecond` is lossless; `zero_dates`
   (`:sentinel` default → `Date(0)`/`DateTime(0)`, `:missing` → `missing` and every date
   column typed `Union{Missing,T}`, `:error`); partial zero dates are errors unless
-  `:missing`; DATETIME values with sub-millisecond digits warn once and truncate (1.x warned,
+  `:missing`; DATETIME values with sub-millisecond digits warn and truncate (1.x warned,
   then failed). `DateAndTime` scales one-to-six fractional digits to microseconds (1.x
   treated the digits as an unscaled microsecond count, which was correct only at precision 6).
 - **LOCAL INFILE** follows the plan's state table: refusal (`nothing`) always raises

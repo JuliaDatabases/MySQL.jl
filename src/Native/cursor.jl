@@ -24,6 +24,7 @@ mutable struct TextCursor{buffered} <: DBInterface.Cursor
     rows_affected::Int64
     ok::Union{Nothing, P.OKPacket}
     status::UInt16
+    warnings::UInt16
     buf::Vector{UInt8}
     spare::Vector{UInt8}
     rowstarts::Vector{Int}
@@ -87,7 +88,7 @@ Base.length(c::TextCursor) = c.nrows
 # ---- construction from a command response ----
 
 function empty_cursor(conn::Connection, sql::String, token::Int, ok::P.OKPacket, buffered::Bool, opts::ResultOptions, number::Int)
-    c = TextCursor{buffered}(conn, sql, token, @atomic(conn.generation), Symbol[], Type[], Dict{Symbol, Int}(), 0, 0, Core.bitcast(Int64, ok.affected_rows), ok, ok.status, UInt8[], UInt8[], Int[], Int[], Int[], 0, 0, number, true, false, opts)
+    c = TextCursor{buffered}(conn, sql, token, @atomic(conn.generation), Symbol[], Type[], Dict{Symbol, Int}(), 0, 0, Core.bitcast(Int64, ok.affected_rows), ok, ok.status, ok.warnings, UInt8[], UInt8[], Int[], Int[], Int[], 0, 0, number, true, false, opts)
     P.more_results(ok) || release_token!(c)
     return c
 end
@@ -99,7 +100,7 @@ function result_cursor(conn::Connection, sql::String, token::Int, header::P.Resu
     names = [Symbol(col.name) for col in header.columns]
     types = Type[juliatype(col, opts) for col in header.columns]
     lookup = Dict{Symbol, Int}(nm => i for (i, nm) in enumerate(names))
-    c = TextCursor{buffered}(conn, sql, token, @atomic(conn.generation), names, types, lookup, n, buffered ? 0 : -1, Int64(0), nothing, UInt16(0), UInt8[], UInt8[], Int[], Vector{Int}(undef, n), Vector{Int}(undef, n), 0, 0, number, false, false, opts)
+    c = TextCursor{buffered}(conn, sql, token, @atomic(conn.generation), names, types, lookup, n, buffered ? 0 : -1, Int64(0), nothing, UInt16(0), UInt16(0), UInt8[], UInt8[], Int[], Vector{Int}(undef, n), Vector{Int}(undef, n), 0, 0, number, false, false, opts)
     buffered && buffer_rows!(c, s)
     return c
 end
@@ -114,6 +115,7 @@ end
 # distinguish a later foreign command from an ordinary stale-row error.
 function finish!(c::TextCursor{buffered}, r::P.ResultEnd) where {buffered}
     c.status = r.status
+    c.warnings = r.warnings
     c.ok = r.ok
     c.finished = true
     (!r.more_results && buffered) && release_token!(c)
