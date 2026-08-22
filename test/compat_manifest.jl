@@ -108,15 +108,12 @@ const TEXT_ROW_TUPLE = (
             DBInterface.execute(conn, "SET SESSION SQL_MODE=''")
             try; Tables.columntable(DBInterface.execute(conn, "SELECT CAST('0000-00-00' AS DATE) AS d")).d; catch e; :error; end
         end; native=Union{Missing, Date}[Date(0)], legacy=:error),
-    Row("DATETIME with microsecond precision: warn and truncate to milliseconds (1.x warned, then failed)", :fix,
-        conn -> try; Tables.columntable(DBInterface.execute(conn, "SELECT CAST('2021-01-02 01:02:03.456789' AS DATETIME(6)) AS dt")).dt; catch e; :error; end;
-        native=Union{Missing, DateTime}[DateTime(2021, 1, 2, 1, 2, 3, 456)], legacy=:error),
+    Row("DATETIME with sub-millisecond precision warns and fails", :preserve,
+        conn -> try; Tables.columntable(DBInterface.execute(conn, "SELECT CAST('2021-01-02 01:02:03.456789' AS DATETIME(6)) AS dt")).dt; catch; :error; end),
     Row("mysql_date_and_time=true maps DATETIME(6) to DateAndTime", :preserve,
         conn -> Tables.columntable(DBInterface.execute(conn, "SELECT CAST('2021-01-02 01:02:03.456789' AS DATETIME(6)) AS dt"; mysql_date_and_time=true)).dt),
-    Row("DateAndTime scales DATETIME(1) fractions to microseconds (1.x treated the digits as microseconds)", :fix,
-        conn -> Tables.columntable(DBInterface.execute(conn, "SELECT CAST('2021-01-02 01:02:03.4' AS DATETIME(1)) AS dt"; mysql_date_and_time=true)).dt;
-        native=Union{Missing, DateAndTime}[DateAndTime(Date(2021, 1, 2), Time(1, 2, 3, 400))],
-        legacy=Union{Missing, DateAndTime}[DateAndTime(Date(2021, 1, 2), Time(1, 2, 3, 0, 4))]),
+    Row("DateAndTime preserves the 1.x unscaled DATETIME(1) fraction", :preserve,
+        conn -> Tables.columntable(DBInterface.execute(conn, "SELECT CAST('2021-01-02 01:02:03.4' AS DATETIME(1)) AS dt"; mysql_date_and_time=true)).dt),
     Row("transaction returns f()'s value and commits", :preserve,
         conn -> begin
             v = DBInterface.transaction(conn) do

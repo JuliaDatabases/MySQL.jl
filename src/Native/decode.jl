@@ -212,7 +212,10 @@ function decode_value(::Type{DateTime}, buf::Vector{UInt8}, pos::Int, len::Int, 
     kind == :zero && return zero_date_value(DateTime, buf, pos, len, opts)
     kind == :partial && conversion_error(DateTime, "partial zero date \"$(String(buf[pos:(pos + len - 1)]))\" (use zero_dates=:missing)")
     y, mo, d, h, mi, s, micros = parts
-    micros % 1000 == 0 || API.dateandtime_warning()                       # truncated to milliseconds (1.x warned, then failed)
+    if micros % 1000 != 0
+        API.dateandtime_warning()
+        conversion_error(DateTime, buf, pos, len)
+    end
     Dates.validargs(DateTime, y, mo, d, h, mi, s, micros ÷ 1000) === nothing || conversion_error(DateTime, buf, pos, len)
     return DateTime(y, mo, d, h, mi, s, micros ÷ 1000)
 end
@@ -226,7 +229,11 @@ function decode_value(::Type{DateAndTime}, buf::Vector{UInt8}, pos::Int, len::In
     y, mo, d, h, mi, s, micros = parts
     Dates.validargs(Date, y, mo, d) === nothing || conversion_error(DateAndTime, buf, pos, len)
     (h < 24 && mi < 60 && s < 60) || conversion_error(DateAndTime, buf, pos, len)
-    return DateAndTime(Date(y, mo, d), Time(h, mi, s, micros ÷ 1000, micros % 1000))
+    # Preserve 1.x: fractional digits were treated as an unscaled microsecond count. This is
+    # numerically correct only when the server sends all six fractional digits.
+    fraction_digits = len == 19 ? 0 : len - 20
+    legacy_micros = fraction_digits == 0 ? 0 : micros ÷ (10 ^ (6 - fraction_digits))
+    return DateAndTime(Date(y, mo, d), Time(h, mi, s) + Dates.Microsecond(legacy_micros))
 end
 
 # TIME: [-]H+:MM:SS[.ffffff], hours up to 838. Returns the signed total in microseconds.

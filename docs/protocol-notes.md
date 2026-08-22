@@ -153,9 +153,9 @@ source are never read.
   `ConversionError` otherwise, `time_type=Dates.Microsecond` is lossless; `zero_dates`
   (`:sentinel` default → `Date(0)`/`DateTime(0)`, `:missing` → `missing` and every date
   column typed `Union{Missing,T}`, `:error`); partial zero dates are errors unless
-  `:missing`; DATETIME values with sub-millisecond digits warn and truncate (1.x warned,
-  then failed). `DateAndTime` scales one-to-six fractional digits to microseconds (1.x
-  treated the digits as an unscaled microsecond count, which was correct only at precision 6).
+  `:missing`; DATETIME values with sub-millisecond digits preserve the 1.x warning and
+  conversion failure. `DateAndTime` preserves the 1.x unscaled fractional-digit quirk,
+  which is numerically correct only at precision 6.
 - **LOCAL INFILE** follows the plan's state table: refusal (`nothing`) always raises
   `LocalInfileRefused` even when the server accepts the empty upload; a handler error before
   any data (including the source's first read) is re-raised after resynchronizing; an error,

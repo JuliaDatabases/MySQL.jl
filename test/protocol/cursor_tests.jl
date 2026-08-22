@@ -191,7 +191,9 @@ end
         @test row.s == "héllo" && row.b == UInt8[0x00, 0x01] && row.bit == MySQL.API.Bit(0x0102)
         @test_throws P.ConversionError row.tm                               # 838 h does not fit Dates.Time
         @test row.da == Date(2024, 2, 29) && row.y === UInt64(2024)                 # YEAR is an unsigned numeric (Clong → UInt64)
-        @test (@test_logs (:warn, r"microsecond") row.dt) == DateTime(2024, 2, 29, 13, 14, 15, 250)
+        @test_logs (:warn, r"microsecond") begin
+            @test_throws P.ConversionError row.dt
+        end
         @test propertynames(row) == [:i, :u, :f, :d, :s, :b, :bit, :dt, :da, :tm, :y] && length(row) == 11
         @test Base.IndexStyle(typeof(row)) == Base.IndexLinear()
         row2, _ = iterate(cur, st)
@@ -245,7 +247,8 @@ end
     @test_throws P.ConversionError decode_text(Dates.Microsecond, "839:00:00"; opts=duration)
     @test_throws P.ConversionError decode_text(Dates.Microsecond, "01:02:03."; opts=duration)
     @test_throws P.ConversionError decode_text(Dates.Microsecond, "01:02:03.1234567"; opts=duration)
-    @test decode_text(DateAndTime, "2024-01-01 00:00:00.1") == DateAndTime(Date(2024, 1, 1), Time(0, 0, 0, 100))
+    @test decode_text(DateAndTime, "2024-01-01 00:00:00.1") == DateAndTime(Date(2024, 1, 1), Time(0, 0, 0, 0, 1))
+    @test decode_text(DateAndTime, "2024-01-01 00:00:00.123456") == DateAndTime(Date(2024, 1, 1), Time(0, 0, 0, 123, 456))
 end
 
 @testset "DML cursors, lastrowid snapshots, rows_affected bitcast" begin
