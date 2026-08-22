@@ -116,6 +116,7 @@ function parse_initial_err(p::PacketView)
     c = PacketCursor(p)
     read_u8!(c) == ERR_HEADER || protocol_error("expected ERR packet")
     code = read_u16!(c)
+    validate_server_errno(code)
     return ERRPacket(code, "", read_eof_string!(c))
 end
 

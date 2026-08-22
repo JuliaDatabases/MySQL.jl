@@ -116,6 +116,8 @@ pview(payload::Vector{UInt8}; seq=0x00) = P.PacketView(payload, 1, length(payloa
         @test e.code == 0x0410
         @test e.sqlstate == ""
         @test e.msg == "#ABCDEToo many connections"
+        @test_throws P.ProtocolError P.parse_initial_err(pview(UInt8[0xFF, 0xDD, 0x07]))
+        @test_throws P.ProtocolError P.parse_initial_err(pview(UInt8[0xFF, 0xFF, 0xFF]))
     end
 
     @testset "vendor SSLRequest and HandshakeResponse41" begin

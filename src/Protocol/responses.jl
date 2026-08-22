@@ -139,6 +139,12 @@ end
 
 # ---- EOF / ERR ----
 
+function validate_server_errno(code::UInt16)
+    code == MARIADB_ER_PROGRESS && protocol_error("unexpected MariaDB progress packet (MARIADB_CLIENT_PROGRESS was not negotiated)")
+    is_client_reserved_errno(code) && protocol_error("server ERR packet carries client-reserved error code $(Int(code))")
+    return nothing
+end
+
 function parse_eof(p::PacketView, caps::UInt64)
     c = PacketCursor(p)
     read_u8!(c) == EOF_HEADER || protocol_error("expected EOF packet")
@@ -157,8 +163,7 @@ function parse_err(p::PacketView, caps::UInt64)
     c = PacketCursor(p)
     read_u8!(c) == ERR_HEADER || protocol_error("expected ERR packet")
     code = read_u16!(c)
-    code == MARIADB_ER_PROGRESS && protocol_error("unexpected MariaDB progress packet (MARIADB_CLIENT_PROGRESS was not negotiated)")
-    is_client_reserved_errno(code) && protocol_error("server ERR packet carries client-reserved error code $(Int(code))")
+    validate_server_errno(code)
     sqlstate = ""
     if has_capability(caps, CLIENT_PROTOCOL_41) && remaining(c) >= 1 + SQLSTATE_LENGTH && peek_u8(c) == SQLSTATE_MARKER
         skip!(c, 1, "sql_state_marker")
