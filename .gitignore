@@ -42,3 +42,8 @@ deps/build.log
 Manifest.toml
 
 .vscode/
+
+# Documentation build and native-backend artifacts
+docs/build/
+fuzz_failures/
+*.cov

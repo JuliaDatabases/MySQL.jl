@@ -1,7 +1,7 @@
 name = "MySQL"
 uuid = "39abe10b-433b-5dbd-92d4-e302a9df00cd"
 author = ["quinnj"]
-version = "1.6.0"
+version = "1.7.0"
 
 [deps]
 DBInterface = "a10d1c49-ce27-4219-8d33-6db1a4562965"
@@ -24,7 +24,7 @@ Harbor = "1.0.3"
 MariaDB_Connector_C_jll = "3.1.12"
 OpenSSL_jll = "3"
 Parsers = "0.3, 1, 2"
-Reseau = "1.4"
+Reseau = "1.4.1"
 SHA = "0.7.0"
 Tables = "1"
 julia = "1.10"

@@ -13,6 +13,7 @@ jobs:
     name: Julia ${{ matrix.version }} - ${{ matrix.os }} - ${{ matrix.arch }} - ${{ github.event_name }}
     if: github.event_name != 'schedule'
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -77,6 +78,27 @@ jobs:
         with:
           name: fuzz-failures
           path: fuzz_failures/
+  perf:
+    # §8.9 native-vs-Connector/C performance gates: opt-in (MYSQL_PERF_GATES=1) because the
+    # timing ratios are too tight for shared PR runners; run on the nightly schedule and on
+    # demand, with coverage off so the pure-Julia backend is not instrumented against C.
+    name: Performance gates (§8.9)
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+      - run: docker info
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: "1"
+      - uses: julia-actions/cache@v2
+      - uses: julia-actions/julia-buildpkg@v1
+      - uses: julia-actions/julia-runtest@v1
+        with:
+          coverage: false
+        env:
+          MYSQL_PERF_GATES: "1"
   docs:
     name: Documentation
     if: github.event_name != 'schedule'

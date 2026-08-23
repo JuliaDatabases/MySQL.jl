@@ -17,7 +17,7 @@ Once installed, you start using the package by making a connection to the mysql 
 conn = DBInterface.connect(MySQL.Connection, host, user, passwd)
 ```
 
-This utilizes the DBInterface.jl package method `connect` and passes in `MySQL.Connection` as the first argument to signal the type of database we're connecting to. `DBInterface.connect` also supports a host of options like the port to connect to, whether to use a socket, where an options file is located etc. To see the full list of supported keyword arguments, see the help for [`DBInterface.connect`](@ref).
+This utilizes the DBInterface.jl package method `connect` and passes in `MySQL.Connection` as the first argument to signal the type of database we're connecting to. MySQL.jl 1.7 also ships an opt-in native wire-protocol backend, `MySQL.Native.Connection`, that needs no C library; see [Migrating to the native backend](migration.md). `DBInterface.connect` also supports a host of options like the port to connect to, whether to use a socket, where an options file is located etc. To see the full list of supported keyword arguments, see the help for [`DBInterface.connect`](@ref).
 
 Once connected, there are two ways to submit queries to the server:
 

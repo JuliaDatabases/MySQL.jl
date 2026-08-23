@@ -104,7 +104,7 @@ source are never read.
 - **TLS 1.3 post-handshake failures**: a TLS 1.3 server may reject the session (e.g. alert
   116 certificate_required) on the first record *after* the handshake; before authentication
   `fault!` reports that as `TLSNegotiationError`, afterwards as `ProtocolError`.
-- **Upstream fix required (Reseau 1.4.0)**: Reseau's mixed-version client driver
+- **Upstream fix required (Reseau 1.4.1)**: Reseau's mixed-version client driver
   (`_native_tls_auto_client_handshake!`, used whenever both TLS 1.2 and 1.3 are allowed —
   the default) did not load the client identity into its TLS 1.3 state, so mutual TLS on
   TLS 1.3 sent an empty Certificate; found by the `ssl_mode` matrix here and fixed in

@@ -39,7 +39,8 @@ strip), `passwd=nothing` vs `""`, option files (subset; see below), `init_comman
 (SQL parameters still cannot be passed as keywords), `executemany`, the `wrongrow`
 contract ("a row is only valid while it is the cursor's current row", same
 `ArgumentError`), `rows_affected::Int64` bitcast semantics, cursor `close!`/`close`
-idempotence, `Base.show(conn)`, `MySQL.escape`, and the `MySQL.API` value types (`Bit`,
+idempotence, `Base.show(conn)`, escaping (`MySQL.escape` on `MySQL.Connection`;
+`MySQL.Native.escape(conn, str)` during the preview), and the `MySQL.API` value types (`Bit`,
 `DateAndTime`, `MYSQL_TYPE_*`/`CLIENT_*` constants, `juliatype`, `mysqltype`).
 
 ## Behavior changes (Fix)
@@ -55,27 +56,31 @@ Deliberate, documented changes relative to Connector/C 1.6.0:
 | `ssl_mode` | #240: enum collision, `SSL_MODE_DISABLED` unimplementable | five real modes; default `:preferred`; explicit `ssl_mode` wins over `ssl_enforce`/`ssl_verify_server_cert`/CA-material escalation; contradictions are `ArgumentError`s; **no plaintext fallback after a failed TLS handshake** |
 | `ssl_ca` + `ssl_capath` together | both applied | `ArgumentError` (Reseau has a single trust-root source); each alone works |
 | `connect_timeout` | C socket timeout with platform-dependent meaning | one monotonic establishment deadline spanning dial, greeting, TLS, the whole auth exchange, and the charset bootstrap |
-| `reconnect` | C auto-reconnect | narrow: only before a send on a transport known closed; never mid-command, never in a transaction, never after a protocol fault |
+| `read_timeout` / `write_timeout` | `MYSQL_OPT_READ_TIMEOUT`/`MYSQL_OPT_WRITE_TIMEOUT`: per socket operation | same meaning: re-armed before every transport read/write, so a slowly-consumed streaming result never expires while the server keeps answering; expiry closes the connection |
+| `reconnect` | C auto-reconnect | narrow: only before a send on a transport known closed; never mid-command, never in a transaction, never after a protocol fault; a reconnect that itself fails leaves the connection retryable, not closed |
 | `executemultiple` | first-OK result yielded nothing; later results mutated one cursor (stale `lookup`, aliased metadata) | every result (DML/OK included) is a **distinct cursor** with immutable metadata and its own OK snapshot; advancing past an unconsumed streaming result drains and invalidates it |
 | `lastrowid` | read live connection/statement state (sticky) | snapshot from the cursor's own OK/terminator (a SELECT cursor reports 0) |
 | DML cursor `length` | `-1` surprises | DML cursors keep the `-1` sentinel; **buffered SELECT cursors report the row count** |
+| Sub-millisecond DATETIME | text errored; binary truncated silently | text warns then raises `ConversionError`; binary (prepared) warns then truncates to milliseconds — each preserves its 1.x protocol behavior (both mirror `MYSQL_TIME`) |
 | BIT decoding | text: first byte only; binary: little-endian | big-endian value of all bytes (≤ 8) in both protocols |
 | TIME decoding | text parse errored on negative/≥24 h; binary ignored sign and days | `Dates.Time` for `0 ≤ t < 24h`, `ConversionError` otherwise; `time_type=Dates.Microsecond` opt-in is lossless and signed |
 | Zero dates | text special-cased only zero DATETIME; text zero DATE failed; binary mapped zero components to 1970 | unified `zero_dates` policy: `:sentinel` (default, `Date(0)`/`DateTime(0)`), `:missing` (widens column types to `Union{Missing, T}`), `:error`; partial zero dates (`2024-00-05`) are `ConversionError` unless `:missing` |
 | `Base.isopen` | `mysql_ping` round trip | local check only; use `MySQL.Native.ping(conn)` for a round trip |
-| Errors | `API.Error`/`API.StmtError` with pointer-only constructors | same names/field types (`errno::Cuint`, `msg`) in a real hierarchy (`MySQLError` → `ServerError` → `Error`/`StmtError`, plus `ProtocolError`, `AuthError`, `TimeoutError`, `ConversionError`, …), public constructors, and a new `sqlstate` field |
+| Errors | `API.Error`/`API.StmtError` with pointer-only constructors | `MySQL.Protocol.Error`/`StmtError` keep the same names, field names and types (`errno::Cuint`, `msg`) and `showerror` text, in a real hierarchy (`MySQLError` → `ServerError` → `Error`/`StmtError`, plus `ProtocolError`, `AuthError`, `TimeoutError`, `ConversionError`, …), with public constructors and a new `sqlstate` field. They are **not** subtypes of `MySQL.API.Error`, so code that catches `MySQL.API.Error` must target `MySQL.Protocol.Error` (or `MySQL.Protocol.MySQLError`) for the native backend |
 | Buffered memory | unbounded | buffered results are bounded by `max_buffered_bytes` (default 256 MiB, per command across all retained result sets incl. row offsets/NULL masks/metadata); exceeding it is a `ProtocolError`. Streaming stays unbounded by default (`max_response_bytes=nothing`) |
 | Transactions | lock not held | the connection lock is held across `DBInterface.transaction(f, conn)`: other tasks block until commit/rollback |
 | Cleanup/finalizers | abandoned C handles depended on Connector/C lifetimes | explicit `close!` or a do-block remains the contract; a dropped native connection only enqueues its transport for the timer reaper, and a dropped statement only parks its preallocated id for the next command. Finalizers do no protocol or transport I/O; explicit close, timer reaping, and parked statement close are exactly-once |
 | Concurrent use | not thread-safe | connection operations are lock-serialized. One task must consume a streaming cursor; a command from another task drains the pending response and invalidates that cursor instead of overwriting its Julia-owned row bytes. A transaction owns the connection lock until commit or rollback |
-| `MySQL.load(...; debug=true)` | logged every row | statements only; `debug=:values` logs rows; `quoteid` doubles embedded backticks |
+| `MySQL.load` | Connector/C only | runs on both backends through the same code path (its signatures were widened to `DBInterface.Connection`); no behavior change |
 | `Bool` parameters | fell through to the `MYSQL_TYPE_STRING` fallback (untested latent bug) | bound as `MYSQL_TYPE_TINY` |
 | Value lifetime (#206) | `TextRow` values could alias freed C memory | rows decode from Julia-owned, cursor-owned buffers |
 
 ## Deprecated (warning in 1.x preview, `ArgumentError` in 2.0)
 
 - `data_truncation` (no C buffer truncation exists natively)
-- `net_buffer_length`
+- `net_buffer_length` (buffer sizing is automatic)
+- `secure_auth` (`mysql_old_password` is never supported; the option has no effect)
+- `multi_results` (multiple result sets are always negotiated; the option has no effect)
 
 ## Removed (error explains the replacement)
 
@@ -93,8 +98,7 @@ Deliberate, documented changes relative to Connector/C 1.6.0:
 `zero_dates`, `time_type`, `read_env` (opt-in `MYSQL_TCP_PORT`; `MYSQL_PWD` is never
 read), `max_buffered_bytes`, `max_response_bytes`, `max_columns`, `max_result_sets`,
 `max_metadata_bytes`, `MySQL.Native.ping`, `MySQL.Native.escape_identifier`,
-`MySQL.Native.send_long_data!`, `MySQL.Native.reset_statement!`, and the do-block form
-`DBInterface.connect(f, …)`.
+`MySQL.Native.send_long_data!`, `MySQL.Native.reset_statement!`.
 
 ## Security: what `ssl_mode=:preferred` does and does not give you
 
