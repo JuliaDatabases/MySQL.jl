@@ -59,6 +59,21 @@ function expect_long_data(conn)
     return (statement_id, parameter_number, payload[7:end])
 end
 
+function serve_load(conn, table_name::String, column_name::String)
+    @test expect_query(conn) == "CREATE TABLE IF NOT EXISTS $table_name ($column_name VARCHAR(255) )"
+    send_ok(conn, 1)
+    @test expect_query(conn) == "START TRANSACTION"
+    send_ok(conn, 1)
+    @test expect_prepare(conn) == "INSERT INTO $table_name ($column_name) VALUES (?)"
+    send_prepare_ok(conn, 1, 91, paramdefs(1), P.ColumnDef[])
+    expect_execute(conn)
+    send_ok(conn, 1; affected=1)
+    @test expect_stmt_close(conn) == 91
+    @test expect_query(conn) == "COMMIT"
+    send_ok(conn, 1)
+    return nothing
+end
+
 # A binary protocol resultset row: 0x00 header, NULL bitmap (bit offset 2), then the non-NULL
 # values encoded exactly as parameters are (same wire form).
 function binary_row(values...)
@@ -89,6 +104,23 @@ function execute_new_params_flag(payload, nparams)
 end
 
 execute_null_bitmap(payload, nparams) = payload[10:(9 + ((nparams + 7) >> 3))]
+
+@testset "MySQL.load native identifier and debug policy" begin
+    row = NamedTuple{(Symbol("co`l"),)}(("secret-value",))
+    with_native(c -> serve_load(c, "`ta``ble`", "`co``l`")) do conn
+        @test_logs (:info, r"executing create table statement") (:info, r"executing insert statement") begin
+            @test MySQL.load([row], conn, "ta`ble"; debug=true) == "`ta``ble`"
+        end
+    end
+    with_native(c -> serve_load(c, "`ta``ble`", "`co``l`")) do conn
+        @test_logs (:info, r"executing create table statement") (:info, r"executing insert statement") (:info, r"(?s)inserting row 1;.*secret-value") begin
+            @test MySQL.load([row], conn, "ta`ble"; debug=:values) == "`ta``ble`"
+        end
+    end
+    with_native(c -> nothing) do conn
+        @test_throws ArgumentError MySQL.load([row], conn, "ta`ble"; debug=:invalid)
+    end
+end
 
 @testset "COM_STMT_PREPARE_OK header shape" begin
     header = UInt8[0x00]

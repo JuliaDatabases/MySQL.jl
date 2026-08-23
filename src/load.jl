@@ -7,6 +7,10 @@ function quoteid(str)
     end
 end
 
+function quoteid(::DBInterface.Connection, str)
+    return quoteid(str)
+end
+
 sqltype(::Type{Union{T, Missing}}) where {T} = sqltype(T)
 sqltype(T) = get(SQLTYPES, T, "VARCHAR(255)")
 sqltype(T, coltypes, name) = get(coltypes, name, sqltype(T))
@@ -39,7 +43,7 @@ function createtable(conn::DBInterface.Connection, nm::AbstractString, sch::Tabl
     names = sch.names
     checkdupnames(names)
     types = [sqltype(T, coltypes, names[i]) for (i, T) in enumerate(sch.types)]
-    columns = (string(quoteidentifiers ? quoteid(String(names[i])) : names[i], ' ', types[i], ' ', get(columnsuffix, names[i], "")) for i = 1:length(names))
+    columns = (string(quoteidentifiers ? quoteid(conn, String(names[i])) : names[i], ' ', types[i], ' ', get(columnsuffix, names[i], "")) for i = 1:length(names))
     auto_increment_column = (auto_increment_primary_key_name === nothing || isempty(auto_increment_primary_key_name)) ? "" : "$(auto_increment_primary_key_name) INT AUTO_INCREMENT PRIMARY KEY, "
     debug && @info "executing create table statement: `$createtableclause $nm ($(auto_increment_column)$(join(columns, ", ")))`"
     return DBInterface.execute(conn, "$createtableclause $nm ($(auto_increment_column)$(join(columns, ", ")))")
@@ -63,6 +67,9 @@ column name (given as a `Symbol`) to a string of the enhancement that will come 
 `[column name] [column type] enhancements`. This allows, for example, specifying the charset of a string column
 by doing something like `columnsuffix=Dict(:Name => "CHARACTER SET utf8mb4")`.
 
+On `MySQL.Native.Connection`, `debug=true` logs generated statements without row values;
+use `debug=:values` to include row values. Connector/C keeps its 1.x `debug::Bool` behavior.
+
 Do note that databases vary wildly in requirements for `CREATE TABLE` and column definitions
 so it can be extremely difficult to load data generically. You may just need to tweak some of the provided
 keyword arguments, but you may also need to execute the `CREATE TABLE` and `INSERT` statements
@@ -71,9 +78,13 @@ we can see if there's something we can do to make it easier to use this function
 """
 function load end
 
-load(conn::DBInterface.Connection, table::AbstractString="mysql_"*Random.randstring(5); kw...) = x->load(x, conn, table; kw...)
+load(conn::DBInterface.Connection, table::AbstractString="mysql_"*Random.randstring(5); kw...) = return x -> load(x, conn, table; kw...)
 
 function load(itr, conn::DBInterface.Connection, name::AbstractString="mysql_"*Random.randstring(5); append::Bool=true, quoteidentifiers::Bool=true, debug::Bool=false, limit::Integer=typemax(Int64), kw...)
+    return _load(itr, conn, name; append=append, quoteidentifiers=quoteidentifiers, debug_statements=debug, debug_values=debug, debug_all_statements=false, limit=limit, kw...)
+end
+
+function _load(itr, conn::DBInterface.Connection, name::AbstractString; append::Bool, quoteidentifiers::Bool, debug_statements::Bool, debug_values::Bool, debug_all_statements::Bool, limit::Integer, kw...)
     isopen(conn) || throw(ArgumentError("`MySQL.Connection` is closed"))
     # get data
     rows = Tables.rows(itr)
@@ -85,26 +96,30 @@ function load(itr, conn::DBInterface.Connection, name::AbstractString="mysql_"*R
     end
     # ensure table exists
     if quoteidentifiers
-        name = quoteid(name)
+        name = quoteid(conn, name)
     end
     # Use IF NOT EXISTS when appending to avoid warnings on subsequent loads
     createclause = append ? "CREATE TABLE IF NOT EXISTS" : "CREATE TABLE"
     try
-        createtable(conn, name, sch; quoteidentifiers=quoteidentifiers, debug=debug, createtableclause=createclause, kw...)
+        createtable(conn, name, sch; quoteidentifiers=quoteidentifiers, debug=debug_statements, createtableclause=createclause, kw...)
     catch e
         @warn "error creating table" (e, catch_backtrace())
     end
     if !append
+        debug_all_statements && @info "executing delete statement: `DELETE FROM $name`"
         DBInterface.execute(conn, "DELETE FROM $name")
     end
     # start a transaction for inserting rows
     DBInterface.transaction(conn) do
         params = chop(repeat("?,", length(sch.names)))
-        stmt = DBInterface.prepare(conn, "INSERT INTO $name ($(join(sch.names .|> string .|> quoteid,", "))) VALUES ($params)")
+        columns = join((quoteid(conn, string(column)) for column in sch.names), ", ")
+        insert = "INSERT INTO $name ($columns) VALUES ($params)"
+        debug_all_statements && @info "executing insert statement: `$insert`"
+        stmt = DBInterface.prepare(conn, insert)
         try
             for (i, row) in enumerate(rows)
                 i > limit && break
-                debug && @info "inserting row $i; $(Tables.Row(row))"
+                debug_values && @info "inserting row $i; $(Tables.Row(row))"
                 DBInterface.execute(stmt, Tables.Row(row))
             end
         finally

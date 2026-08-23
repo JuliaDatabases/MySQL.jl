@@ -11,7 +11,7 @@ module Native
 
 using ..Protocol
 using ..MySQL: MySQL, API, DateAndTime, MySQLInterfaceError
-using Reseau, Dates, DBInterface, Tables, Parsers, DecFP
+using Reseau, Dates, DBInterface, Tables, Parsers, DecFP, Random
 
 const P = Protocol
 
@@ -23,5 +23,6 @@ include("connect.jl")
 include("connection.jl")
 include("cursor.jl")
 include("statement.jl")
+include("load.jl")
 
 end # module

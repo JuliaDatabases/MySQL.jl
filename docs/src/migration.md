@@ -71,7 +71,7 @@ Deliberate, documented changes relative to Connector/C 1.6.0:
 | Transactions | lock not held | the connection lock is held across `DBInterface.transaction(f, conn)`: other tasks block until commit/rollback |
 | Cleanup/finalizers | abandoned C handles depended on Connector/C lifetimes | explicit `close!` or a do-block remains the contract; a dropped native connection only enqueues its transport for the timer reaper, and a dropped statement only parks its preallocated id for the next command. Finalizers do no protocol or transport I/O; explicit close, timer reaping, and parked statement close are exactly-once |
 | Concurrent use | not thread-safe | connection operations are lock-serialized. One task must consume a streaming cursor; a command from another task drains the pending response and invalidates that cursor instead of overwriting its Julia-owned row bytes. A transaction owns the connection lock until commit or rollback |
-| `MySQL.load` | Connector/C only | runs on both backends through the same code path (its signatures were widened to `DBInterface.Connection`); no behavior change |
+| `MySQL.load` | Connector/C only; embedded backticks were not escaped; `debug=true` logged row values | runs on both backends; the native backend doubles embedded identifier backticks (**Fix**), uses `debug=true` for statements only (**Fix**), and logs row values only with `debug=:values` (**Add**) |
 | `Bool` parameters | fell through to the `MYSQL_TYPE_STRING` fallback (untested latent bug) | bound as `MYSQL_TYPE_TINY` |
 | Value lifetime (#206) | `TextRow` values could alias freed C memory | rows decode from Julia-owned, cursor-owned buffers |
 
