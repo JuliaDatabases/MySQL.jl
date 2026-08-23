@@ -235,9 +235,14 @@ source are never read.
   `ConversionError`. The fuzz contract: any mutated transcript must fail as a
   `Protocol.MySQLError`, never a crash. The harness (`test/protocol/fuzz.jl`) drives the
   real packet reader/classifiers/scanners/decoders and the handshake/auth parsers over an
-  in-memory transport, deterministically from `(entry, seed)`; a bounded smoke batch runs
-  in every CI lane and `scripts/fuzz.jl` runs budgeted batches in isolated worker
-  processes (wall-clock + heap bounds, crash bisection, saved repros).
+  in-memory transport. Its vendor and synthetic corpus must produce the declared clean or
+  documented-error outcome before mutation. Every case is deterministic from `(entry, seed)`.
+  A bounded smoke batch runs in every CI lane. `scripts/fuzz.jl` runs budgeted
+  batches in isolated workers with a wall-clock limit and an OS-enforced memory limit
+  (hard address-space limit on the nightly Linux lane, RSS watchdog on other Unix hosts).
+  Failed batches are split recursively inside the total run budget. An isolated failure
+  saves its entry, seed, and exact mutated input; a cumulative or nondeterministic failure
+  saves the smallest unresolved seed range.
 - **The per-row hot path is allocation-free** (§8.9 gate: allocations per row ≤
   String/Vector columns + 1, asserted serverless in `test/protocol/perf_tests.jl` and
   against live servers in `test/perf/perf_gates.jl`). Four per-row allocations were

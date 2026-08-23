@@ -1,7 +1,7 @@
 # Deterministic mutation fuzzer over protocol transcripts (plan §8.4).
 #
 # Seed transcripts (server → client byte streams, vendor examples plus synthetic frames)
-# are mutated by a seeded xorshift generator and fed to the real packet reader, response
+# are mutated by a seeded SplitMix64 generator and fed to the real packet reader, response
 # classifiers, row scanners, value decoders and the handshake/auth parsers through an
 # in-memory transport. The contract under test: any malformed stream must surface as a
 # `Protocol.MySQLError` (`ProtocolError`, `ConversionError`, `Error`, …) — never a
@@ -17,6 +17,16 @@ using MySQL, Dates, Logging
 
 const P = MySQL.Protocol
 const N = MySQL.Native
+
+# Reuse the vendor golden vectors already loaded by the protocol suite. The standalone
+# worker includes their small fixture modules itself.
+const VendorVectors = if isdefined(parentmodule(@__MODULE__), :Vectors)
+    getfield(parentmodule(@__MODULE__), :Vectors)
+else
+    include("fakepeer.jl")
+    include("vectors.jl")
+    Vectors
+end
 
 # ---- in-memory transport ----
 
@@ -66,10 +76,10 @@ randbyte(r::Rng) = UInt8(next!(r) % 256)
 # ---- corpus ----
 
 # `expect` for the unmutated stream: :clean (must complete without any exception),
-# :server_error (a ServerError is the expected clean outcome), :any (clean or MySQLError).
+# :server_error (a ServerError is expected), or :protocol_error (a documented rejection).
 struct CorpusEntry
     name::String
-    flow::Symbol            # :connect | :query | :prepare | :scan_text | :scan_binary
+    flow::Symbol            # :connect | :query | :prepare | :execute | :scan_text | :scan_binary
     caps::UInt64
     bytes::Vector{UInt8}
     expect::Symbol
@@ -400,6 +410,9 @@ end
 
 function build_corpus()
     corpus = CorpusEntry[]
+    # The documented 5.5.2 greeting lacks CLIENT_PLUGIN_AUTH. The native backend requires
+    # that capability, so its clean corpus outcome is a deliberate ProtocolError.
+    push!(corpus, CorpusEntry("vendor/connect-5.5.2", :connect, CAPS_LEGACY, copy(VendorVectors.HANDSHAKE_V10_552), :protocol_error))
     push!(corpus, CorpusEntry("connect/plain", :connect, CAPS_MODERN, connect_stream(; plugin_switch=false), :clean))
     push!(corpus, CorpusEntry("connect/auth-switch", :connect, CAPS_MODERN, connect_stream(; plugin_switch=true), :clean))
     push!(corpus, CorpusEntry("connect/initial-err", :connect, CAPS_MODERN, err_stream(1040, "Too many connections"; seq=0), :server_error))
@@ -407,15 +420,19 @@ function build_corpus()
     push!(corpus, CorpusEntry("query/text-deprecate-eof", :query, CAPS_MODERN, stream, :clean))
     stream, _ = text_resultset_stream(; deprecate_eof=false)
     push!(corpus, CorpusEntry("query/text-legacy-eof", :query, CAPS_LEGACY, stream, :clean))
+    push!(corpus, CorpusEntry("vendor/query-text", :query, CAPS_LEGACY, copy(VendorVectors.TEXT_RESULTSET_REPEAT_A), :clean))
+    push!(corpus, CorpusEntry("vendor/query-call-multi", :query, CAPS_LEGACY, copy(VendorVectors.CALL_MULTI_RESULTSET), :clean))
+    push!(corpus, CorpusEntry("vendor/execute-binary", :execute, CAPS_LEGACY, copy(VendorVectors.BINARY_RESULTSET_FOOBAR), :clean))
     push!(corpus, CorpusEntry("query/multi-result", :query, CAPS_MODERN, multi_result_stream(), :clean))
+    push!(corpus, CorpusEntry("vendor/query-err", :query, CAPS_MODERN, copy(VendorVectors.ERR_EXAMPLE), :server_error))
     push!(corpus, CorpusEntry("query/err", :query, CAPS_MODERN, err_stream(1064, "You have an error in your SQL syntax"), :server_error))
     push!(corpus, CorpusEntry("query/err-mid-rows", :query, CAPS_MODERN, err_mid_rows_stream(), :server_error))
     push!(corpus, CorpusEntry("query/local-infile", :query, CAPS_INFILE, infile_stream(), :clean))
     push!(corpus, CorpusEntry("prepare/deprecate-eof", :prepare, CAPS_MODERN, prepare_execute_stream(; deprecate_eof=true), :clean))
     push!(corpus, CorpusEntry("prepare/legacy-eof", :prepare, CAPS_LEGACY, prepare_execute_stream(; deprecate_eof=false), :clean))
     push!(corpus, CorpusEntry("prepare/err", :prepare, CAPS_MODERN, err_stream(1064, "syntax"), :server_error))
-    push!(corpus, CorpusEntry("scan/text-row", :scan_text, CAPS_MODERN, text_row(TYPED_TEXT_VALUES), :any))
-    push!(corpus, CorpusEntry("scan/binary-row", :scan_binary, CAPS_MODERN, binary_row_full(), :any))
+    push!(corpus, CorpusEntry("scan/text-row", :scan_text, CAPS_MODERN, text_row(TYPED_TEXT_VALUES), :clean))
+    push!(corpus, CorpusEntry("scan/binary-row", :scan_binary, CAPS_MODERN, binary_row_full(), :clean))
     return corpus
 end
 
@@ -499,11 +516,12 @@ end
 
 # Decode exceptions must be MySQLErrors; they do not end the scan (production decodes
 # lazily per `getcolumn` and the session stays usable).
-function decode_one(binary::Bool, T::Type, buf::Vector{UInt8}, off::Int, len::Int, opts::N.ResultOptions)
+function decode_one(binary::Bool, T::Type, buf::Vector{UInt8}, off::Int, len::Int, opts::N.ResultOptions; accept_conversion::Bool=true)
     try
         binary ? N.decode_binary(T, buf, off, len, opts) : N.decode(T, buf, off, len, opts)
     catch err
         err isa P.MySQLError || rethrow()
+        accept_conversion || rethrow()
     end
     return nothing
 end
@@ -574,33 +592,53 @@ const BINARY_TYPE_POOL = UInt8[
     P.MYSQL_TYPE_NEWDECIMAL, P.MYSQL_TYPE_NEWDATE, P.MYSQL_TYPE_JSON, P.MYSQL_TYPE_GEOMETRY,
 ]
 
-const SCAN_DECODE_TYPES = Type[Union{Missing, String}, Union{Missing, Int64}, Union{Missing, Float64},
-    Union{Missing, DateTime}, Union{Missing, Date}, Union{Missing, Dates.Time}, Union{Missing, Vector{UInt8}}]
-
 # Direct scanner fuzz: a mutated row payload against random column shapes; every failure
 # must be a MySQLError.
-function drive_scan(flow::Symbol, data::Vector{UInt8}, rng::Rng)
-    p = P.PacketView(data, 1, length(data), 0x00, 1, length(data))
+function scan_definition(type::UInt8, flags::UInt16)
+    charset = (flags & P.BINARY_FLAG) == 0 ? P.CHARSET_UTF8MB4_GENERAL_CI : P.CHARSET_BINARY
+    return P.ColumnDef("def", "db", "t", "t", "v", "v", UInt16(charset), UInt32(255), type, flags, 0x00)
+end
+
+function scan_schema(rng::Rng, randomized::Bool)
+    if !randomized
+        defs = P.ColumnDef[scan_definition(UInt8(type), UInt16(flags)) for (_, type, flags) in TYPED_COLUMNS]
+        return UInt8[def.type for def in defs], Type[N.juliatype(def, N.ResultOptions(; time_type=Dates.Microsecond)) for def in defs]
+    end
     ncols = randint(rng, 12)
+    defs = P.ColumnDef[]
+    for _ in 1:ncols
+        type = BINARY_TYPE_POOL[randint(rng, length(BINARY_TYPE_POOL))]
+        flags = UInt16(0)
+        randint(rng, 2) == 1 && (flags |= P.UNSIGNED_FLAG)
+        randint(rng, 2) == 1 && (flags |= P.BINARY_FLAG)
+        randint(rng, 2) == 1 && (flags |= P.NOT_NULL_FLAG)
+        push!(defs, scan_definition(type, flags))
+    end
+    opts = N.DEFAULT_RESULT_OPTIONS
+    return UInt8[def.type for def in defs], Type[N.juliatype(def, opts) for def in defs]
+end
+
+function drive_scan(flow::Symbol, data::Vector{UInt8}, rng::Rng; randomized::Bool=true)
+    p = P.PacketView(data, 1, length(data), 0x00, 1, length(data))
     offsets = Int[]
     lengths = Int[]
-    opts = N.DEFAULT_RESULT_OPTIONS
+    opts = randomized ? N.DEFAULT_RESULT_OPTIONS : N.ResultOptions(; time_type=Dates.Microsecond)
     binary = flow == :scan_binary
+    coltypes, types = scan_schema(rng, randomized)
+    ncols = length(coltypes)
     if binary
-        coltypes = UInt8[BINARY_TYPE_POOL[randint(rng, length(BINARY_TYPE_POOL))] for _ in 1:ncols]
         P.scan_binary_row!(coltypes, p, offsets, lengths)
     else
         P.scan_text_row!(p, ncols, offsets, lengths)
     end
     for i in 1:ncols
-        T = SCAN_DECODE_TYPES[randint(rng, length(SCAN_DECODE_TYPES))]
-        decode_one(binary, T, data, offsets[i], lengths[i], opts)
+        decode_one(binary, types[i], data, offsets[i], lengths[i], opts; accept_conversion=randomized)
     end
     return nothing
 end
 
-function run_case!(entry::CorpusEntry, data::Vector{UInt8}, rng::Rng)
-    (entry.flow == :scan_text || entry.flow == :scan_binary) && return drive_scan(entry.flow, data, rng)
+function run_case!(entry::CorpusEntry, data::Vector{UInt8}, rng::Rng; randomized_scan::Bool=true)
+    (entry.flow == :scan_text || entry.flow == :scan_binary) && return drive_scan(entry.flow, data, rng; randomized=randomized_scan)
     s = session_for(entry, data)
     try
         if entry.flow == :connect
@@ -610,6 +648,9 @@ function run_case!(entry::CorpusEntry, data::Vector{UInt8}, rng::Rng)
             consume_response!(s, false)
         elseif entry.flow == :prepare
             drive_prepare!(s)
+        elseif entry.flow == :execute
+            P.stmt_execute!(s, 1, UInt8[])
+            consume_response!(s, true)
         else
             error("unknown fuzz flow $(entry.flow)")
         end
