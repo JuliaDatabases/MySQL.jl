@@ -121,6 +121,10 @@ pview(payload::Vector{UInt8}; seq=0x00) = P.PacketView(payload, 1, length(payloa
         @test P.normalize_version("99999999999999999999.1.1", :mysql) == v"0.0.0"
         @test P.normalize_version("8.4.99999999999", :mysql) == v"0.0.0"
         @test P.normalize_version("8.4.3", :mysql) == v"8.4.3"
+        # Julia's `\d` matches Unicode digits but `parse` accepts only ASCII: a version with
+        # non-ASCII digits must yield v"0.0.0", not an uncaught ArgumentError
+        @test P.normalize_version("\uff11.\uff12.\uff13", :mysql) == v"0.0.0"   # fullwidth 123
+        @test P.normalize_version("8.4.\u0663", :mysql) == v"0.0.0"               # Arabic-Indic 3
         for bad in ("5000000000.0.0-log\0", "99999999999999999999.1.1\0", "8.4.999999999999\0")
             info = P.parse_handshake_v10(pview(greeting(; version=bad[1:end-1])))
             @test info.version == v"0.0.0" && info.raw_version == bad[1:end-1]

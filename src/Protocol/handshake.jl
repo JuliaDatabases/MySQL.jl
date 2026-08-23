@@ -51,13 +51,14 @@ end
 
 `VersionNumber("5.5.5-10.11.8-MariaDB")` parses as 5.5.5 with a prerelease tag, so a MariaDB
 10.x greeting must have exactly one leading `5.5.5-` removed before the leading
-`major.minor.patch` is parsed. Unparseable strings (including components of more than nine
-digits, which are untrusted wire bytes rather than a version) become `v"0.0.0"`.
+`major.minor.patch` is parsed. Unparseable strings (including components of more than nine ASCII
+digits, or non-ASCII digits, which are untrusted wire bytes rather than a version) become
+`v"0.0.0"`.
 """
 function normalize_version(raw::String, kind::Symbol)
     s = raw
     kind == :mariadb && startswith(s, "5.5.5-") && (s = s[7:end])
-    m = match(r"^(\d{1,9})\.(\d{1,9})\.(\d{1,9})(?!\d)", s)
+    m = match(r"^([0-9]{1,9})\.([0-9]{1,9})\.([0-9]{1,9})(?![0-9])", s)
     m === nothing && return v"0.0.0"
     return VersionNumber(parse(UInt32, m.captures[1]), parse(UInt32, m.captures[2]), parse(UInt32, m.captures[3]))
 end
