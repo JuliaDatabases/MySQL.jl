@@ -57,6 +57,13 @@ end
         @test P.system_variables(ok) == ["autocommit" => "OFF"]
         @test P.schema_change(ok) == "test"
         @test length(ok.session_state) == 3
+        gtid_data = UInt8[]
+        P.write_lenenc!(gtid_data, 0)
+        P.write_lenenc_string!(gtid_data, "3E11FA47-71CA-11E1-9E33-C80AA9429562:23")
+        gtid_block = UInt8[P.SESSION_TRACK_GTIDS]
+        P.write_lenenc_bytes!(gtid_block, gtid_data)
+        ok = P.parse_ok(pv(ok_payload(; status=P.SERVER_SESSION_STATE_CHANGED, info="", state=gtid_block, track=true)), CAPS_TRACK, P.Limits())
+        @test only(ok.session_state).data == gtid_data
         # MariaDB packs several variable pairs into one block
         multi = UInt8[]
         for s in ("character_set_client", "utf8mb4", "time_zone", "SYSTEM")
@@ -74,6 +81,13 @@ end
         @test_throws P.ProtocolError P.parse_ok(pv(payload), CAPS_TRACK, P.Limits(; max_session_state_bytes=8))
         # truncated state block
         @test_throws P.ProtocolError P.parse_ok(pv(ok_payload(; status=P.SERVER_SESSION_STATE_CHANGED, info="", state=UInt8[0x00, 0x05, 0x01], track=true)), CAPS_TRACK, P.Limits())
+        # Known session-state payloads are validated before the command can reach READY.
+        @test_throws P.ProtocolError P.parse_ok(pv(ok_payload(; status=P.SERVER_SESSION_STATE_CHANGED, info="", state=state_block(P.SESSION_TRACK_SYSTEM_VARIABLES, "name-without-value"), track=true)), CAPS_TRACK, P.Limits())
+        @test_throws P.ProtocolError P.parse_ok(pv(ok_payload(; status=P.SERVER_SESSION_STATE_CHANGED, info="", state=state_block(P.SESSION_TRACK_SCHEMA, "schema", "trailing"), track=true)), CAPS_TRACK, P.Limits())
+        malformed_gtids = UInt8[P.SESSION_TRACK_GTIDS, 0x01, 0x01]
+        @test_throws P.ProtocolError P.parse_ok(pv(ok_payload(; status=P.SERVER_SESSION_STATE_CHANGED, info="", state=malformed_gtids, track=true)), CAPS_TRACK, P.Limits())
+        unknown = state_block(0x7F, "opaque", "extension")
+        @test length(P.parse_ok(pv(ok_payload(; status=P.SERVER_SESSION_STATE_CHANGED, info="", state=unknown, track=true)), CAPS_TRACK, P.Limits()).session_state) == 1
         tracked = ok_payload(; info="x", track=true)
         @test_throws P.ProtocolError P.parse_ok(pv(vcat(tracked, 0x00)), CAPS_TRACK, P.Limits())
     end
@@ -90,6 +104,7 @@ end
         # a message without the marker
         e = P.parse_err(pv(vcat(UInt8[0xFF, 0x28, 0x04], codeunits("plain"))), CAPS41)
         @test e.code == 1064 && e.sqlstate == "" && e.msg == "plain"
+        @test_throws P.ProtocolError P.parse_err(pv(UInt8[0xFF, 0x28, 0x04, 0x23, 0x48]), CAPS41)
         @test_throws P.ProtocolError P.parse_err(pv(UInt8[0xFF, 0xDD, 0x07]), CAPS41)     # 2013 client-reserved
         @test_throws P.ProtocolError P.parse_err(pv(UInt8[0xFF, 0xFF, 0xFF, 0x01]), CAPS41)  # MariaDB progress
         @test_throws P.ProtocolError P.parse_err(pv(UInt8[0xFF, 0x28]), CAPS41)

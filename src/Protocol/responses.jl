@@ -104,7 +104,39 @@ function parse_session_state!(state::Vector{SessionStateChange}, c::PacketCursor
     while remaining(c) > 0
         type = read_u8!(c)
         data = read_lenenc_bytes!(c, "session state block")
+        validate_session_state(type, data)
         push!(state, SessionStateChange(type, data))
+    end
+    return nothing
+end
+
+function validate_one_session_value(type::UInt8, data::Vector{UInt8}, what::String)
+    c = PacketCursor(data)
+    read_lenenc_window!(c, what)
+    atend(c) || protocol_error("malformed session-state block type $(Int(type)): $(remaining(c)) trailing bytes")
+    return nothing
+end
+
+function validate_session_state(type::UInt8, data::Vector{UInt8})
+    if type == SESSION_TRACK_SYSTEM_VARIABLES
+        c = PacketCursor(data)
+        while remaining(c) > 0
+            read_lenenc_window!(c, "system variable name")
+            read_lenenc_window!(c, "system variable value")
+        end
+    elseif type == SESSION_TRACK_GTIDS
+        c = PacketCursor(data)
+        read_lenenc!(c) # extensible encoding specification
+        read_lenenc_window!(c, "GTID value")
+        atend(c) || protocol_error("malformed GTID session-state block: $(remaining(c)) trailing bytes")
+    elseif type == SESSION_TRACK_SCHEMA
+        validate_one_session_value(type, data, "schema name")
+    elseif type == SESSION_TRACK_STATE_CHANGE
+        validate_one_session_value(type, data, "state-change value")
+    elseif type == SESSION_TRACK_TRANSACTION_CHARACTERISTICS
+        validate_one_session_value(type, data, "transaction characteristics")
+    elseif type == SESSION_TRACK_TRANSACTION_STATE
+        validate_one_session_value(type, data, "transaction state")
     end
     return nothing
 end
@@ -168,9 +200,10 @@ function parse_err(p::PacketView, caps::UInt64)
     code = read_u16!(c)
     validate_server_errno(code)
     sqlstate = ""
-    if has_capability(caps, CLIENT_PROTOCOL_41) && remaining(c) >= 1 + SQLSTATE_LENGTH && peek_u8(c) == SQLSTATE_MARKER
-        skip!(c, 1, "sql_state_marker")
-        sqlstate = read_fixed_string!(c, SQLSTATE_LENGTH, "sql_state")
+    if has_capability(caps, CLIENT_PROTOCOL_41) && remaining(c) > 0 && peek_u8(c) == SQLSTATE_MARKER
+        remaining(c) >= 1 + SQLSTATE_LENGTH || truncated("SQL state")
+        skip!(c, 1, "SQL state marker")
+        sqlstate = read_fixed_string!(c, SQLSTATE_LENGTH, "SQL state")
     end
     return ERRPacket(code, sqlstate, read_eof_string!(c))
 end

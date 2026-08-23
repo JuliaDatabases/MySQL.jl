@@ -352,8 +352,7 @@ end
         end) do client
             s = P.Session(client)
             P.read_greeting!(s)
-            ok = P.authenticate!(s, "root", "pw", P.AuthPolicy())
-            @test_throws P.ProtocolError N.bootstrap_charset!(s, ok)
+            @test_throws P.ProtocolError P.authenticate!(s, "root", "pw", P.AuthPolicy())
             @test s.phase == P.BROKEN && !isopen(s)
         end
     end
