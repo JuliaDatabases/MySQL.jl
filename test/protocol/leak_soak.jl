@@ -67,6 +67,30 @@ end
     return refs
 end
 
+function has_parked_statement(conn)
+    lock(conn.reaplock)
+    try
+        return conn.stmts_to_close !== nothing
+    finally
+        unlock(conn.reaplock)
+    end
+end
+
+@noinline function abandon_statement_during_stream!(conn)
+    stmt = DBInterface.prepare(conn, "SELECT 99")
+    ref = WeakRef(stmt)
+    cursor = nothing
+    first_value = 0
+    GC.@preserve stmt begin
+        cursor = DBInterface.execute(conn, "SELECT 1 UNION ALL SELECT 2 UNION ALL SELECT 3"; mysql_store_result=false)
+        item = iterate(cursor)
+        item === nothing && error("stream ended before its first row")
+        row, _ = item
+        first_value = row[1]
+    end
+    return cursor, first_value, ref
+end
+
 function run_leak_soak(port)
     @testset "leak/lifecycle soak (§8.10)" begin
         monitor = soak_connect(port)
@@ -132,15 +156,24 @@ function run_leak_soak(port)
             @test soak_wait(() -> all(r -> r.value === nothing, refs))
             # -- a late statement finalizer must not disturb the active streaming cursor --
             conn = soak_connect(port)
-            abandon_statements!(conn, 3)
-            GC.gc(); GC.gc()   # parked, not closed: the wire must stay silent under a cursor
-            cursor = DBInterface.execute(conn, "SELECT 1 UNION ALL SELECT 2 UNION ALL SELECT 3"; mysql_store_result=false)
-            rows = Int[]
+            late_baseline = global_status(monitor, "Prepared_stmt_count")
+            cursor, first_value, stmt_ref = abandon_statement_during_stream!(conn)
+            @test global_status(monitor, "Prepared_stmt_count") == late_baseline + 1
+            # The helper preserves the statement through the first row. It becomes
+            # unreachable only after the streaming cursor is active.
+            @test soak_wait(() -> stmt_ref.value === nothing && has_parked_statement(conn))
+            # The finalizer parked the id. It did not send COM_STMT_CLOSE under the cursor.
+            @test global_status(monitor, "Prepared_stmt_count") == late_baseline + 1
+            rows = Int[first_value]
             for row in cursor
                 GC.gc()
                 push!(rows, row[1])
             end
             @test rows == [1, 2, 3]
+            @test soak_wait() do
+                DBInterface.execute(conn, "SELECT 1")
+                global_status(monitor, "Prepared_stmt_count") == late_baseline
+            end
             DBInterface.close!(conn)
             # -- a read deadline closes the connection deterministically --
             conn = soak_connect(port; read_timeout=1)
