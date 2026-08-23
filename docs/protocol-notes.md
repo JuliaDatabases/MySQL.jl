@@ -88,7 +88,8 @@ source are never read.
 - **One establishment deadline** (`connect_timeout`): dial, greeting, TLS handshake, the
   whole authentication exchange and the utf8mb4 bootstrap share one absolute deadline
   (`apply_deadline!` on the TCP conn, re-applied on the TLS conn after STARTTLS); it is
-  cleared once the session is `READY`. `read_timeout` applies per command (`init_command`).
+  cleared once the session is `READY`. After that, `read_timeout` and `write_timeout` are
+  re-armed before every transport read and write, including `init_command`.
 - **utf8mb4 bootstrap contract**: `SET NAMES utf8mb4` is skipped only when the connect OK's
   session tracking reports `character_set_client/connection/results = utf8mb4`; otherwise it
   is sent and must return OK. MariaDB 11 and MySQL 8.4 report the variables only when they
@@ -219,10 +220,11 @@ source are never read.
   `zero_dates` policy (Fix; 1.x binary mapped zero components to 1970).
 - **Statement reaping is finalizer-free**: `DBInterface.close!(stmt)` and a dropped
   statement's finalizer both park a preallocated `(statement_id, generation)` entry under a
-  per-connection spinlock; `begin_command!` sends `COM_STMT_CLOSE` for the parked ids of the
-  current generation before the next command (after `drain_pending!`, so a streaming result
-  is drained first). One-shot `execute(conn, sql, params)` prepares, executes and parks the
-  statement the same way.
+  per-connection `ReentrantLock`; the finalizer path only uses `trylock` and re-registers the
+  finalizer when the lock is busy. `begin_command!` sends `COM_STMT_CLOSE` for the parked ids
+  of the current generation before the next command (after `drain_pending!`, so a streaming
+  result is drained first). One-shot `execute(conn, sql, params)` prepares, executes and
+  parks the statement the same way.
 
 ## M5 decisions worth remembering
 
