@@ -36,8 +36,12 @@ const READBUF_SIZE = 64 * 1024
 
 Reader/writer state: one shared sequence counter, a reusable reassembly buffer, a reusable
 output buffer, the count of payload bytes consumed since the last `newcommand!` (fed to
-`max_response_bytes`), and the read buffer that batches small transport reads during the
-command phase (`readbuf[readpos:readlim]` holds bytes already taken from the transport).
+`max_response_bytes`), the read buffer that batches small transport reads during the
+command phase (`readbuf[readpos:readlim]` holds bytes already taken from the transport), and
+the per-operation timeouts (`read_timeout_ns`/`write_timeout_ns`, 0 = none): every transport
+read or write re-arms its deadline `timeout` from now, like Connector/C's
+`MYSQL_OPT_READ_TIMEOUT`/`MYSQL_OPT_WRITE_TIMEOUT`, so a slowly consumed streaming result
+never expires while the server keeps answering.
 """
 mutable struct PacketIO
     seq::UInt8
@@ -48,11 +52,25 @@ mutable struct PacketIO
     readbuf::Vector{UInt8}
     readpos::Int
     readlim::Int
+    read_timeout_ns::Int64
+    write_timeout_ns::Int64
 end
 
-PacketIO() = PacketIO(0x00, UInt8[], zeros(UInt8, PACKET_HEADER_LEN), UInt8[], 0, Vector{UInt8}(undef, READBUF_SIZE), 1, 0)
+PacketIO() = PacketIO(0x00, UInt8[], zeros(UInt8, PACKET_HEADER_LEN), UInt8[], 0, Vector{UInt8}(undef, READBUF_SIZE), 1, 0, 0, 0)
 
 buffered_bytes_available(io::PacketIO) = io.readlim - io.readpos + 1
+
+# Re-arms the read deadline before a transport read when a per-read timeout is configured
+# (a no-op otherwise, so the default path costs nothing).
+@inline function arm_read_deadline!(io::PacketIO, transport::Transport)
+    io.read_timeout_ns == 0 || set_read_deadline!(transport, Int64(time_ns()) + io.read_timeout_ns)
+    return nothing
+end
+
+@inline function arm_write_deadline!(io::PacketIO, transport::Transport)
+    io.write_timeout_ns == 0 || set_write_deadline!(transport, Int64(time_ns()) + io.write_timeout_ns)
+    return nothing
+end
 
 # Refills the (empty) read buffer with at least `needed` bytes using large partial reads.
 function fill_readbuf!(io::PacketIO, transport::Transport, needed::Int)
@@ -60,6 +78,7 @@ function fill_readbuf!(io::PacketIO, transport::Transport, needed::Int)
     io.readlim = 0
     total = 0
     while total < needed
+        arm_read_deadline!(io, transport)
         got = transport_read_some!(transport, io.readbuf, total + 1, length(io.readbuf) - total)
         got == 0 && throw(EOFError())
         total += got
@@ -79,6 +98,7 @@ transport, so the STARTTLS empty-reader invariant is untouched.
 """
 function packet_read!(io::PacketIO, transport::Transport, dest::Vector{UInt8}, offset::Int, n::Int, buffered::Bool)
     if !buffered || !supports_buffered_reads(transport)
+        arm_read_deadline!(io, transport)
         transport_read!(transport, dest, offset, n)
         return nothing
     end
@@ -92,6 +112,7 @@ function packet_read!(io::PacketIO, transport::Transport, dest::Vector{UInt8}, o
     end
     n == 0 && return nothing
     if n >= length(io.readbuf) >> 1
+        arm_read_deadline!(io, transport)
         transport_read!(transport, dest, offset, n)
         return nothing
     end
@@ -160,6 +181,7 @@ function sendpacket!(io::PacketIO, transport::Transport, payload::AbstractVector
         # a payload that is an exact multiple of 0xFFFFFF (including 0) ends with an empty chunk
         (chunk < MAX_CHUNK) && break
     end
+    arm_write_deadline!(io, transport)
     transport_write(transport, out)
     return nothing
 end

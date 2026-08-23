@@ -1,14 +1,15 @@
 """
     MySQL.Protocol
 
-Native implementation of the MySQL client/server wire protocol (packet framing, connection
-phase, command phase) on top of Reseau transports. This module has no DBInterface/Tables
-dependency; the public driver layer builds on it.
-
-M1: constants, bounded codecs, packet reader/writer, the phase machine, handshake packets,
-generic response packets, column definitions, command/response framing.
-M2: authentication plugins (`auth.jl`), OpenSSL-backed RSA-OAEP (`crypto.jl`), STARTTLS
-orchestration (`tls.jl`). Value decoding and the DBInterface layer follow later.
+Native implementation of the MySQL client/server wire protocol on top of Reseau transports:
+constants generated from the server headers, bounded codecs, packet framing with
+reassembly, the phase machine, handshake and capability negotiation, authentication plugins
+(`mysql_native_password`, `caching_sha2_password`, `sha256_password`,
+`mysql_clear_password`) with OpenSSL-backed RSA-OAEP, STARTTLS, generic responses, column
+definitions, text and binary row scanning, and the command/response framing of COM_QUERY,
+the COM_STMT_* family, LOCAL INFILE and the simple commands. It has no DBInterface/Tables
+dependency; `MySQL.Native` (value decoding, connections, cursors, statements) builds on it.
+See `docs/protocol-notes.md`.
 """
 module Protocol
 

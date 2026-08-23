@@ -51,14 +51,15 @@ end
 
 `VersionNumber("5.5.5-10.11.8-MariaDB")` parses as 5.5.5 with a prerelease tag, so a MariaDB
 10.x greeting must have exactly one leading `5.5.5-` removed before the leading
-`major.minor.patch` is parsed. Unparseable strings become `v"0.0.0"`.
+`major.minor.patch` is parsed. Unparseable strings (including components of more than nine
+digits, which are untrusted wire bytes rather than a version) become `v"0.0.0"`.
 """
 function normalize_version(raw::String, kind::Symbol)
     s = raw
     kind == :mariadb && startswith(s, "5.5.5-") && (s = s[7:end])
-    m = match(r"^(\d+)\.(\d+)\.(\d+)", s)
+    m = match(r"^(\d{1,9})\.(\d{1,9})\.(\d{1,9})(?!\d)", s)
     m === nothing && return v"0.0.0"
-    return VersionNumber(parse(Int, m.captures[1]), parse(Int, m.captures[2]), parse(Int, m.captures[3]))
+    return VersionNumber(parse(UInt32, m.captures[1]), parse(UInt32, m.captures[2]), parse(UInt32, m.captures[3]))
 end
 
 """
@@ -235,7 +236,7 @@ function build_handshake_response(caps::UInt64, max_packet::Integer, charset::UI
     if has_capability(caps, CLIENT_PLUGIN_AUTH_LENENC_CLIENT_DATA)
         write_lenenc_bytes!(buf, auth_response)
     else
-        length(auth_response) <= 255 || throw(ArgumentError("auth response longer than 255 bytes requires CLIENT_PLUGIN_AUTH_LENENC_CLIENT_DATA"))
+        length(auth_response) <= 255 || throw(AuthError("the $(length(auth_response))-byte authentication response needs CLIENT_PLUGIN_AUTH_LENENC_CLIENT_DATA, which the server did not offer"))
         write_u8!(buf, length(auth_response))
         write_bytes!(buf, auth_response)
     end

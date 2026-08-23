@@ -131,7 +131,7 @@ function read_command_response!(s::Session; kind::CommandKind=s.command_kind)
     what == :eof && return finish_eof!(s, p)
     what == :err && return throw_command_err!(s, p, kind)
     what == :local_infile && return begin_local_infile!(s, p)
-    what == :prepare_ok && throw(fault!(s, ProtocolError("COM_STMT_PREPARE responses are not implemented yet")))
+    what == :prepare_ok && throw(fault!(s, ProtocolError("internal error: COM_STMT_PREPARE responses must be read with read_prepare_response!")))
     return read_result_header!(s, p, kind == CMD_STMT_EXECUTE)
 end
 
@@ -291,7 +291,10 @@ end
 
 function drain_step!(s::Session)
     if s.phase == CMD_SENT
-        read_command_response!(s)
+        # an unread COM_STMT_PREPARE answer (the caller was interrupted between the send and
+        # the read) is a PREPARE_OK, not a generic response; its statement id is leaked
+        # server-side but the connection stays usable
+        s.command_kind == CMD_STMT_PREPARE ? read_prepare_response!(s) : read_command_response!(s)
     elseif s.phase == ROWS
         read_row!(s)
     elseif s.phase == RESULT_END

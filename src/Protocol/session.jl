@@ -68,6 +68,18 @@ end
 max_payload(s::Session) = s.authenticated ? s.limits.max_packet : s.limits.max_preauth_packet
 
 """
+    set_timeouts!(s, read_timeout_ns, write_timeout_ns)
+
+Per-operation timeouts (0 = none) re-armed before every transport read and write; distinct
+from the absolute deadlines a caller may set on the transport for connection establishment.
+"""
+function set_timeouts!(s::Session, read_timeout_ns::Integer, write_timeout_ns::Integer)
+    s.io.read_timeout_ns = Int64(read_timeout_ns)
+    s.io.write_timeout_ns = Int64(write_timeout_ns)
+    return nothing
+end
+
+"""
     fault!(s, err) -> Exception
 
 Marks the session `BROKEN`, closes the transport, and returns the exception the caller
