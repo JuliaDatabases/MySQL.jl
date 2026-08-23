@@ -444,7 +444,13 @@ function Base.iterate(tc::Cursors{binary, buffered}, first::Bool=true) where {bi
         cur = tc.current
         conn.handle === nothing && return nothing
         cur.generation == (@atomic conn.generation) || return nothing
-        buffered || (@atomic cur.epoch += 1)  # advancing the outer iterator stales this result's row
+        if !buffered
+            if cur.token == (@atomic conn.active_token)
+                claim_streaming_owner!(cur)
+                check_active(cur)
+            end
+            @atomic cur.epoch += 1  # advancing the outer iterator stales this result's row
+        end
         if !cur.finished
             # an unconsumed streaming result: it must still own the response, then it is drained
             cur.token == (@atomic conn.active_token) || cursor_invalidated()

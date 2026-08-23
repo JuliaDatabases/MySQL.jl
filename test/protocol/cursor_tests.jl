@@ -458,6 +458,25 @@ end
         @test r2.a == 9 && r2[1] == "s"
         @test iterate(tc, st) === nothing
     end
+    # advancing the outer iterator also consumes the streaming cursor and stays task-owned
+    with_native(c -> begin
+        expect_query(c)
+        seq = send_resultset(c, 1, cols, [text_row("1")]; more=true)
+        send_resultset(c, seq, cols, [text_row("2")])
+    end; connect_kw=(; multi_statements=true)) do conn
+        tc = DBInterface.executemultiple(conn, "select; select"; mysql_store_result=false)
+        c1, outer = iterate(tc)
+        r1, _ = iterate(c1)
+        foreign_advance = errormonitor(Threads.@spawn try
+            iterate(tc, outer)
+        catch err
+            err
+        end)
+        @test fetch(foreign_advance) isa MySQL.MySQLInterfaceError
+        @test r1.x == 1
+        c2, _ = iterate(tc, outer)
+        @test first(c2).x == 2
+    end
     # an outer advance also stales the last row of a result that was already exhausted
     with_native(c -> begin
         expect_query(c)
