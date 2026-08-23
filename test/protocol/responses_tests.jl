@@ -156,6 +156,9 @@ end
         end
         @test P.parse_column_def(pv(ext); extended_metadata=true).name == "col1"
         @test_throws P.ProtocolError P.parse_column_def(pv(ext))
+        vector = copy(Vectors.payload(Vectors.COLUMN_DEF_COL1))
+        vector[21] = P.MYSQL_TYPE_VECTOR
+        @test_throws P.ProtocolError P.parse_column_def(pv(vector))
     end
 
     @testset "classification is phase-specific" begin
