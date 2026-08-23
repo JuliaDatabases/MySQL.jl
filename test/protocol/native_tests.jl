@@ -1,3 +1,6 @@
+struct LocalInfileFunctor end
+(::LocalInfileFunctor)(::String) = nothing
+
 @testset "Native options truth table" begin
     @test_throws ArgumentError N.ConnectOptions("h", "u"; bogus=1)
     err = try; N.ConnectOptions("h", "u"; ssl_cipher="AES"); nothing; catch e; e; end
@@ -29,6 +32,8 @@
     @test N.ConnectOptions("h", "u"; ssl_capath="/etc/ssl/certs").tls.ca_file == "/etc/ssl/certs"
     @test_throws ArgumentError N.ConnectOptions("h", "u"; local_files=true)
     @test N.ConnectOptions("h", "u"; local_files=true, local_infile_handler=identity).client_flags & P.CLIENT_LOCAL_FILES != 0
+    @test N.ConnectOptions("h", "u"; local_files=true, local_infile_handler=LocalInfileFunctor()).local_infile_handler isa LocalInfileFunctor
+    @test_throws ArgumentError N.ConnectOptions("h", "u"; local_infile_handler=1)
     @test N.ConnectOptions("h", "u"; port=0).port == 3306
     @test_throws ArgumentError N.ConnectOptions("h", "u"; port=70000)
     @test N.ConnectOptions("h", "u").client_flags & P.CLIENT_MULTI_STATEMENTS == 0

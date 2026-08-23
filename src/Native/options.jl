@@ -28,7 +28,7 @@ struct ConnectOptions
     can_handle_expired_passwords::Bool
     limits::P.Limits
     attrs::Vector{Pair{String, String}}
-    local_infile_handler::Union{Nothing, Function}
+    local_infile_handler::Any
     max_local_infile_bytes::Int
     debug::Bool
     zero_dates::Symbol
@@ -191,7 +191,9 @@ The client option files Oracle's clients read, minus server-only locations. `.my
 function default_option_files()
     if Sys.iswindows()
         windir = get(ENV, "WINDIR", "C:\\Windows")
-        appdata = get(ENV, "APPDATA", homedir())
+        appdata = get(ENV, "APPDATA") do
+            return homedir()
+        end
         return [joinpath(windir, "my.ini"), joinpath(windir, "my.cnf"), "C:\\my.ini", "C:\\my.cnf", joinpath(appdata, "MySQL", ".mylogin.cnf")]
     end
     return ["/etc/my.cnf", "/etc/mysql/my.cnf", joinpath(homedir(), ".my.cnf"), joinpath(homedir(), ".mylogin.cnf")]
@@ -390,6 +392,7 @@ function ConnectOptions(host::AbstractString, user::AbstractString, password::Un
     auth = P.AuthPolicy(; server_public_key=pem, get_server_public_key=get(kwd, :get_server_public_key, false), enable_cleartext_plugin=get(kwd, :enable_cleartext_plugin, false) || default_auth == P.PLUGIN_CLEAR_PASSWORD, insecure_cleartext_auth=get(kwd, :insecure_cleartext_auth, false))
     local_files = get(kwd, :local_files, false)
     handler = get(kwd, :local_infile_handler, nothing)
+    handler === nothing || applicable(handler, "") || throw(ArgumentError("local_infile_handler must be callable with a filename String"))
     local_files && handler === nothing && throw(ArgumentError("local_files=true requires a local_infile_handler"))
     db = String(pick(:db, ""))
     flags = client_flags(; found_rows=get(kwd, :found_rows, false), no_schema=get(kwd, :no_schema, false), ignore_space=get(kwd, :ignore_space, false), multi_statements=get(kwd, :multi_statements, false), local_files=local_files)
@@ -408,7 +411,8 @@ function ConnectOptions(host::AbstractString, user::AbstractString, password::Un
         max_response_bytes=get(kwd, :max_response_bytes, nothing),
         max_session_state_bytes=something(get(kwd, :max_session_state_bytes, nothing), 1024 * 1024),
     )
-    attrs = Vector{Pair{String, String}}(get(kwd, :attrs, default_attrs()))
+    attrs_option = get(kwd, :attrs, nothing)
+    attrs = attrs_option === nothing ? default_attrs() : Vector{Pair{String, String}}(attrs_option)
     ct = pick(:connect_timeout, nothing)
     ct = ct isa AbstractString ? parse(Int, ct) : ct
     max_local_infile_bytes = Int(get(kwd, :max_local_infile_bytes, 1024 * 1024 * 1024))
