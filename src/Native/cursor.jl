@@ -22,6 +22,7 @@ mutable struct Cursor{binary, buffered} <: DBInterface.Cursor
     sql::String
     token::Int
     generation::Int
+    owner::Union{Nothing, Task}
     names::Vector{Symbol}
     types::Vector{Type}
     lookup::Dict{Symbol, Int}
@@ -64,11 +65,20 @@ getepoch(r::Row) = getfield(r, :epoch)
 
 @noinline wrongrow(i) = throw(ArgumentError("row $i is no longer valid; mysql results are forward-only iterators where each row is only valid when iterated"))
 @noinline cursor_invalidated() = throw(P.ProtocolError("cursor invalidated: another command ran on the connection, or it was reconnected or closed"))
+@noinline wrong_streaming_task() = throw(MySQLInterfaceError("a streaming cursor must be consumed by only one task"))
+
+function claim_streaming_owner!(c::Cursor{B, false}) where {B}
+    owner = c.owner
+    owner === nothing && (c.owner = current_task())
+    (owner === nothing || owner === current_task()) || wrong_streaming_task()
+    return nothing
+end
 
 # A streaming cursor that has not reached its terminator must still own the connection's
 # in-flight response and belong to the current session generation.
 function check_active(c::Cursor{B, false}) where {B}
     conn = c.conn
+    c.owner === current_task() || wrong_streaming_task()
     c.generation == (@atomic conn.generation) || cursor_invalidated()
     c.token == (@atomic conn.active_token) || cursor_invalidated()
     return nothing
@@ -112,7 +122,7 @@ Base.length(c::Cursor) = c.nrows
 # ---- construction from a command response ----
 
 function empty_cursor(conn::Connection, sql::String, token::Int, ok::P.OKPacket, binary::Bool, buffered::Bool, opts::ResultOptions, number::Int)
-    c = Cursor{binary, buffered}(conn, sql, token, @atomic(conn.generation), Symbol[], Type[], Dict{Symbol, Int}(), UInt8[], 0, -1, Core.bitcast(Int64, ok.affected_rows), ok, ok.status, ok.warnings, UInt8[], UInt8[], Int[], Int[], Int[], P.PacketCursor(UInt8[]), 0, 0, number, true, false, opts)
+    c = Cursor{binary, buffered}(conn, sql, token, @atomic(conn.generation), nothing, Symbol[], Type[], Dict{Symbol, Int}(), UInt8[], 0, -1, Core.bitcast(Int64, ok.affected_rows), ok, ok.status, ok.warnings, UInt8[], UInt8[], Int[], Int[], Int[], P.PacketCursor(UInt8[]), 0, 0, number, true, false, opts)
     P.more_results(ok) || release_token!(c)
     return c
 end
@@ -128,7 +138,7 @@ function result_cursor(conn::Connection, sql::String, token::Int, header::P.Resu
     types = Type[juliatype(col, opts) for col in header.columns]
     lookup = Dict{Symbol, Int}(nm => i for (i, nm) in enumerate(names))
     coltypes = binary ? UInt8[col.type for col in header.columns] : UInt8[]
-    c = Cursor{binary, buffered}(conn, sql, token, @atomic(conn.generation), names, types, lookup, coltypes, n, buffered ? 0 : -1, Int64(0), nothing, UInt16(0), UInt16(0), UInt8[], UInt8[], Int[], Vector{Int}(undef, n), Vector{Int}(undef, n), P.PacketCursor(UInt8[]), 0, 0, number, false, false, opts)
+    c = Cursor{binary, buffered}(conn, sql, token, @atomic(conn.generation), nothing, names, types, lookup, coltypes, n, buffered ? 0 : -1, Int64(0), nothing, UInt16(0), UInt16(0), UInt8[], UInt8[], Int[], Vector{Int}(undef, n), Vector{Int}(undef, n), P.PacketCursor(UInt8[]), 0, 0, number, false, false, opts)
     buffered && buffer_rows!(c, s)
     return c
 end
@@ -245,6 +255,7 @@ function stream_advance!(c::Cursor{binary, false}, i::Int) where {binary}
     lock(conn.lock)
     try
         (c.closed || c.finished) && return false
+        claim_streaming_owner!(c)
         check_active(c)
         s = session(conn)
         r = try

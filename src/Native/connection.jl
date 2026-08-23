@@ -175,8 +175,13 @@ end
 # session re-arms them before every transport read and write.
 function begin_command!(conn::Connection)
     checkconn(conn)
-    drain_pending!(conn)
-    ensure_live!(conn)
+    if isopen(conn.handle.session)
+        drain_pending!(conn)
+    else
+        # A transport already known closed cannot be drained. Reconnect before any byte of
+        # the new command is sent and invalidate the abandoned response with its session.
+        ensure_live!(conn)
+    end
     s = conn.handle.session
     reap_statements!(conn, s)
     conn.buffered_bytes = 0

@@ -328,6 +328,19 @@ end
         @test isopen(conn)
         cur = DBInterface.execute(conn, "select"; mysql_store_result=false)
         r5, st = iterate(cur)
+        foreign_row = errormonitor(Threads.@spawn try
+            r5.x
+        catch err
+            err
+        end)
+        @test fetch(foreign_row) isa MySQL.MySQLInterfaceError
+        foreign_iterate = errormonitor(Threads.@spawn try
+            iterate(cur, st)
+        catch err
+            err
+        end)
+        @test fetch(foreign_iterate) isa MySQL.MySQLInterfaceError
+        @test r5.x == 5
         r6, st = iterate(cur, st)
         @test r6.x == 6
         @test_throws ArgumentError r5.x
@@ -759,7 +772,10 @@ end
         cur = DBInterface.execute(conn, "select"; mysql_store_result=false)
         r, _ = iterate(cur)
         @test r.x == 1
-        P.close!(conn.handle.session)
+        # Close only the transport, leaving an unread streaming response in ROWS. The next
+        # command must reconnect before trying to drain a transport already known closed.
+        P.transport_close(conn.handle.session.transport)
+        @test conn.handle.session.phase == P.ROWS
         gen = @atomic conn.generation
         @test DBInterface.transaction(conn) do
             @test DBInterface.execute(conn, "inside reconnect").rows_affected == 4
