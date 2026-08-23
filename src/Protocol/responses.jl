@@ -120,6 +120,7 @@ end
 function validate_session_state(type::UInt8, data::Vector{UInt8})
     if type == SESSION_TRACK_SYSTEM_VARIABLES
         c = PacketCursor(data)
+        remaining(c) > 0 || protocol_error("malformed system-variable session-state block: no name/value pair")
         while remaining(c) > 0
             read_lenenc_window!(c, "system variable name")
             read_lenenc_window!(c, "system variable value")

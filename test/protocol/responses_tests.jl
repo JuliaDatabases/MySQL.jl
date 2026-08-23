@@ -83,6 +83,7 @@ end
         @test_throws P.ProtocolError P.parse_ok(pv(ok_payload(; status=P.SERVER_SESSION_STATE_CHANGED, info="", state=UInt8[0x00, 0x05, 0x01], track=true)), CAPS_TRACK, P.Limits())
         # Known session-state payloads are validated before the command can reach READY.
         @test_throws P.ProtocolError P.parse_ok(pv(ok_payload(; status=P.SERVER_SESSION_STATE_CHANGED, info="", state=state_block(P.SESSION_TRACK_SYSTEM_VARIABLES, "name-without-value"), track=true)), CAPS_TRACK, P.Limits())
+        @test_throws P.ProtocolError P.parse_ok(pv(ok_payload(; status=P.SERVER_SESSION_STATE_CHANGED, info="", state=UInt8[P.SESSION_TRACK_SYSTEM_VARIABLES, 0x00], track=true)), CAPS_TRACK, P.Limits())
         @test_throws P.ProtocolError P.parse_ok(pv(ok_payload(; status=P.SERVER_SESSION_STATE_CHANGED, info="", state=state_block(P.SESSION_TRACK_SCHEMA, "schema", "trailing"), track=true)), CAPS_TRACK, P.Limits())
         malformed_gtids = UInt8[P.SESSION_TRACK_GTIDS, 0x01, 0x01]
         @test_throws P.ProtocolError P.parse_ok(pv(ok_payload(; status=P.SERVER_SESSION_STATE_CHANGED, info="", state=malformed_gtids, track=true)), CAPS_TRACK, P.Limits())
