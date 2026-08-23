@@ -124,7 +124,11 @@ Documented gaps of the preview, planned for later milestones — attempting to u
 raises a clear error rather than misbehaving:
 
 - **Unix sockets and Windows named pipes** (transport is TCP/TLS in the preview; the
-  Windows named-pipe CI lane needs a Windows runner and is part of the 2.0 promotion gate)
+  Windows named-pipe CI lane needs a Windows runner and is part of the 2.0 promotion gate).
+  As in 1.x, an empty host or `"localhost"` on Unix (and `"."` on Windows) selects the local
+  transport; because that transport is deferred, the native backend raises a clear error
+  instead of silently using TCP — pass `protocol=:tcp` to force a TCP connection to a local
+  server.
 - **Compression** (`compress=true` is an `ArgumentError`), server cursors /
   `COM_STMT_FETCH`, query attributes, `COM_STMT_BULK_EXECUTE`
 - MariaDB `client_ed25519` / PARSEC / `dialog` (PAM) authentication (`UnsupportedAuthError`)
