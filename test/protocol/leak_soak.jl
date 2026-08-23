@@ -43,18 +43,24 @@ end
 end
 
 @noinline function abandon_buffered_cursors!(conn, n::Int)
+    refs = WeakRef[]
+    sizehint!(refs, n)
     for _ in 1:n
-        DBInterface.execute(conn, "SELECT 1")
+        cursor = DBInterface.execute(conn, "SELECT 1")
+        push!(refs, WeakRef(cursor))
     end
-    return nothing
+    return refs
 end
 
 @noinline function abandon_streaming_cursors!(conn, n::Int)
+    refs = WeakRef[]
+    sizehint!(refs, n)
     for _ in 1:n
         cursor = DBInterface.execute(conn, "SELECT 1 UNION ALL SELECT 2"; mysql_store_result=false)
         iterate(cursor)   # abandon mid-result; the next command drains
+        push!(refs, WeakRef(cursor))
     end
-    return nothing
+    return refs
 end
 
 @noinline function abandon_connections!(port, n::Int)
@@ -133,16 +139,20 @@ function run_leak_soak(port)
                         global_status(monitor, "Prepared_stmt_count") == stmt_baseline
                 end
                 # -- 10k cursors abandoned (buffered, and streaming abandoned mid-result) --
+                cursor_refs = Vector{Vector{WeakRef}}(undef, length(conns))
                 @sync for (i, c) in enumerate(conns)
                     errormonitor(Threads.@spawn begin
-                        abandon_buffered_cursors!(c, isodd(i) ? 2500 : 0)
-                        abandon_streaming_cursors!(c, isodd(i) ? 0 : 2500)
+                        cursor_refs[i] = isodd(i) ?
+                            abandon_buffered_cursors!(c, 2500) :
+                            abandon_streaming_cursors!(c, 2500)
+                        return nothing
                     end)
                 end
                 for c in conns
                     @test Tables.columntable(DBInterface.execute(c, "SELECT 42 AS x")).x == [42]
-                    DBInterface.close!(c)
                 end
+                @test soak_wait(() -> all(r -> r.value === nothing, Iterators.flatten(cursor_refs)))
+                foreach(DBInterface.close!, conns)
             finally
                 @atomic gc_flag.stop = true
                 wait(gc_task)
