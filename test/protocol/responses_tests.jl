@@ -86,6 +86,10 @@ end
         @test_throws P.ProtocolError P.parse_ok(pv(ok_payload(; status=P.SERVER_SESSION_STATE_CHANGED, info="", state=state_block(P.SESSION_TRACK_SCHEMA, "schema", "trailing"), track=true)), CAPS_TRACK, P.Limits())
         malformed_gtids = UInt8[P.SESSION_TRACK_GTIDS, 0x01, 0x01]
         @test_throws P.ProtocolError P.parse_ok(pv(ok_payload(; status=P.SERVER_SESSION_STATE_CHANGED, info="", state=malformed_gtids, track=true)), CAPS_TRACK, P.Limits())
+        unsupported_gtids = UInt8[P.SESSION_TRACK_GTIDS, 0x02, 0x01, 0x00]
+        @test_throws P.ProtocolError P.parse_ok(pv(ok_payload(; status=P.SERVER_SESSION_STATE_CHANGED, info="", state=unsupported_gtids, track=true)), CAPS_TRACK, P.Limits())
+        lenenc_gtid_spec = UInt8[P.SESSION_TRACK_GTIDS, 0x04, 0xFC, 0x00, 0x00, 0x00]
+        @test_throws P.ProtocolError P.parse_ok(pv(ok_payload(; status=P.SERVER_SESSION_STATE_CHANGED, info="", state=lenenc_gtid_spec, track=true)), CAPS_TRACK, P.Limits())
         unknown = state_block(0x7F, "opaque", "extension")
         @test length(P.parse_ok(pv(ok_payload(; status=P.SERVER_SESSION_STATE_CHANGED, info="", state=unknown, track=true)), CAPS_TRACK, P.Limits()).session_state) == 1
         tracked = ok_payload(; info="x", track=true)

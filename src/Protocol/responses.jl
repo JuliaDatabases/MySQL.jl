@@ -126,7 +126,8 @@ function validate_session_state(type::UInt8, data::Vector{UInt8})
         end
     elseif type == SESSION_TRACK_GTIDS
         c = PacketCursor(data)
-        read_lenenc!(c) # extensible encoding specification
+        encoding = read_u8!(c)
+        encoding == 0x00 || protocol_error("unsupported GTID session-state encoding $(Int(encoding))")
         read_lenenc_window!(c, "GTID value")
         atend(c) || protocol_error("malformed GTID session-state block: $(remaining(c)) trailing bytes")
     elseif type == SESSION_TRACK_SCHEMA
