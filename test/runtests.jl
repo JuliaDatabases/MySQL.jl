@@ -24,6 +24,11 @@ function parse_image_ref(ref::String)
 end
 
 function docker_available()
+    # The live lanes, §8.9 gates, and Connector/C integration tests all need Linux server
+    # images. Windows CI runners ship the Docker CLI but only Windows-container mode, so a
+    # `docker pull mysql:8.4` fails ("no matching manifest for windows/amd64"); skip Docker
+    # there. macOS runners have no Docker CLI and are skipped by the check below.
+    Sys.iswindows() && return false
     Sys.which("docker") === nothing && return false
     try
         run(pipeline(`docker info`, stdout=devnull, stderr=devnull))
