@@ -271,9 +271,13 @@ end
     @test N.decode_binary(Date, zero, 1, 0, N.DEFAULT_RESULT_OPTIONS) == Date(0)
     @test N.decode_binary(Union{Missing, Date}, zero, 1, 0, N.ResultOptions(; zero_dates=:missing)) === missing
     @test_throws P.ConversionError N.decode_binary(DateTime, zero, 1, 0, N.ResultOptions(; zero_dates=:error))
-    partial = UInt8[0x00, 0x00, 0x05, 0x01]   # 0000-05-01
+    partial = UInt8[0xE8, 0x07, 0x00, 0x01]   # 2024-00-01
     @test_throws P.ConversionError N.decode_binary(Date, partial, 1, 4, N.DEFAULT_RESULT_OPTIONS)
     @test N.decode_binary(Union{Missing, Date}, partial, 1, 4, N.ResultOptions(; zero_dates=:missing)) === missing
+    year0 = UInt8[0x00, 0x00, 0x01, 0x01]   # 0000-01-01: a legal date, not a partial zero
+    @test N.decode_binary(Date, year0, 1, 4, N.DEFAULT_RESULT_OPTIONS) == Date(0, 1, 1)
+    @test N.decode_binary(Union{Missing, Date}, year0, 1, 4, N.ResultOptions(; zero_dates=:missing)) == Date(0, 1, 1)
+    @test N.decode_binary(DateTime, vcat(year0, UInt8[0x17, 0x3B, 0x3B]), 1, 7, N.ResultOptions(; zero_dates=:error)) == DateTime(0, 1, 1, 23, 59, 59)
     malformed_partial = vcat(partial, UInt8[0x18, 0x00, 0x00])
     @test_throws P.ConversionError N.decode_binary(Union{Missing, Date}, malformed_partial, 1, 7, N.ResultOptions(; zero_dates=:missing))
     @test N.decode_binary(Union{Missing, Int32}, UInt8[], 1, -1, N.DEFAULT_RESULT_OPTIONS) === missing
@@ -316,14 +320,25 @@ end
         @test block[1:nullbytes] == expected
     end
 
-    # Parameter Bit bytes preserve the effective 1.x bind conversion. The big-endian Fix is
-    # for result decoding, not for parameter binding.
+    # A native BIT parameter is the big-endian binary string of its value (no leading zero
+    # bytes, at least one byte), matching the native big-endian BIT decode.
+    @test N.bit_param_bytes(MySQL.API.Bit(0)) == UInt8[0x00]
+    @test N.bit_param_bytes(MySQL.API.Bit(0x7f)) == UInt8[0x7f]
+    @test N.bit_param_bytes(MySQL.API.Bit(0x0100)) == UInt8[0x01, 0x00]
+    @test N.bit_param_bytes(MySQL.API.Bit(0x01ff)) == UInt8[0x01, 0xff]
+    @test N.bit_param_bytes(MySQL.API.Bit(0x0102)) == UInt8[0x01, 0x02]
+    @test N.bit_param_bytes(MySQL.API.Bit(0xffff)) == UInt8[0xff, 0xff]
+    @test N.bit_param_bytes(MySQL.API.Bit(0x0001_0000_0000)) == UInt8[0x01, 0x00, 0x00, 0x00, 0x00]
+    @test N.bit_param_bytes(MySQL.API.Bit(typemax(UInt64))) == fill(0xff, 8)
+    @test N.bit_param_bytes(MySQL.API.Bit(0x8000_0000_0000_0000)) == UInt8[0x80, 0, 0, 0, 0, 0, 0, 0]
     bit = MySQL.API.Bit(0x0102)
     bitbuf = UInt8[]
     N.encode_param_value!(bitbuf, bit)
     c = P.PacketCursor(bitbuf)
     off, len = P.read_lenenc_window_len!(c, "Bit parameter")
-    @test bitbuf[off:(off + len - 1)] == MySQL.API.bitvalue(bit)
+    @test bitbuf[off:(off + len - 1)] == UInt8[0x01, 0x02]
+    # and the text/binary decoders read the same bytes back (BIT round trip)
+    @test N.decode(MySQL.API.Bit, bitbuf, off, len, N.ResultOptions()) == bit
 end
 
 @testset "prepare then execute: binary result set round trip" begin
@@ -799,7 +814,9 @@ end
     @test roundtrip(Float64, -2.5) === -2.5
     @test roundtrip(String, "héllo") == "héllo"
     @test roundtrip(Vector{UInt8}, UInt8[1, 2, 3]) == UInt8[1, 2, 3]
-    @test roundtrip(MySQL.API.Bit, MySQL.API.Bit(0x7f)) == MySQL.API.Bit(0x7f)   # single-byte (1.x bitvalue under-sizes wider BITs)
+    @test roundtrip(MySQL.API.Bit, MySQL.API.Bit(0x7f)) == MySQL.API.Bit(0x7f)
+    @test roundtrip(MySQL.API.Bit, MySQL.API.Bit(0x0102)) == MySQL.API.Bit(0x0102)
+    @test roundtrip(MySQL.API.Bit, MySQL.API.Bit(typemax(UInt64))) == MySQL.API.Bit(typemax(UInt64))
     @test roundtrip(Dec64, d64"12.345") == d64"12.345"
     @test roundtrip(Date, Date(2024, 2, 29)) == Date(2024, 2, 29)
     @test roundtrip(DateTime, DateTime(2024, 2, 29, 13, 14, 15, 250)) == DateTime(2024, 2, 29, 13, 14, 15, 250)

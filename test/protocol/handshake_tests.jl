@@ -114,6 +114,17 @@ pview(payload::Vector{UInt8}; seq=0x00) = P.PacketView(payload, 1, length(payloa
         @test P.detect_kind("8.4.\xf5-w\xbfird", MYSQL8_SERVER_CAPS) == :mysql
         @test P.detect_kind("11.4.\xbf-MARIADB", MYSQL8_SERVER_CAPS) == :mariadb
         @test P.normalize_version("5.5.5-\xbf0.6.1-MariaDB", :mariadb) == v"0.0.0"
+        # version components are untrusted: values that overflow Int/UInt32 (or run past
+        # nine digits) are not versions and must yield v"0.0.0", never OverflowError /
+        # InexactError out of the greeting parser (fuzz finding)
+        @test P.normalize_version("5000000000.0.0-log", :mysql) == v"0.0.0"
+        @test P.normalize_version("99999999999999999999.1.1", :mysql) == v"0.0.0"
+        @test P.normalize_version("8.4.99999999999", :mysql) == v"0.0.0"
+        @test P.normalize_version("8.4.3", :mysql) == v"8.4.3"
+        for bad in ("5000000000.0.0-log\0", "99999999999999999999.1.1\0", "8.4.999999999999\0")
+            info = P.parse_handshake_v10(pview(greeting(; version=bad[1:end-1])))
+            @test info.version == v"0.0.0" && info.raw_version == bad[1:end-1]
+        end
     end
 
     @testset "initial ERR keeps the whole message and no SQLSTATE" begin
@@ -150,8 +161,10 @@ pview(payload::Vector{UInt8}; seq=0x00) = P.PacketView(payload, 1, length(payloa
         @test P.read_nul_string!(c) == "caching_sha2_password"
         @test P.read_lenenc!(c) == 0   # empty attrs block
         @test P.atend(c)
-        # without LENENC_CLIENT_DATA the auth response is limited to 255 bytes
-        @test_throws ArgumentError P.build_handshake_response(caps & ~P.CLIENT_PLUGIN_AUTH_LENENC_CLIENT_DATA, 1, 0x2D, "u", zeros(UInt8, 256), "p")
+        # without LENENC_CLIENT_DATA the auth response is limited to 255 bytes (an RSA
+        # ciphertext is 256+ bytes: a greeting that drops the capability must fail as a
+        # MySQLError, never as an ArgumentError)
+        @test_throws P.AuthError P.build_handshake_response(caps & ~P.CLIENT_PLUGIN_AUTH_LENENC_CLIENT_DATA, 1, 0x2D, "u", zeros(UInt8, 256), "p")
         # MariaDB layout: 19 filler bytes + extended capabilities
         r = P.build_handshake_response((caps & ~P.CLIENT_MYSQL) | P.MARIADB_CLIENT_CACHE_METADATA, 16777216, 0x2D, "u", UInt8[], "p"; mariadb=true)
         c = P.PacketCursor(r)

@@ -77,6 +77,10 @@ end
             @test occursin("input_hex: $(bytes2hex(data))", read(path, String))
         end
     end
-    @test occursin("--startup-file=no", string(FuzzDriver.worker_cmd(UInt64(1), 1, "/tmp/fuzz.tsv", 64)))
-    @test occursin("--heap-size-hint=64M", string(FuzzDriver.worker_cmd(UInt64(1), 1, "/tmp/fuzz.tsv", 64)))
+    # the bounded (memory-limited) worker lane is Linux/macOS; Windows runs workers unbounded
+    memory_mb = Sys.iswindows() ? 0 : 64
+    cmd = string(FuzzDriver.worker_cmd(UInt64(1), 1, joinpath(tempdir(), "fuzz.tsv"), memory_mb))
+    @test occursin("--startup-file=no", cmd)
+    Sys.iswindows() || @test occursin("--heap-size-hint=64M", cmd)
+    Sys.iswindows() && @test_throws ErrorException FuzzDriver.worker_cmd(UInt64(1), 1, joinpath(tempdir(), "fuzz.tsv"), 64)
 end

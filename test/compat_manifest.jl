@@ -88,7 +88,25 @@ function prepared_parameter_roundtrip(conn)
         m IS NULL AS m_null, n IS NULL AS n_null
         FROM manifest_params"""))
     DBInterface.execute(conn, "DROP TEMPORARY TABLE manifest_params")
-    return values
+    # bit_bytes (a Bit parameter) is asserted by its own :fix row: the native encoder is
+    # big-endian, the Connector/C encoder little-endian, so they legitimately differ.
+    return Base.structdiff(values, NamedTuple{(:bit_bytes,)})
+end
+
+# A Bit(0x0102) bound as a BLOB parameter: native writes the big-endian binary string
+# (matching the native big-endian BIT decode), Connector/C writes its 1.x `API.bitvalue`.
+function prepared_bit_parameter(conn)
+    DBInterface.execute(conn, "DROP TEMPORARY TABLE IF EXISTS manifest_bit")
+    DBInterface.execute(conn, "CREATE TEMPORARY TABLE manifest_bit (b BLOB NOT NULL)")
+    stmt = DBInterface.prepare(conn, "INSERT INTO manifest_bit VALUES (?)")
+    try
+        DBInterface.execute(stmt, (MySQL.API.Bit(0x0102),))
+    finally
+        DBInterface.close!(stmt)
+    end
+    v = only(Tables.columntable(DBInterface.execute(conn, "SELECT HEX(b) AS b FROM manifest_bit")).b)
+    DBInterface.execute(conn, "DROP TEMPORARY TABLE manifest_bit")
+    return v
 end
 
 function prepared_bool_parameter(conn)
@@ -276,6 +294,8 @@ const BINARY_ROW_TUPLE = (
         end),
     Row("prepared parameters round-trip every supported non-Bool family", :preserve,
         prepared_parameter_roundtrip),
+    Row("prepared Bit parameter: native writes the big-endian binary string (1.x bitvalue is little-endian and under-sized)", :fix,
+        prepared_bit_parameter; native="0102"),
     Row("prepared Bool uses TINY instead of the 1.x empty-STRING fallback", :fix,
         prepared_bool_parameter; native=:one, legacy=:zero),
     Row("prepared negative TIME honours the sign and applies the Dates.Time range policy", :fix,

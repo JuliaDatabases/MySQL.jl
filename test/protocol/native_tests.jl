@@ -107,6 +107,12 @@ end
         o = N.ConnectOptions("", ""; option_file=path)
         @test o.host == "db.example" && o.user == "alice" && o.password == "s3cret"
         @test o.port == 3307 && o.db == "app" && o.connect_timeout == 7
+        # an omitted db/port falls back to the file exactly like host/user/password, both
+        # when the kwarg is left out and when it is explicitly nothing (the sentinel the
+        # public DBInterface.connect method forwards)
+        @test N.ConnectOptions("", ""; db=nothing, port=nothing, option_file=path).db == "app"
+        @test N.ConnectOptions("", ""; db=nothing, port=nothing, option_file=path).port == 3307
+        @test N.ConnectOptions("", ""; db="explicit", option_file=path).db == "explicit"
         @test o.tls.ca_file == "/etc/ca.pem" && o.tls.mode == P.SSL_VERIFY_CA
         @test o.tls.min_version == Reseau.TLS.TLS1_3_VERSION == o.tls.max_version
         # explicit keywords beat the file; a requested group overrides [client]

@@ -111,8 +111,8 @@ include("protocol/live_tests.jl")
 # timing *ratios* are off by default on CI: shared runners cannot hold a 0.75×/1.0× ratio
 # reliably. The `perf` CI job (and any local run) opts back in with MYSQL_PERF_GATES=1; the
 # correctness/limit/allocation gates always run when they run.
-const PERF_GATES_DEFAULT = haskey(ENV, "CI") ? "0" : "1"
-if docker_available() && get(ENV, "MYSQL_PERF_GATES", PERF_GATES_DEFAULT) != "0"
+perf_gates_default = haskey(ENV, "CI") ? "0" : "1"
+if docker_available() && get(ENV, "MYSQL_PERF_GATES", perf_gates_default) != "0"
     include("perf/perf_gates.jl")
     if Base.JLOptions().check_bounds == 1
         # Pkg.test forces --check-bounds=yes, which slows the pure-Julia backend 2-3x on

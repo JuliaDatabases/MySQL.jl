@@ -244,8 +244,16 @@ end
 
     missing_dates = N.ResultOptions(; zero_dates=:missing)
     duration = N.ResultOptions(; time_type=Dates.Microsecond)
-    @test decode_text(Union{Missing, DateTime}, "0000-05-01 00:00:00"; opts=missing_dates) === missing
-    @test_throws P.ConversionError decode_text(DateTime, "0000-05-01 00:00:00")
+    # a zero month or day is a partial zero date; year 0000 alone is a legal year
+    @test decode_text(Union{Missing, DateTime}, "2024-00-01 00:00:00"; opts=missing_dates) === missing
+    @test decode_text(Union{Missing, Date}, "2024-05-00"; opts=missing_dates) === missing
+    @test_throws P.ConversionError decode_text(DateTime, "2024-00-01 00:00:00")
+    @test_throws P.ConversionError decode_text(Date, "2024-05-00")
+    @test decode_text(DateTime, "0000-05-01 00:00:00") == DateTime(0, 5, 1)
+    @test decode_text(Date, "0000-01-01") == Date(0, 1, 1)
+    @test decode_text(Union{Missing, Date}, "0000-01-01"; opts=missing_dates) == Date(0, 1, 1)
+    @test decode_text(Union{Missing, DateTime}, "0000-12-31 23:59:59"; opts=missing_dates) == DateTime(0, 12, 31, 23, 59, 59)
+    @test decode_text(Date, "0000-01-01"; opts=N.ResultOptions(; zero_dates=:error)) == Date(0, 1, 1)
     @test_throws P.ConversionError decode_text(Union{Missing, DateTime}, "xxxx-00-xx 00:00:00"; opts=missing_dates)
     @test_throws P.ConversionError decode_text(DateTime, "0000-00-00::::")
     @test_throws P.ConversionError decode_text(DateTime, "2024-01-01 00:00:00.")
@@ -785,6 +793,51 @@ end
     end
 end
 
+@testset "a failed reconnect leaves the connection retryable, not closed" begin
+    # When the dead session cannot be re-established, ensure_live! keeps the old (closed)
+    # handle so the next command retries the reconnect, instead of reporting the connection
+    # as closed forever.
+    listener = Reseau.TCP.listen(Reseau.TCP.loopback_addr(0))
+    port = Int(Reseau.TCP.addr(listener).port)
+    accepted = Threads.Atomic{Int}(0)
+    server = errormonitor(Threads.@spawn begin
+        while true
+            c = try; Reseau.TCP.accept(listener); catch; break; end
+            Threads.atomic_add!(accepted, 1)
+            errormonitor(Threads.@spawn begin
+                try
+                    plain_peer_connect!(c; caps=MYSQL8_SERVER_CAPS & ~P.CLIENT_SSL, after=cc -> begin
+                        expect_query(cc); send_ok(cc, 1)
+                        stall_until_eof(cc)
+                    end)
+                catch
+                finally
+                    close(c)
+                end
+            end)
+        end
+    end)
+    try
+        conn = DBInterface.connect(N.Connection, "127.0.0.1", "root", "pw"; port=port, ssl_mode=:disabled, connect_timeout=5, reconnect=true)
+        @test DBInterface.execute(conn, "select").rows_affected == 0
+        @test accepted[] == 1
+        # kill the session and stop the server so the reconnect dial fails
+        P.close!(conn.handle.session)
+        close(listener); wait(server)
+        err = try; DBInterface.execute(conn, "reconnect fails"); nothing; catch e; e; end
+        @test err isa Exception                                                # the reconnect dial failed
+        @test !(err isa ErrorException && occursin("closed or disconnected", err.msg))
+        @test conn.handle !== nothing                                          # not permanently "closed"
+        # a second attempt still tries to reconnect (same connect-style failure), never the
+        # "connection has been closed or disconnected" local error
+        err2 = try; DBInterface.execute(conn, "retry"); nothing; catch e; e; end
+        @test !(err2 isa ErrorException && occursin("closed or disconnected", err2.msg))
+        DBInterface.close!(conn)
+    finally
+        close(listener)
+    end
+end
+
 @testset "command read timeout faults the connection" begin
     with_native(c -> begin
         expect_query(c)
@@ -798,6 +851,47 @@ end
         @test_throws P.TimeoutError DBInterface.execute(conn, "slow")
         @test time_ns() - started < 5_000_000_000
         @test !isopen(conn)
+    end
+end
+
+@testset "read_timeout is per operation, not per command" begin
+    # A streaming cursor consumed slowly (each row inside read_timeout of the previous one)
+    # must not fault: the deadline is re-armed before every transport read, like
+    # Connector/C's MYSQL_OPT_READ_TIMEOUT, not set once for the whole command.
+    rows = [text_row(string(i)) for i in 1:4]
+    cols = [coldef("x"; type=P.MYSQL_TYPE_LONG, flags=NOT_NULL)]
+    with_native(c -> begin
+        expect_query(c)
+        send_packet(c, 1, column_count(1)); send_packet(c, 2, cols[1])
+        for (i, r) in enumerate(rows)
+            sleep(0.4)                                                        # < read_timeout=1 between rows
+            send_logical(c, 2 + i, r)
+        end
+        send_packet(c, 3 + length(rows), ok_payload(; header=0xFE))
+    end; connect_kw=(; read_timeout=1)) do conn
+        cur = DBInterface.execute(conn, "slow-stream"; mysql_store_result=false)
+        @test [Int(row.x) for row in cur] == [1, 2, 3, 4]                      # total wall time > read_timeout
+        @test isopen(conn)
+    end
+end
+
+@testset "closing an abandoned streaming cursor after read_timeout does not throw" begin
+    # The stale-deadline regression: draining an abandoned stream at close! time used the
+    # previous command's (now-expired) absolute deadline and faulted a healthy connection.
+    with_native(c -> begin
+        expect_query(c)
+        send_packet(c, 1, column_count(1)); send_packet(c, 2, coldef("x"; type=P.MYSQL_TYPE_LONG, flags=NOT_NULL))
+        send_logical(c, 3, text_row("1"))
+        send_logical(c, 4, text_row("2"))
+        send_packet(c, 5, ok_payload(; header=0xFE))
+        expect_query(c); send_ok(c, 1)
+    end; connect_kw=(; read_timeout=2)) do conn
+        cur = DBInterface.execute(conn, "stream"; mysql_store_result=false)
+        @test iterate(cur)[1].x == 1
+        sleep(2.2)                                                            # let the per-command deadline expire
+        DBInterface.close!(cur)                                               # must quietly drain, not fault
+        @test isopen(conn)
+        @test DBInterface.execute(conn, "after").rows_affected == 0
     end
 end
 
