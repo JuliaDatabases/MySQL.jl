@@ -1,9 +1,15 @@
 # Native-only MySQL.load fixes. The shared fallback keeps Connector/C 1.x behavior.
 
-function MySQL.quoteid(::Connection, str)
+const VALID_QUOTED_IDENTIFIER = r"^`(?:``|[^`])*`(?:\.`(?:``|[^`])*`)*$"
+function quote_load_identifier(str)
     name = String(str)
-    (ncodeunits(name) >= 2 && first(name) == '`' && last(name) == '`') && return name
-    return escape_identifier(name)
+    wrapped = ncodeunits(name) >= 2 && first(name) == '`' && last(name) == '`'
+    wrapped || return escape_identifier(name)
+    occursin(VALID_QUOTED_IDENTIFIER, name) && return name
+    return escape_identifier(chop(name; head=1, tail=1))
+end
+function MySQL.quoteid(::Connection, str)
+    return quote_load_identifier(str)
 end
 
 function MySQL.load(itr, conn::Connection, name::AbstractString="mysql_" * Random.randstring(5); append::Bool=true, quoteidentifiers::Bool=true, debug::Union{Bool, Symbol}=false, limit::Integer=typemax(Int64), kw...)

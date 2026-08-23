@@ -109,7 +109,7 @@ execute_null_bitmap(payload, nparams) = payload[10:(9 + ((nparams + 7) >> 3))]
     row = NamedTuple{(Symbol("co`l"),)}(("secret-value",))
     with_native(c -> serve_load(c, "`ta``ble`", "`co``l`")) do conn
         @test_logs (:info, r"executing create table statement") (:info, r"executing insert statement") begin
-            @test MySQL.load([row], conn, "ta`ble"; debug=true) == "`ta``ble`"
+            @test MySQL.load([row], conn, "`ta`ble`"; debug=true) == "`ta``ble`"
         end
     end
     with_native(c -> serve_load(c, "`ta``ble`", "`co``l`")) do conn
@@ -118,6 +118,8 @@ execute_null_bitmap(payload, nparams) = payload[10:(9 + ((nparams + 7) >> 3))]
         end
     end
     with_native(c -> nothing) do conn
+        @test MySQL.quoteid(conn, "`schema`.`table`") == "`schema`.`table`"
+        @test MySQL.quoteid(conn, "`ta``ble`") == "`ta``ble`"
         @test_throws ArgumentError MySQL.load([row], conn, "ta`ble"; debug=:invalid)
     end
 end
