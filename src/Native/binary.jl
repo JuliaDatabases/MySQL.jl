@@ -212,7 +212,20 @@ encode_param_value!(buf::Vector{UInt8}, x::Float32) = (P.write_u32!(buf, Core.bi
 encode_param_value!(buf::Vector{UInt8}, x::Float64) = (P.write_u64!(buf, Core.bitcast(UInt64, x)); nothing)
 encode_param_value!(buf::Vector{UInt8}, x::AbstractString) = (P.write_lenenc_string!(buf, String(x)); nothing)
 encode_param_value!(buf::Vector{UInt8}, x::Vector{UInt8}) = (P.write_lenenc_bytes!(buf, x); nothing)
-encode_param_value!(buf::Vector{UInt8}, x::API.Bit) = (P.write_lenenc_bytes!(buf, API.bitvalue(x)); nothing)
+# A BIT parameter is the big-endian binary string of its value (no leading zero bytes, at
+# least one byte), matching the native big-endian BIT *decode*. (`API.bitvalue`, used by the
+# Connector/C backend, is a separate 1.x-compatible little-endian encoding.)
+function bit_param_bytes(x::API.Bit)
+    v = x.bits
+    n = max(1, cld(64 - leading_zeros(v), 8))
+    bytes = Vector{UInt8}(undef, n)
+    for i in n:-1:1
+        @inbounds bytes[i] = v % UInt8
+        v >>= 8
+    end
+    return bytes
+end
+encode_param_value!(buf::Vector{UInt8}, x::API.Bit) = (P.write_lenenc_bytes!(buf, bit_param_bytes(x)); nothing)
 encode_param_value!(buf::Vector{UInt8}, x::DecFP.DecimalFloatingPoint) = (P.write_lenenc_string!(buf, string(x)); nothing)
 
 function encode_param_value!(buf::Vector{UInt8}, x::Date)

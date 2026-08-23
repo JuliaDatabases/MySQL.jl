@@ -182,12 +182,14 @@ function parse_date_parts(::Type{T}, buf::Vector{UInt8}, pos::Int, len::Int) whe
     return parse_datetime_parts(buf, pos, len)
 end
 
+# `:zero` is the all-zero value, `:partial` a zero month or day (`NO_ZERO_IN_DATE`); year
+# 0000 with a real month and day is a legal date (`0000-01-01`), not a partial zero.
 function zero_date_kind(parts)
     y, mo, d, h, mi, s, micros = parts
     if y == 0 && mo == 0 && d == 0 && h == 0 && mi == 0 && s == 0 && micros == 0
         return :zero
     end
-    return y == 0 || mo == 0 || d == 0 ? :partial : :none
+    return mo == 0 || d == 0 ? :partial : :none
 end
 
 function zero_date_value(::Type{T}, buf::Vector{UInt8}, pos::Int, len::Int, opts::ResultOptions) where {T}
