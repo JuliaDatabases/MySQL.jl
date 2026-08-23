@@ -109,17 +109,25 @@ include("protocol/live_tests.jl")
 
 # §8.9 performance/allocation gates: native vs Connector/C on a dedicated server
 if docker_available() && get(ENV, "MYSQL_PERF_GATES", "1") != "0"
+    include("perf/perf_gates.jl")
     if Base.JLOptions().check_bounds == 1
         # Pkg.test forces --check-bounds=yes, which slows the pure-Julia backend 2-3x on
         # byte-heavy paths while leaving Connector/C's C code untouched (measured: the
         # 64 MiB blob fetch goes 64ms -> 147ms native, C unchanged) — a rigged race, not
-        # production performance. Run the timing gates in a child with production bounds.
-        cmd = `$(Base.julia_cmd()) --check-bounds=auto --threads=$(Threads.nthreads()) --project=$(Base.active_project()) $(joinpath(@__DIR__, "perf", "run_perf_gates.jl"))`
-        @testset "performance/allocation gates (§8.9, production-bounds child)" begin
-            @test success(pipeline(cmd; stdout=stdout, stderr=stderr))
+        # production performance. Keep the fixtures in this process. Run correctness,
+        # limit, and allocation checks here, then run only ratios in a production-bounds child.
+        PerfGates.with_perf_servers() do plain_port, tls_port
+            @testset "performance/allocation gates (§8.9)" begin
+                PerfGates.run_correctness_gates(plain_port, tls_port)
+                script = joinpath(@__DIR__, "perf", "run_perf_gates.jl")
+                project = Base.active_project()
+                cmd = `$(Base.julia_cmd()) --startup-file=no --check-bounds=auto --threads=$(Threads.nthreads()) --project=$project $script $plain_port $tls_port`
+                @testset "timing ratios (production-bounds child)" begin
+                    @test success(pipeline(cmd; stdout=stdout, stderr=stderr))
+                end
+            end
         end
     else
-        include("perf/perf_gates.jl")
         PerfGates.runtests()
     end
 else

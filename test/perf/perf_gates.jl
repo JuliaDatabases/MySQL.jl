@@ -1,5 +1,8 @@
 # Performance/allocation gates (plan §8.9): the native backend against the Connector/C
-# backend on the same dedicated server (mysql:8.4 with `--max-allowed-packet=128M`).
+# backend on dedicated mysql:8.4 servers with `--max-allowed-packet=128M`. Plain gates use
+# a server with `--tls-version=` (TLS disabled), because Connector/C 3.4 cannot force
+# `SSL_MODE_DISABLED`.
+# The TLS round-trip gate uses a second TLS-capable server.
 #
 # Gates (asserted, not merely reported):
 #   - 1M-row text scan, 10k `SELECT 1` round trips (plain and TLS), 100k `executemany`,
@@ -29,7 +32,9 @@ function perf_port()
     return port
 end
 
-connect_native(port; kw...) = DBInterface.connect(N.Connection, "127.0.0.1", "root", PERF_ROOT_PW; port=port, db="perf", connect_timeout=10, kw...)
+# The plain fixture uses caching_sha2_password. Connection setup is outside every timer;
+# explicitly request its RSA public-key path when TLS is unavailable.
+connect_native(port; kw...) = DBInterface.connect(N.Connection, "127.0.0.1", "root", PERF_ROOT_PW; port=port, db="perf", connect_timeout=10, get_server_public_key=true, kw...)
 
 connect_c(port; kw...) = DBInterface.connect(MySQL.Connection, "127.0.0.1", "root", PERF_ROOT_PW; port=port, db="perf", kw...)
 
@@ -68,14 +73,19 @@ scan(cursor) = scan_rows(cursor, Tables.schema(cursor))
 
 # ---- fixture ----
 
-function setup_fixture!(port)
-    admin = DBInterface.connect(N.Connection, "127.0.0.1", "root", PERF_ROOT_PW; port=port, connect_timeout=10)
+function setup_database!(port; ssl_mode::Symbol)
+    admin = DBInterface.connect(N.Connection, "127.0.0.1", "root", PERF_ROOT_PW; port=port, connect_timeout=10, ssl_mode=ssl_mode, get_server_public_key=true)
     try
         DBInterface.execute(admin, "CREATE DATABASE IF NOT EXISTS perf")
     finally
         DBInterface.close!(admin)
     end
-    conn = connect_native(port)
+    return nothing
+end
+
+function setup_fixture!(port)
+    setup_database!(port; ssl_mode=:disabled)
+    conn = connect_native(port; ssl_mode=:disabled)
     try
         DBInterface.execute(conn, "CREATE TABLE IF NOT EXISTS seed10 (i INT NOT NULL PRIMARY KEY)")
         DBInterface.execute(conn, "INSERT IGNORE INTO seed10 VALUES (0),(1),(2),(3),(4),(5),(6),(7),(8),(9)")
@@ -97,6 +107,20 @@ function setup_fixture!(port)
     return nothing
 end
 
+function ssl_cipher(conn)
+    cols = Tables.columntable(DBInterface.execute(conn, "SHOW SESSION STATUS LIKE 'Ssl_cipher'"))
+    name = propertynames(cols)[2]
+    return String(first(getproperty(cols, name)))
+end
+
+function assert_transport_modes!(native, c, native_tls, c_tls)
+    @test isempty(ssl_cipher(native))
+    @test isempty(ssl_cipher(c))
+    @test !isempty(ssl_cipher(native_tls))
+    @test !isempty(ssl_cipher(c_tls))
+    return nothing
+end
+
 # ---- gate helpers ----
 
 function gate!(name::String, native_s::Float64, c_s::Float64, min_ratio::Float64)
@@ -107,23 +131,23 @@ function gate!(name::String, native_s::Float64, c_s::Float64, min_ratio::Float64
 end
 
 # A round-trip-bound gate (one server round trip per unit of work) is bounded by the
-# transport latency floor: Reseau's event-loop read wake costs a fixed extra per round trip
-# over Connector/C's blocking recv. When the raw gate misses, the floor difference is
-# measured on bare COM_PING (identical bytes, no protocol-layer work on either backend),
-# the protocol-layer cost net of that floor is asserted, and the raw ratio is recorded as
-# an explicit skip — never as a pass (docs/protocol-notes.md "M5 decisions"; closing it
-# needs a Reseau-level read-wake improvement).
+# minimal command latency floor. When the raw gate misses, measure end-to-end COM_PING on
+# both backends. It uses identical wire bytes and includes each client's command wrapper.
+# Assert the cost net of that measured difference, then record the raw ratio as an explicit
+# skip — never as a pass (docs/protocol-notes.md "M5 decisions").
 function roundtrip_gate!(name::String, native_s::Float64, c_s::Float64, min_ratio::Float64, native_conn, c_conn, nroundtrips::Int)
     if native_s <= c_s / min_ratio
         gate!(name, native_s, c_s, min_ratio)
         return nothing
     end
     pings = 2_000
-    pn = @b run_ping(native_conn, pings) samples = 1 evals = 1
-    pc = @b run_ping(c_conn, pings) samples = 1 evals = 1
+    pn = @b run_ping(native_conn, pings) samples = 5 evals = 1
+    pc = @b run_ping(c_conn, pings) samples = 5 evals = 1
     floor_diff = max(pn.time - pc.time, 0.0) / pings * nroundtrips
-    @info @sprintf("§8.9 %-28s native %8.4fs  C %8.4fs  native/C %5.2fx; COM_PING floor native %.1fµs C %.1fµs → floor-adjusted native %8.4fs", name, native_s, c_s, c_s / native_s, pn.time / pings * 1e6, pc.time / pings * 1e6, native_s - floor_diff)
-    @test native_s - floor_diff <= c_s / min_ratio
+    adjusted_native = native_s - floor_diff
+    @info @sprintf("§8.9 %-28s native %8.4fs  C %8.4fs  native/C %5.2fx; COM_PING floor native %.1fµs C %.1fµs → floor-adjusted native %8.4fs", name, native_s, c_s, c_s / native_s, pn.time / pings * 1e6, pc.time / pings * 1e6, adjusted_native)
+    @test adjusted_native >= 0.0
+    @test adjusted_native <= c_s / min_ratio
     @test_skip native_s <= c_s / min_ratio
     return nothing
 end
@@ -151,8 +175,8 @@ function run_roundtrips(conn, n::Int)
     return acc
 end
 
-# Bare COM_PING round trips: the transport+server latency floor with zero protocol-layer
-# work on either backend (used to attribute a round-trip-bound gate shortfall).
+# Minimal COM_PING round trips: the end-to-end client+transport+server latency floor used
+# as evidence for a round-trip-bound gate shortfall.
 run_ping(conn::N.Connection, n::Int) = (for _ in 1:n; N.ping(conn); end; nothing)
 
 run_ping(conn::MySQL.Connection, n::Int) = (for _ in 1:n; MySQL.API.ping(conn.mysql); end; nothing)
@@ -172,51 +196,141 @@ end
 
 # ---- the gates ----
 
-function run_gates(port)
-    setup_fixture!(port)
-    native = connect_native(port; ssl_mode=:disabled)
-    c = connect_c(port)
-    native_tls = connect_native(port; ssl_mode=:required)
-    c_tls = connect_c(port; ssl_mode=MySQL.API.SSL_MODE_REQUIRED)
+many_params() = (a=collect(Int64, 1:100_000), b=["value-$(i % 1000)" for i in 1:100_000])
+
+function table_count(conn, table::String)
+    return first(Tables.columntable(DBInterface.execute(conn, "SELECT COUNT(*) AS n FROM $table")).n)
+end
+
+# These checks run in the Pkg.test process, including under its forced bounds checking.
+function run_correctness_gates(plain_port, tls_port)
+    native = connect_native(plain_port; ssl_mode=:disabled)
+    c = connect_c(plain_port)
+    native_tls = connect_native(tls_port; ssl_mode=:required)
+    c_tls = connect_c(tls_port; ssl_mode=MySQL.API.SSL_MODE_REQUIRED)
     try
-        @testset "1M-row text scan" begin
+        @testset "matched transport modes" begin
+            assert_transport_modes!(native, c, native_tls, c_tls)
+        end
+        @testset "1M-row scan correctness and allocations" begin
             @test run_text(native) == run_text(c)
+            bn = @b run_text(native) samples = 1 evals = 1
+            alloc_gate!("text scan 1M rows", bn.allocs, 1_000_000, 2)
+
+            stmt_n = DBInterface.prepare(native, "SELECT i, f, s, n FROM perf1m")
+            stmt_c = DBInterface.prepare(c, "SELECT i, f, s, n FROM perf1m")
+            try
+                @test run_binary(stmt_n) == run_binary(stmt_c)
+                bn = @b run_binary(stmt_n) samples = 1 evals = 1
+                alloc_gate!("binary scan 1M rows", bn.allocs, 1_000_000, 2)
+            finally
+                DBInterface.close!(stmt_n)
+                DBInterface.close!(stmt_c)
+            end
+
+            @test run_nulls(native) == run_nulls(c)
+            bn = @b run_nulls(native) samples = 1 evals = 1
+            alloc_gate!("tiny/NULL scan 1M rows", bn.allocs, 1_000_000, 1)
+        end
+        @testset "round-trip correctness (plain, TLS)" begin
+            @test run_roundtrips(native, 10) == run_roundtrips(c, 10) == 10
+            @test run_roundtrips(native_tls, 10) == run_roundtrips(c_tls, 10) == 10
+        end
+        @testset "100k executemany correctness" begin
+            DBInterface.execute(native, "CREATE TABLE IF NOT EXISTS many_check_n (a BIGINT, b VARCHAR(24))")
+            DBInterface.execute(c, "CREATE TABLE IF NOT EXISTS many_check_c (a BIGINT, b VARCHAR(24))")
+            params = many_params()
+            run_executemany(native, "many_check_n", params)
+            run_executemany(c, "many_check_c", params)
+            @test table_count(native, "many_check_n") == table_count(c, "many_check_c") == 100_000
+        end
+        @testset "64 MiB blob correctness" begin
+            big_n = connect_native(plain_port; ssl_mode=:disabled, max_allowed_packet=128 * 1024 * 1024)
+            big_c = connect_c(plain_port; max_allowed_packet=128 * 1024 * 1024)
+            try
+                @test run_blob(big_n) == run_blob(big_c) == (1, 67108864)
+            finally
+                DBInterface.close!(big_n)
+                DBInterface.close!(big_c)
+            end
+        end
+        @testset "buffer limits" begin
+            small = connect_native(plain_port; ssl_mode=:disabled, max_buffered_bytes=4 * 1024 * 1024)
+            try
+                # Buffered budgets charge per-row offsets even when row bytes are tiny.
+                @test_throws P.ProtocolError run_nulls(small)
+            finally
+                DBInterface.close!(small)
+            end
+
+            # 300 rows of 1 MiB: streaming has no aggregate cap by default.
+            stream = connect_native(plain_port; ssl_mode=:disabled)
+            try
+                sql = "SELECT REPEAT('a', 1048576) AS v FROM seed10 a, seed10 b, seed10 c LIMIT 300"
+                nrows, bytes = scan(DBInterface.execute(stream, sql; mysql_store_result=false))
+                @test nrows == 300 && bytes == 300 * 1048576
+                @test bytes > 256 * 1024 * 1024
+                # The same result buffered exceeds the default aggregate budget.
+                @test_throws P.ProtocolError DBInterface.execute(stream, sql)
+                @test !isopen(stream)
+            finally
+                DBInterface.close!(stream)
+            end
+
+            multi = connect_native(plain_port; ssl_mode=:disabled, multi_statements=true, max_buffered_bytes=3 * 1024 * 1024)
+            try
+                sql = "SELECT REPEAT('a', 1048576) UNION ALL SELECT REPEAT('b', 1048576); SELECT REPEAT('c', 1048576) UNION ALL SELECT REPEAT('d', 1048576)"
+                # Each result is about 2 MiB; together they exceed the shared budget.
+                err = try; foreach(identity, DBInterface.executemultiple(multi, sql)); nothing; catch e; e; end
+                @test err isa P.ProtocolError
+                @test !isopen(multi)
+            finally
+                DBInterface.close!(multi)
+            end
+        end
+    finally
+        DBInterface.close!(native)
+        DBInterface.close!(c)
+        DBInterface.close!(native_tls)
+        DBInterface.close!(c_tls)
+    end
+    return nothing
+end
+
+# Only ratio measurements run with production bounds semantics.
+function run_timing_gates(plain_port, tls_port)
+    native = connect_native(plain_port; ssl_mode=:disabled)
+    c = connect_c(plain_port)
+    native_tls = connect_native(tls_port; ssl_mode=:required)
+    c_tls = connect_c(tls_port; ssl_mode=MySQL.API.SSL_MODE_REQUIRED)
+    try
+        @testset "matched timing transport modes" begin
+            assert_transport_modes!(native, c, native_tls, c_tls)
+        end
+        @testset "1M-row text scan" begin
             bn = @b run_text(native) seconds = 8
             bc = @b run_text(c) seconds = 8
             gate!("text scan 1M rows", bn.time, bc.time, 0.75)
-            alloc_gate!("text scan 1M rows", bn.allocs, 1_000_000, 2)   # 1 String column + 1
         end
         @testset "1M-row binary (prepared) scan" begin
             stmt_n = DBInterface.prepare(native, "SELECT i, f, s, n FROM perf1m")
             stmt_c = DBInterface.prepare(c, "SELECT i, f, s, n FROM perf1m")
             try
-                @test run_binary(stmt_n) == run_binary(stmt_c)
                 bn = @b run_binary(stmt_n) seconds = 8
                 bc = @b run_binary(stmt_c) seconds = 8
                 gate!("binary scan 1M rows", bn.time, bc.time, 1.0)
-                alloc_gate!("binary scan 1M rows", bn.allocs, 1_000_000, 2)
             finally
                 DBInterface.close!(stmt_n)
                 DBInterface.close!(stmt_c)
             end
         end
         @testset "1M tiny/NULL rows" begin
-            @test run_nulls(native) == run_nulls(c)
             bn = @b run_nulls(native) seconds = 6
             bc = @b run_nulls(c) seconds = 6
             gate!("tiny/NULL scan 1M rows", bn.time, bc.time, 0.75)
-            alloc_gate!("tiny/NULL scan 1M rows", bn.allocs, 1_000_000, 1)   # no String/Vector columns
-            # the buffered budget charges per-row offsets even when the row bytes are tiny
-            small = connect_native(port; ssl_mode=:disabled, max_buffered_bytes=4 * 1024 * 1024)
-            try
-                @test_throws P.ProtocolError run_nulls(small)
-            finally
-                DBInterface.close!(small)
-            end
         end
         @testset "10k SELECT 1 round trips (plain, TLS)" begin
-            # best of three full 10k passes (plus Chairmarks' warmup pass, which also
-            # covers compilation); both backends get the identical treatment
+            # Best of three full 10k passes. Chairmarks gives both backends one warmup pass.
             bn = @b run_roundtrips(native, 10_000) samples = 3 evals = 1
             bc = @b run_roundtrips(c, 10_000) samples = 3 evals = 1
             roundtrip_gate!("10k round trips plain", bn.time, bc.time, 0.75, native, c, 10_000)
@@ -227,51 +341,23 @@ function run_gates(port)
         @testset "100k executemany" begin
             DBInterface.execute(native, "CREATE TABLE IF NOT EXISTS many_n (a BIGINT, b VARCHAR(24))")
             DBInterface.execute(c, "CREATE TABLE IF NOT EXISTS many_c (a BIGINT, b VARCHAR(24))")
-            params = (a=collect(Int64, 1:100_000), b=["value-$(i % 1000)" for i in 1:100_000])
+            params = many_params()
             bn = @b run_executemany(native, "many_n", params) samples = 1 evals = 1
             bc = @b run_executemany(c, "many_c", params) samples = 1 evals = 1
-            # one round trip per row: floor-bounded like the SELECT 1 round trips
+            # One round trip per row; fixed setup commands make the adjustment conservative.
             roundtrip_gate!("100k executemany", bn.time, bc.time, 0.75, native, c, 100_000)
-            @test first(Tables.columntable(DBInterface.execute(native, "SELECT COUNT(*) AS n FROM many_n")).n) == 100_000
+            @test table_count(native, "many_n") == table_count(c, "many_c") == 100_000
         end
         @testset "64 MiB blob fetch" begin
-            big_n = connect_native(port; ssl_mode=:disabled, max_allowed_packet=128 * 1024 * 1024)
-            big_c = connect_c(port; max_allowed_packet=128 * 1024 * 1024)
+            big_n = connect_native(plain_port; ssl_mode=:disabled, max_allowed_packet=128 * 1024 * 1024)
+            big_c = connect_c(plain_port; max_allowed_packet=128 * 1024 * 1024)
             try
-                @test run_blob(big_n) == (1, 67108864)
                 bn = @b run_blob(big_n) seconds = 6
                 bc = @b run_blob(big_c) seconds = 6
                 gate!("64 MiB blob fetch", bn.time, bc.time, 0.75)
             finally
                 DBInterface.close!(big_n)
                 DBInterface.close!(big_c)
-            end
-        end
-        @testset "streaming > 256 MiB under default limits" begin
-            # 300 rows of 1 MiB: streaming has no aggregate cap by default …
-            stream = connect_native(port; ssl_mode=:disabled)
-            try
-                sql = "SELECT REPEAT('a', 1048576) AS v FROM seed10 a, seed10 b, seed10 c LIMIT 300"
-                nrows, bytes = scan(DBInterface.execute(stream, sql; mysql_store_result=false))
-                @test nrows == 300 && bytes == 300 * 1048576
-                @test bytes > 256 * 1024 * 1024
-                # … but the same result buffered exceeds the default max_buffered_bytes budget
-                @test_throws P.ProtocolError DBInterface.execute(stream, sql)
-                @test !isopen(stream)
-            finally
-                DBInterface.close!(stream)
-            end
-        end
-        @testset "buffered multi-results share one budget" begin
-            multi = connect_native(port; ssl_mode=:disabled, multi_statements=true, max_buffered_bytes=3 * 1024 * 1024)
-            try
-                sql = "SELECT REPEAT('a', 1048576) UNION ALL SELECT REPEAT('b', 1048576); SELECT REPEAT('c', 1048576) UNION ALL SELECT REPEAT('d', 1048576)"
-                # each result is ~2 MiB (below the budget); together they exceed it
-                err = try; foreach(identity, DBInterface.executemultiple(multi, sql)); nothing; catch e; e; end
-                @test err isa P.ProtocolError
-                @test !isopen(multi)
-            finally
-                DBInterface.close!(multi)
             end
         end
     finally
@@ -292,12 +378,12 @@ function image_ref(ref::AbstractString)
     return String(ref), "latest"
 end
 
-function wait_ready(port; timeout=120.0)
+function wait_ready(port; ssl_mode::Symbol, timeout=120.0)
     t0 = time()
     last = nothing
     while time() - t0 < timeout
         try
-            h = DBInterface.connect(N.Connection, "127.0.0.1", "root", PERF_ROOT_PW; port=port, connect_timeout=3)
+            h = DBInterface.connect(N.Connection, "127.0.0.1", "root", PERF_ROOT_PW; port=port, connect_timeout=3, ssl_mode=ssl_mode, get_server_public_key=true)
             DBInterface.close!(h)
             return nothing
         catch err
@@ -308,15 +394,34 @@ function wait_ready(port; timeout=120.0)
     error("perf server did not become ready: $(sprint(showerror, last))")
 end
 
-function runtests()
+function with_perf_server(f::F, port::Int; tls::Bool) where {F}
     image, tag = image_ref(PERF_IMAGE)
-    port = perf_port()
     command = ["--mysql-native-password=ON", "--max-allowed-packet=134217728"]
+    tls || push!(command, "--tls-version=")
     env = Dict("MYSQL_ROOT_PASSWORD" => PERF_ROOT_PW, "MARIADB_ROOT_PASSWORD" => PERF_ROOT_PW)
-    Harbor.with_container(image; tag=tag, ports=Dict(3306 => port), environment=env, command=command, wait_strategy=(port=3306,), wait_timeout=180.0) do _
-        wait_ready(port)
+    return Harbor.with_container(image; tag=tag, ports=Dict(3306 => port), environment=env, command=command, wait_strategy=(port=3306,), wait_timeout=180.0) do _
+        wait_ready(port; ssl_mode=tls ? :required : :disabled)
+        return f()
+    end
+end
+
+function with_perf_servers(f::F) where {F}
+    plain_port = perf_port()
+    return with_perf_server(plain_port; tls=false) do
+        tls_port = perf_port()
+        return with_perf_server(tls_port; tls=true) do
+            setup_fixture!(plain_port)
+            setup_database!(tls_port; ssl_mode=:required)
+            return f(plain_port, tls_port)
+        end
+    end
+end
+
+function runtests()
+    with_perf_servers() do plain_port, tls_port
         @testset "performance/allocation gates (§8.9)" begin
-            run_gates(port)
+            run_correctness_gates(plain_port, tls_port)
+            run_timing_gates(plain_port, tls_port)
         end
     end
     return nothing
