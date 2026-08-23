@@ -13,9 +13,9 @@
 #     fails with `ProtocolError`; buffered multi-results jointly above `max_buffered_bytes`
 #     fail with `ProtocolError`; tiny rows charge their offsets to the budget
 #
-# Runs inside `Pkg.test` when Docker is available (skip with MYSQL_PERF_GATES=0). Timings
-# use Chairmarks (best-of-N samples on the identical consumption function for both
-# backends; the fixture is created once server-side, so setup cost is outside the timers).
+# Correctness, limit, and allocation gates run inside `Pkg.test` when Docker is available.
+# `MYSQL_PERF_GATES=0` skips only timing ratios. Timings use Chairmarks (best-of-N samples
+# on the identical consumption function for both backends; fixture setup is outside timers).
 module PerfGates
 
 using Test, MySQL, DBInterface, Tables, Chairmarks, Printf, Harbor

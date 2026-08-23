@@ -33,6 +33,12 @@ function docker_available()
     end
 end
 
+function performance_gate_plan(env=ENV; docker::Bool=docker_available())
+    docker || return (correctness=false, timing=false)
+    timing_default = haskey(env, "CI") ? "0" : "1"
+    return (correctness=true, timing=get(env, "MYSQL_PERF_GATES", timing_default) != "0")
+end
+
 function pick_port()
     listener = MySQL.Protocol.Reseau.TCP.listen(MySQL.Protocol.Reseau.TCP.loopback_addr(0))
     port = Int(MySQL.Protocol.Reseau.TCP.addr(listener).port)
@@ -101,6 +107,13 @@ end
 
 @testset "MySQL" begin
 
+@testset "performance gate selection" begin
+    @test performance_gate_plan(Dict("CI" => "true"); docker=true) == (correctness=true, timing=false)
+    @test performance_gate_plan(Dict("CI" => "true", "MYSQL_PERF_GATES" => "1"); docker=true) == (correctness=true, timing=true)
+    @test performance_gate_plan(Dict{String, String}(); docker=true) == (correctness=true, timing=true)
+    @test performance_gate_plan(Dict{String, String}(); docker=false) == (correctness=false, timing=false)
+end
+
 # Native wire-protocol tests (no database server needed)
 include("protocol/runtests.jl")
 
@@ -110,33 +123,34 @@ include("protocol/live_tests.jl")
 # §8.9 performance/allocation gates: native vs Connector/C on a dedicated server. The
 # timing *ratios* are off by default on CI: shared runners cannot hold a 0.75×/1.0× ratio
 # reliably. The `perf` CI job (and any local run) opts back in with MYSQL_PERF_GATES=1; the
-# correctness/limit/allocation gates always run when they run.
-perf_gates_default = haskey(ENV, "CI") ? "0" : "1"
-if docker_available() && get(ENV, "MYSQL_PERF_GATES", perf_gates_default) != "0"
+# correctness/limit/allocation gates always run when Docker is available.
+perf_plan = performance_gate_plan()
+if perf_plan.correctness
     include("perf/perf_gates.jl")
-    if Base.JLOptions().check_bounds == 1
-        # Pkg.test forces --check-bounds=yes, which slows the pure-Julia backend 2-3x on
-        # byte-heavy paths while leaving Connector/C's C code untouched (measured: the
-        # 64 MiB blob fetch goes 64ms -> 147ms native, C unchanged) — a rigged race, not
-        # production performance. Keep the fixtures in this process. Run correctness,
-        # limit, and allocation checks here, then run only ratios in a production-bounds
-        # child that also drops any inherited coverage instrumentation.
-        PerfGates.with_perf_servers() do plain_port, tls_port
-            @testset "performance/allocation gates (§8.9)" begin
-                PerfGates.run_correctness_gates(plain_port, tls_port)
-                script = joinpath(@__DIR__, "perf", "run_perf_gates.jl")
-                project = Base.active_project()
-                cmd = `$(Base.julia_cmd()) --startup-file=no --check-bounds=auto --code-coverage=none --threads=$(Threads.nthreads()) --project=$project $script $plain_port $tls_port`
-                @testset "timing ratios (production-bounds child)" begin
-                    @test success(pipeline(cmd; stdout=stdout, stderr=stderr))
+    PerfGates.with_perf_servers() do plain_port, tls_port
+        @testset "performance/allocation gates (§8.9)" begin
+            PerfGates.run_correctness_gates(plain_port, tls_port)
+            if perf_plan.timing
+                if Base.JLOptions().check_bounds == 1
+                    # Pkg.test forces --check-bounds=yes, which slows the pure-Julia backend
+                    # while leaving Connector/C's C code untouched. Run only ratios in a
+                    # production-bounds child that drops inherited coverage instrumentation.
+                    script = joinpath(@__DIR__, "perf", "run_perf_gates.jl")
+                    project = Base.active_project()
+                    cmd = `$(Base.julia_cmd()) --startup-file=no --check-bounds=auto --code-coverage=none --threads=$(Threads.nthreads()) --project=$project $script $plain_port $tls_port`
+                    @testset "timing ratios (production-bounds child)" begin
+                        @test success(pipeline(cmd; stdout=stdout, stderr=stderr))
+                    end
+                else
+                    PerfGates.run_timing_gates(plain_port, tls_port)
                 end
+            else
+                @info "skipping §8.9 timing ratios (MYSQL_PERF_GATES=0); correctness/limit/allocation gates passed"
             end
         end
-    else
-        PerfGates.runtests()
     end
 else
-    @info "skipping §8.9 performance gates (no Docker, or MYSQL_PERF_GATES=0)"
+    @info "skipping §8.9 Docker gates (Docker unavailable)"
 end
 
 let mysql = MySQL.API.init()

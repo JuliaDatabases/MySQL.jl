@@ -91,8 +91,8 @@ jobs:
           name: fuzz-failures
           path: fuzz_failures/
   perf:
-    # §8.9 native-vs-Connector/C performance gates: opt-in (MYSQL_PERF_GATES=1) because the
-    # timing ratios are too tight for shared PR runners; run on the nightly schedule and on
+    # §8.9 timing ratios: correctness/limit/allocation gates stay in Docker-capable test jobs.
+    # Ratios are too tight for shared PR runners, so opt in on the nightly schedule and on
     # demand, with coverage off so the pure-Julia backend is not instrumented against C.
     name: Performance gates (§8.9)
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
