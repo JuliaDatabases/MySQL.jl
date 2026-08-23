@@ -136,7 +136,11 @@ function read_command_response!(s::Session; kind::CommandKind=s.command_kind)
 end
 
 function finish_eof!(s::Session, p::PacketView)
-    eof = guarded(() -> parse_eof(p, s.capabilities), s)
+    eof = if s.command_kind == CMD_SET_OPTION && payload_length(p) == 1
+        EOFPacket(0x0000, s.status)
+    else
+        guarded(() -> parse_eof(p, s.capabilities), s)
+    end
     s.status = eof.status
     more = more_results(eof)
     transition!(s, more ? :ok_more : :ok, more ? RESULT_END : READY)

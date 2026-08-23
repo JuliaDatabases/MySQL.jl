@@ -382,6 +382,7 @@ end
         cases = (
             (P.MYSQL_OPTION_MULTI_STATEMENTS_ON, UInt8[0xFE, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00], P.DEFAULT_CLIENT_CAPABILITIES, true),
             (P.MYSQL_OPTION_MULTI_STATEMENTS_OFF, UInt8[0xFE, 0x00, 0x00, 0x02, 0x00], CAPS_NO_DEPRECATE_EOF, false),
+            (P.MYSQL_OPTION_MULTI_STATEMENTS_ON, UInt8[0xFE], P.DEFAULT_CLIENT_CAPABILITIES, false),
         )
         for (option, reply, caps, expect_ok) in cases
             with_peer(conn -> begin
@@ -403,7 +404,7 @@ end
                 @test s.phase == P.READY && s.result_sets == 1
             end
         end
-        @test seen == [(P.COM_SET_OPTION, UInt8[0x00, 0x00]), (P.COM_SET_OPTION, UInt8[0x01, 0x00])]
+        @test seen == [(P.COM_SET_OPTION, UInt8[0x00, 0x00]), (P.COM_SET_OPTION, UInt8[0x01, 0x00]), (P.COM_SET_OPTION, UInt8[0x00, 0x00])]
     end
 
     @testset "server ERR keeps the connection usable" begin
