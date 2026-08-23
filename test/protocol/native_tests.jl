@@ -11,6 +11,7 @@ struct LocalInfileFunctor end
     @test_logs (:warn, r"deprecated") N.ConnectOptions("h", "u"; data_truncation=true)
     @test N.ConnectOptions("h", "u"; unix_socket="/tmp/mysql.sock").host == "h"
     @test_throws ArgumentError N.ConnectOptions("h", "u"; named_pipe=true)
+    @test N.ConnectOptions("h", "u"; named_pipe=nothing, protocol=:tcp).host == "h"
     @test_throws ArgumentError N.ConnectOptions("h", "u"; protocol=:socket)
     @test N.ConnectOptions("h", "u"; named_pipe=true, protocol=:tcp).host == "h"
     if Sys.iswindows()
