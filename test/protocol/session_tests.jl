@@ -895,17 +895,19 @@ end
         @test commands[4][2] == P.COM_QUIT && commands[4][1] == 0
     end
 
-    @testset "drain! reads an un-read COM_STMT_PREPARE answer without faulting" begin
+    @testset "drain! reads and closes an un-read COM_STMT_PREPARE answer" begin
         # If a caller is interrupted between stmt_prepare! and read_prepare_response!, the
         # session is in CMD_SENT with command_kind == CMD_STMT_PREPARE; the next drain must
-        # read the PREPARE_OK (leaking the id server-side) and keep the connection usable,
-        # not fault with "internal error".
+        # read the PREPARE_OK, close its server-side id, and keep the connection usable.
         with_peer(conn -> begin
             server_handshake!(conn)
             read_command(conn)                       # COM_STMT_PREPARE, deliberately unread by the client
             hdr = UInt8[0x00]; P.write_u32!(hdr, 7); P.write_u16!(hdr, 0); P.write_u16!(hdr, 0); P.write_u8!(hdr, 0); P.write_u16!(hdr, 0)
             send_packet(conn, 1, hdr)                 # PREPARE_OK: 0 columns, 0 params
-            read_command(conn)                        # COM_PING
+            seq, command, data = read_command(conn)   # COM_STMT_CLOSE has no response
+            @test seq == 0 && command == P.COM_STMT_CLOSE && data == UInt8[7, 0, 0, 0]
+            seq, command, data = read_command(conn)   # COM_PING
+            @test seq == 0 && command == P.COM_PING && isempty(data)
             send_packet(conn, 1, ok_payload())
             await_eof(conn)
         end) do client
@@ -913,7 +915,7 @@ end
             client_handshake!(s)
             P.stmt_prepare!(s, "SELECT 1")
             @test s.phase == P.CMD_SENT && s.command_kind == P.CMD_STMT_PREPARE
-            P.drain!(s)                               # must consume the PREPARE_OK, not fault
+            P.drain!(s)                               # must consume PREPARE_OK and close its id
             @test s.phase == P.READY && isopen(s)
             P.ping!(s)
             @test P.read_command_response!(s; kind=P.CMD_SIMPLE) isa P.OKPacket

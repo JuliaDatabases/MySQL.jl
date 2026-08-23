@@ -292,9 +292,14 @@ end
 function drain_step!(s::Session)
     if s.phase == CMD_SENT
         # an unread COM_STMT_PREPARE answer (the caller was interrupted between the send and
-        # the read) is a PREPARE_OK, not a generic response; its statement id is leaked
-        # server-side but the connection stays usable
-        s.command_kind == CMD_STMT_PREPARE ? read_prepare_response!(s) : read_command_response!(s)
+        # the read) is a PREPARE_OK, not a generic response. Close the otherwise unowned id
+        # after the response returns the session to READY.
+        if s.command_kind == CMD_STMT_PREPARE
+            ok = read_prepare_response!(s)
+            stmt_close!(s, ok.statement_id)
+        else
+            read_command_response!(s)
+        end
     elseif s.phase == ROWS
         read_row!(s)
     elseif s.phase == RESULT_END
