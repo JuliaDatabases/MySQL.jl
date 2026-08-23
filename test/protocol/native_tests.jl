@@ -335,6 +335,24 @@ end
     # the timer-driven reaper runs on its own
     @test N.REAPER_TIMER[] isa Timer
 
+    # The timer task's world age is fixed at its creation (during an earlier test file's
+    # first native connect), which predates this file's `Base.close(::CloseCounterIO)`
+    # method: without the reaper's `invokelatest` the timer would swallow the MethodError
+    # and mark the entry :closed with the transport never closed. Wait on the timer only —
+    # no manual `reap_now!` (which would run in the current world and mask the bug).
+    let counter = CloseCounterIO(0)
+        entry = N.ReapEntry(P.FaultTransport(counter))
+        while (@atomic entry.state) == :live
+            N.enqueue_from_finalizer!(entry, () -> nothing)
+        end
+        deadline = time() + 15
+        while (@atomic entry.state) != :closed && time() < deadline
+            sleep(0.05)
+        end
+        @test (@atomic entry.state) == :closed
+        @test (@atomic counter.closes) == 1
+    end
+
     # A busy queue lock leaves ownership live so an explicit close can still claim it.
     counter = CloseCounterIO(0)
     entry = N.ReapEntry(P.FaultTransport(counter))

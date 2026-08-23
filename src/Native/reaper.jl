@@ -73,7 +73,11 @@ function reap_now!()
         swapped || continue
         t = entry.transport
         entry.transport = nothing
-        t === nothing || P.transport_close(t)
+        # invokelatest: the timer task's world is fixed at its creation, so a `close`
+        # method for a transport type defined later (test doubles) would otherwise be a
+        # MethodError that `transport_close` swallows — leaving the transport unclosed
+        # while the entry still reads :closed
+        t === nothing || Base.invokelatest(P.transport_close, t)
         @atomic entry.state = :closed
         n += 1
     end
