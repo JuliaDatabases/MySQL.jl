@@ -128,13 +128,25 @@ function run_live_lane(ref::String; soak::Bool=false)
             N.close!(root)
             @test !isopen(root)
             # the executable compatibility manifest: Connector/C backend vs native, same server
+            server_port = port
             CompatManifest.run!(
-                (; db) -> DBInterface.connect(MySQL.Connection, "127.0.0.1", "root", ROOT_PW; port=port, db=db),
-                (; db) -> DBInterface.connect(N.Connection, "127.0.0.1", "root", ROOT_PW; port=port, db=db, connect_timeout=10))
+                live_factory(MySQL.Connection, server_port),
+                live_factory(N.Connection, server_port);
+                password=ROOT_PW,
+                port=server_port)
             soak && run_leak_soak(port)
         end
     end
     return nothing
+end
+
+function live_factory(T::Type, server_port::Integer)
+    return function (; host="127.0.0.1", user="root", passwd=ROOT_PW, db="", port=server_port, kw...)
+        options = (; kw...)
+        db === nothing || (options = merge((; db=db), options))
+        port === nothing || (options = merge((; port=port), options))
+        return DBInterface.connect(T, host, user, passwd; options...)
+    end
 end
 
 if docker_available()
