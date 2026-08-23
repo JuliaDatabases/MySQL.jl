@@ -296,6 +296,28 @@ end
         end
         @test seen == ["SET time_zone = '+00:00'"]
 
+        uploaded = Vector{UInt8}[]
+        requested = String[]
+        with_server(conn -> plain_peer_connect!(conn; caps=MYSQL8_SERVER_CAPS & ~P.CLIENT_SSL, after=c -> begin
+            read_command(c)
+            send_packet(c, 1, ok_payload(; status=P.SERVER_STATUS_AUTOCOMMIT | P.SERVER_MORE_RESULTS_EXISTS))
+            send_packet(c, 2, vcat(UInt8[0xFB], codeunits("init.csv")))
+            upload_seq = UInt8(0)
+            while true
+                upload_seq, data = read_packet(c)
+                isempty(data) && break
+                push!(uploaded, data)
+            end
+            send_packet(c, upload_seq + 1, ok_payload())
+            read_command(c)
+        end)) do port
+            handler = name -> (push!(requested, name); IOBuffer("init payload"))
+            h = native_connect(port; init_command="SET @x=1; LOAD DATA LOCAL INFILE 'init.csv'", multi_statements=true, local_files=true, local_infile_handler=handler)
+            N.close!(h)
+        end
+        @test requested == ["init.csv"]
+        @test uploaded == [Vector{UInt8}(codeunits("init payload"))]
+
         with_server(conn -> plain_peer_connect!(conn; caps=MYSQL8_SERVER_CAPS & ~P.CLIENT_SSL, after=c -> begin
             read_command(c)
             send_packet(c, 1, ok_payload(; status=P.SERVER_STATUS_AUTOCOMMIT | P.SERVER_MORE_RESULTS_EXISTS))

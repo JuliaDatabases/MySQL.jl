@@ -146,11 +146,74 @@ function bootstrap_charset!(s::P.Session, ok::P.OKPacket)
     return true
 end
 
-function run_init_command!(s::P.Session, sql::String)
-    P.query!(s, sql)
-    P.read_command_response!(s)
-    while !P.is_terminal(s.phase) && s.phase != P.READY
-        P.drain_step!(s)
+function resync_local_infile!(s::P.Session)
+    P.send_local_infile!(s, nothing)
+    try
+        return P.read_command_response!(s)
+    catch server_err
+        server_err isa P.ServerError || rethrow()
+        return server_err
+    end
+end
+@noinline function throw_with_server_cause(err, cause::P.ServerError)
+    try
+        throw(cause)
+    catch
+        throw(err)
+    end
+end
+function handle_local_infile!(handler, max_bytes::Int, s::P.Session, req::P.LocalInfileRequest)
+    handler === nothing && throw(P.fault!(s, P.ProtocolError("the server requested a LOCAL INFILE upload but no local_infile_handler is configured")))
+    filename = req.filename isa AbstractString ? String(req.filename) : String(copy(req.filename))
+    source = try
+        handler(filename)
+    catch handler_err
+        reply = resync_local_infile!(s)
+        reply isa P.ServerError && throw_with_server_cause(handler_err, reply)
+        rethrow()
+    end
+    if source === nothing
+        reply = resync_local_infile!(s)
+        detail = if reply isa P.ServerError
+            "the server replied: $(sprint(showerror, reply))"
+        else
+            "the server accepted the empty upload"
+        end
+        cause = reply isa P.ServerError ? reply : nothing
+        throw(P.LocalInfileRefused(filename, "the LOCAL INFILE upload of \"$filename\" was refused by local_infile_handler; $detail", cause))
+    end
+    if !(source isa IO)
+        err = ArgumentError("local_infile_handler must return an IO or nothing, got $(typeof(source))")
+        reply = resync_local_infile!(s)
+        reply isa P.ServerError && throw_with_server_cause(err, reply)
+        throw(err)
+    end
+    try
+        P.send_local_infile!(s, source; max_bytes=max_bytes)
+    catch err
+        if !P.is_terminal(s.phase)
+            reply = resync_local_infile!(s)
+            reply isa P.ServerError && throw_with_server_cause(err, reply)
+        end
+        rethrow()
+    end
+    return P.read_command_response!(s)
+end
+function run_init_command!(s::P.Session, opts::ConnectOptions)
+    P.query!(s, opts.init_command)
+    response = P.read_command_response!(s)
+    while s.phase != P.READY
+        if response isa P.LocalInfileRequest
+            response = handle_local_infile!(opts.local_infile_handler, opts.max_local_infile_bytes, s, response)
+        elseif s.phase == P.ROWS
+            response = P.read_row!(s)
+        elseif s.phase == P.RESULT_END
+            response = P.next_result!(s)
+        elseif s.phase == P.CMD_SENT
+            response = P.read_command_response!(s)
+        else
+            P.wrong_phase(s, "an init_command response phase")
+        end
     end
     return nothing
 end
@@ -182,7 +245,7 @@ function connect(opts::ConnectOptions)
         deadline == 0 || apply_deadline!(s.transport, Int64(0))
         # from here on `read_timeout`/`write_timeout` apply per transport operation
         P.set_timeouts!(s, timeout_ns(opts.read_timeout), timeout_ns(opts.write_timeout))
-        opts.init_command === nothing || run_init_command!(s, opts.init_command)
+        opts.init_command === nothing || run_init_command!(s, opts)
         return register!(Handle(s, opts, ReapEntry(s.transport), bootstrapped, trace))
     catch
         P.is_terminal(s.phase) || P.close!(s)
