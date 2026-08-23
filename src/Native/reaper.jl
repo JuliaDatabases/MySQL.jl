@@ -2,41 +2,45 @@
 #
 # A handle's finalizer must not do transport I/O (`close(::Reseau.TLS.Conn)` sends
 # close_notify and takes locks). Instead the finalizer obtains a package-global queue
-# trylock, flips the handle's `ReapEntry` from `:live` to `:pending` with a CAS, and pushes
-# the entry;
-# a timer-driven reaper task closes the transports later. Exactly-once is guaranteed by the
+# trylock, flips the handle's `ReapEntry` from `:live` to `:pending` with a CAS, and links
+# the entry into an intrusive queue. A timer-driven reaper task closes the transports later.
+# Exactly-once is guaranteed by the
 # CAS: explicit `retire!` performs the same transition, so a finalizer can never re-enqueue a
 # handle that was closed explicitly, and an entry never holds a closed transport.
 
 mutable struct ReapEntry
     @atomic state::Symbol          # :live → :pending → :closing → :closed
     transport::Union{Nothing, P.Transport}
+    next::Union{Nothing, ReapEntry}
 end
 
-ReapEntry(transport::P.Transport) = ReapEntry(:live, transport)
+ReapEntry(transport::P.Transport) = ReapEntry(:live, transport, nothing)
 
 const REAPER_LOCK = Threads.SpinLock()
-const REAPER_QUEUE = ReapEntry[]
+const REAPER_QUEUE = Ref{Union{Nothing, ReapEntry}}(nothing)
+const REAPER_QUEUE_LENGTH = Ref(0)
 const REAPER_TIMER = Ref{Union{Nothing, Timer}}(nothing)
 const REAPER_INTERVAL_S = 0.5
 const REAPER_STATS = Ref((enqueued=0, closed=0))
 
-# Called from finalizers: may only trylock, may not yield. `reregister` re-arms the finalizer
-# when the lock is busy (the Julia-manual pattern for finalizers that need locks).
-function enqueue_from_finalizer!(entry::ReapEntry, reregister::F) where {F}
+# Called from finalizers: may only trylock, may not yield or allocate. The intrusive list
+# uses the entry's preallocated `next` field. A false return asks the caller to re-register
+# its finalizer using the Julia-manual pattern for finalizers that need locks.
+function enqueue_from_finalizer!(entry::ReapEntry)
     if trylock(REAPER_LOCK)
         try
             _, swapped = @atomicreplace entry.state :live => :pending
-            swapped || return nothing
-            push!(REAPER_QUEUE, entry)
+            swapped || return true
+            entry.next = REAPER_QUEUE[]
+            REAPER_QUEUE[] = entry
+            REAPER_QUEUE_LENGTH[] += 1
             REAPER_STATS[] = (enqueued=REAPER_STATS[].enqueued + 1, closed=REAPER_STATS[].closed)
         finally
             unlock(REAPER_LOCK)
         end
-    else
-        reregister()
+        return true
     end
-    return nothing
+    return false
 end
 
 """
@@ -59,33 +63,39 @@ end
 Closes every queued transport (outside the lock) and returns how many were closed.
 """
 function reap_now!()
-    batch = ReapEntry[]
+    batch = nothing
     lock(REAPER_LOCK)
     try
-        append!(batch, REAPER_QUEUE)
-        empty!(REAPER_QUEUE)
+        batch = REAPER_QUEUE[]
+        REAPER_QUEUE[] = nothing
+        REAPER_QUEUE_LENGTH[] = 0
     finally
         unlock(REAPER_LOCK)
     end
     n = 0
-    for entry in batch
+    entry = batch
+    while entry !== nothing
+        next = entry.next
+        entry.next = nothing
         _, swapped = @atomicreplace entry.state :pending => :closing
-        swapped || continue
-        t = entry.transport
-        entry.transport = nothing
-        # invokelatest: the timer task's world is fixed at its creation, so a `close`
-        # method for a transport type defined later (test doubles) would otherwise be a
-        # MethodError that `transport_close` swallows — leaving the transport unclosed
-        # while the entry still reads :closed
-        t === nothing || Base.invokelatest(P.transport_close, t)
-        @atomic entry.state = :closed
-        n += 1
+        if swapped
+            t = entry.transport
+            entry.transport = nothing
+            # invokelatest: the timer task's world is fixed at its creation, so a `close`
+            # method for a transport type defined later (test doubles) would otherwise be a
+            # MethodError that `transport_close` swallows — leaving the transport unclosed
+            # while the entry still reads :closed
+            t === nothing || Base.invokelatest(P.transport_close, t)
+            @atomic entry.state = :closed
+            n += 1
+        end
+        entry = next
     end
     n > 0 && lock(() -> (REAPER_STATS[] = (enqueued=REAPER_STATS[].enqueued, closed=REAPER_STATS[].closed + n)), REAPER_LOCK)
     return n
 end
 
-pending_reaps() = lock(() -> length(REAPER_QUEUE), REAPER_LOCK)
+pending_reaps() = lock(() -> REAPER_QUEUE_LENGTH[], REAPER_LOCK)
 
 const REAPER_SETUP_LOCK = ReentrantLock()
 

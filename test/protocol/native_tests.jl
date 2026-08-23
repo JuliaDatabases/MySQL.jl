@@ -263,6 +263,10 @@ function synthetic_reap_entries(n::Int)
     return entries, counters, refs
 end
 
+function finalizer_enqueue_allocations(entry::N.ReapEntry)
+    return @allocated N.enqueue_from_finalizer!(entry)
+end
+
 # Allocated in a function so no top-level binding keeps the handles reachable.
 function abandon_handles(port, n)
     refs = WeakRef[]
@@ -367,7 +371,7 @@ end
     let counter = CloseCounterIO(0)
         entry = N.ReapEntry(P.FaultTransport(counter))
         while (@atomic entry.state) == :live
-            N.enqueue_from_finalizer!(entry, () -> nothing)
+            N.enqueue_from_finalizer!(entry) || yield()
         end
         deadline = time() + 15
         while (@atomic entry.state) != :closed && time() < deadline
@@ -380,11 +384,10 @@ end
     # A busy queue lock leaves ownership live so an explicit close can still claim it.
     counter = CloseCounterIO(0)
     entry = N.ReapEntry(P.FaultTransport(counter))
-    reregistered = Ref(false)
     lock(N.REAPER_LOCK)
     try
-        N.enqueue_from_finalizer!(entry, () -> (reregistered[] = true))
-        @test reregistered[] && (@atomic entry.state) == :live
+        @test !N.enqueue_from_finalizer!(entry)
+        @test (@atomic entry.state) == :live
         P.transport_close(N.retire!(entry))
     finally
         unlock(N.REAPER_LOCK)
@@ -398,8 +401,7 @@ end
         push!(tasks, errormonitor(Threads.@spawn begin
             for i in range
                 while (@atomic entries[i].state) == :live
-                    N.enqueue_from_finalizer!(entries[i], () -> nothing)
-                    yield()
+                    N.enqueue_from_finalizer!(entries[i]) || yield()
                 end
             end
         end))
@@ -421,6 +423,12 @@ end
     @test exactly_once
     @test all(entry -> entry.transport === nothing, entries)
     @test N.pending_reaps() == 0
+    warm = N.ReapEntry(P.FaultTransport(CloseCounterIO(0)))
+    @test N.enqueue_from_finalizer!(warm)
+    N.reap_now!()
+    measured = N.ReapEntry(P.FaultTransport(CloseCounterIO(0)))
+    @test finalizer_enqueue_allocations(measured) == 0
+    N.reap_now!()
     GC.gc(); GC.gc()
     @test all(ref -> ref.value === nothing, refs)
 end

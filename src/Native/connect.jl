@@ -19,7 +19,7 @@ end
 Base.isopen(h::Handle) = isopen(h.session)
 
 function finalize_handle(h::Handle)
-    enqueue_from_finalizer!(h.entry, () -> finalizer(finalize_handle, h))
+    enqueue_from_finalizer!(h.entry) || finalizer(finalize_handle, h)
     return nothing
 end
 
