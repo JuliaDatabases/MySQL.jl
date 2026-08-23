@@ -109,8 +109,19 @@ include("protocol/live_tests.jl")
 
 # §8.9 performance/allocation gates: native vs Connector/C on a dedicated server
 if docker_available() && get(ENV, "MYSQL_PERF_GATES", "1") != "0"
-    include("perf/perf_gates.jl")
-    PerfGates.runtests()
+    if Base.JLOptions().check_bounds == 1
+        # Pkg.test forces --check-bounds=yes, which slows the pure-Julia backend 2-3x on
+        # byte-heavy paths while leaving Connector/C's C code untouched (measured: the
+        # 64 MiB blob fetch goes 64ms -> 147ms native, C unchanged) — a rigged race, not
+        # production performance. Run the timing gates in a child with production bounds.
+        cmd = `$(Base.julia_cmd()) --check-bounds=auto --threads=$(Threads.nthreads()) --project=$(Base.active_project()) $(joinpath(@__DIR__, "perf", "run_perf_gates.jl"))`
+        @testset "performance/allocation gates (§8.9, production-bounds child)" begin
+            @test success(pipeline(cmd; stdout=stdout, stderr=stderr))
+        end
+    else
+        include("perf/perf_gates.jl")
+        PerfGates.runtests()
+    end
 else
     @info "skipping §8.9 performance gates (no Docker, or MYSQL_PERF_GATES=0)"
 end

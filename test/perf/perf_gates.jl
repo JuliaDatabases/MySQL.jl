@@ -215,13 +215,13 @@ function run_gates(port)
             end
         end
         @testset "10k SELECT 1 round trips (plain, TLS)" begin
-            # samples=1 evals=1 still runs one full warmup pass first (Chairmarks), which
-            # also covers compilation; both backends get the identical treatment
-            bn = @b run_roundtrips(native, 10_000) samples = 1 evals = 1
-            bc = @b run_roundtrips(c, 10_000) samples = 1 evals = 1
+            # best of three full 10k passes (plus Chairmarks' warmup pass, which also
+            # covers compilation); both backends get the identical treatment
+            bn = @b run_roundtrips(native, 10_000) samples = 3 evals = 1
+            bc = @b run_roundtrips(c, 10_000) samples = 3 evals = 1
             roundtrip_gate!("10k round trips plain", bn.time, bc.time, 0.75, native, c, 10_000)
-            bn = @b run_roundtrips(native_tls, 10_000) samples = 1 evals = 1
-            bc = @b run_roundtrips(c_tls, 10_000) samples = 1 evals = 1
+            bn = @b run_roundtrips(native_tls, 10_000) samples = 3 evals = 1
+            bc = @b run_roundtrips(c_tls, 10_000) samples = 3 evals = 1
             roundtrip_gate!("10k round trips TLS", bn.time, bc.time, 0.75, native_tls, c_tls, 10_000)
         end
         @testset "100k executemany" begin

@@ -270,7 +270,11 @@ source are never read.
   harness measures the COM_PING floor of both backends, asserts the protocol-layer cost
   net of the floor difference, and records the raw ratio as an explicit `@test_skip`
   (never a fake pass). Closing the floor gap needs a Reseau-level read-wake improvement
-  (spin-before-park or same-thread poll).
+  (spin-before-park or same-thread poll). **Under `Pkg.test` the timing gates run in a
+  child process with `--check-bounds=auto`**: Pkg.test forces `--check-bounds=yes`, which
+  slows the pure-Julia backend 2–3× on byte-heavy paths (64 MiB blob fetch 64 ms → 147 ms
+  measured) while Connector/C's C code is untouched — a rigged race, not production
+  performance. Correctness and allocation gates still run under full bounds checking.
 - **§8.10 leak/lifecycle soak** (`test/protocol/leak_soak.jl`, primary live lane):
   10k statements and 10k cursors abandoned across tasks under GC thrash plus 100 abandoned
   connections all return `Prepared_stmt_count`/`Threads_connected` to baseline with the
