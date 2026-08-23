@@ -67,6 +67,14 @@ end
         @test io.response_bytes == 0
     end
 
+    @testset "large deadlines saturate instead of wrapping" begin
+        @test P.deadline_after_ns(typemax(Int64)) == typemax(Int64)
+        before = Int64(time_ns())
+        deadline = P.deadline_after_ns(1_000_000_000)
+        after = Int64(time_ns())
+        @test before + 1_000_000_000 <= deadline <= after + 1_000_000_000
+    end
+
     @testset "writer framing" begin
         function frames(payload)
             out = IOBuffer()

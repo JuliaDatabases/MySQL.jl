@@ -340,7 +340,28 @@ function default_attrs()
     return ["_client_name" => "MySQL.jl", "_client_version" => string(pkgversion(MySQL), "-native"), "_os" => string(Sys.KERNEL), "_platform" => string(Sys.ARCH), "_pid" => string(getpid())]
 end
 
-positive_or_nothing(v, name) = return v === nothing ? nothing : (v > 0 ? Int(v) : throw(ArgumentError("$name must be positive")))
+const MAX_TIMEOUT_SECONDS = typemax(Int64) ÷ 1_000_000_000
+
+function option_integer(v, name::AbstractString)
+    if v isa Integer
+        typemin(Int) <= v <= typemax(Int) || throw(ArgumentError("$name must be representable as Int"))
+        return Int(v)
+    end
+    if v isa AbstractString
+        parsed = tryparse(Int, v)
+        parsed === nothing && throw(ArgumentError("$name must be an integer representable as Int"))
+        return parsed
+    end
+    throw(ArgumentError("$name must be an integer"))
+end
+
+function positive_or_nothing(v, name::AbstractString)
+    v === nothing && return nothing
+    value = option_integer(v, name)
+    value > 0 || throw(ArgumentError("$name must be positive"))
+    value <= MAX_TIMEOUT_SECONDS || throw(ArgumentError("$name is too large to represent as nanoseconds"))
+    return value
+end
 
 """
     ConnectOptions(host, user, password=nothing; kw...)
@@ -367,7 +388,7 @@ function ConnectOptions(host::AbstractString, user::AbstractString, password::Un
     pw = password === nothing ? (haskey(file, :password) ? file[:password] : nothing) : String(password)
     port = pick(:port, nothing)
     port === nothing && get(kwd, :read_env, false) === true && haskey(ENV, "MYSQL_TCP_PORT") && (port = ENV["MYSQL_TCP_PORT"])
-    port = port === nothing ? DEFAULT_PORT : Int(port isa AbstractString ? parse(Int, port) : port)
+    port = port === nothing ? DEFAULT_PORT : option_integer(port, "port")
     (port == 0) && (port = DEFAULT_PORT)
     1 <= port <= 65535 || throw(ArgumentError("port must be in 1:65535"))
     charset = pick(:charset_name, UTF8MB4)
@@ -414,8 +435,7 @@ function ConnectOptions(host::AbstractString, user::AbstractString, password::Un
     attrs_option = get(kwd, :attrs, nothing)
     attrs = attrs_option === nothing ? default_attrs() : Vector{Pair{String, String}}(attrs_option)
     ct = pick(:connect_timeout, nothing)
-    ct = ct isa AbstractString ? parse(Int, ct) : ct
-    max_local_infile_bytes = Int(get(kwd, :max_local_infile_bytes, 1024 * 1024 * 1024))
+    max_local_infile_bytes = option_integer(get(kwd, :max_local_infile_bytes, 1024 * 1024 * 1024), "max_local_infile_bytes")
     max_local_infile_bytes > 0 || throw(ArgumentError("max_local_infile_bytes must be positive"))
     results = ResultOptions(; zero_dates=Symbol(something(get(kwd, :zero_dates, nothing), :sentinel)), time_type=something(get(kwd, :time_type, nothing), Dates.Time))
     return ConnectOptions(host_s, port, user_s, pw, db, positive_or_nothing(ct, "connect_timeout"), positive_or_nothing(get(kwd, :read_timeout, nothing), "read_timeout"), positive_or_nothing(get(kwd, :write_timeout, nothing), "write_timeout"), pick(:bind, nothing) === nothing ? nothing : String(pick(:bind, nothing)), get(kwd, :init_command, nothing) === nothing ? nothing : String(kwd[:init_command]), something(get(kwd, :reconnect, nothing), false), flags, tls, auth, default_auth === nothing ? nothing : String(default_auth), get(kwd, :can_handle_expired_passwords, false), limits, attrs, handler, max_local_infile_bytes, get(kwd, :debug, false), results.zero_dates, results.time_type)

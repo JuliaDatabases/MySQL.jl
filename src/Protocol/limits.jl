@@ -56,6 +56,14 @@ function Limits(;
     max_buffered_bytes === nothing || max_buffered_bytes >= 1 || throw(ArgumentError("max_buffered_bytes must be >= 1 or nothing"))
     max_response_bytes === nothing || max_response_bytes >= 1 || throw(ArgumentError("max_response_bytes must be >= 1 or nothing"))
     max_session_state_bytes >= 1 || throw(ArgumentError("max_session_state_bytes must be >= 1"))
+    max_auth_rounds <= typemax(Int) || throw(ArgumentError("max_auth_rounds exceeds typemax(Int)"))
+    max_auth_bytes <= typemax(Int) || throw(ArgumentError("max_auth_bytes exceeds typemax(Int)"))
+    max_columns <= typemax(Int) || throw(ArgumentError("max_columns exceeds typemax(Int)"))
+    max_result_sets <= typemax(Int) || throw(ArgumentError("max_result_sets exceeds typemax(Int)"))
+    max_metadata_bytes <= typemax(Int) || throw(ArgumentError("max_metadata_bytes exceeds typemax(Int)"))
+    max_buffered_bytes === nothing || max_buffered_bytes <= typemax(Int) || throw(ArgumentError("max_buffered_bytes exceeds typemax(Int)"))
+    max_response_bytes === nothing || max_response_bytes <= typemax(Int) || throw(ArgumentError("max_response_bytes exceeds typemax(Int)"))
+    max_session_state_bytes <= typemax(Int) || throw(ArgumentError("max_session_state_bytes exceeds typemax(Int)"))
     return Limits(Int(max_packet), Int(max_preauth_packet), Int(max_auth_rounds), Int(max_auth_bytes), Int(max_columns), Int(max_result_sets), Int(max_metadata_bytes), max_buffered_bytes === nothing ? nothing : Int(max_buffered_bytes), max_response_bytes === nothing ? nothing : Int(max_response_bytes), Int(max_session_state_bytes))
 end
 

@@ -60,15 +60,20 @@ PacketIO() = return PacketIO(0x00, UInt8[], zeros(UInt8, PACKET_HEADER_LEN), UIn
 
 buffered_bytes_available(io::PacketIO) = return io.readlim - io.readpos + 1
 
+@inline function deadline_after_ns(timeout_ns::Int64)
+    now = Int64(time_ns())
+    return timeout_ns > typemax(Int64) - now ? typemax(Int64) : now + timeout_ns
+end
+
 # Re-arms the read deadline before a transport read when a per-read timeout is configured
 # (a no-op otherwise, so the default path costs nothing).
 @inline function arm_read_deadline!(io::PacketIO, transport::Transport)
-    io.read_timeout_ns == 0 || set_read_deadline!(transport, Int64(time_ns()) + io.read_timeout_ns)
+    io.read_timeout_ns == 0 || set_read_deadline!(transport, deadline_after_ns(io.read_timeout_ns))
     return nothing
 end
 
 @inline function arm_write_deadline!(io::PacketIO, transport::Transport)
-    io.write_timeout_ns == 0 || set_write_deadline!(transport, Int64(time_ns()) + io.write_timeout_ns)
+    io.write_timeout_ns == 0 || set_write_deadline!(transport, deadline_after_ns(io.write_timeout_ns))
     return nothing
 end
 

@@ -36,6 +36,9 @@ struct LocalInfileFunctor end
     @test_throws ArgumentError N.ConnectOptions("h", "u"; local_infile_handler=1)
     @test N.ConnectOptions("h", "u"; port=0).port == 3306
     @test_throws ArgumentError N.ConnectOptions("h", "u"; port=70000)
+    @test_throws ArgumentError N.ConnectOptions("h", "u"; port=big(typemax(Int)) + 1)
+    @test_throws ArgumentError N.ConnectOptions("h", "u"; connect_timeout=big(N.MAX_TIMEOUT_SECONDS) + 1)
+    @test_throws ArgumentError N.ConnectOptions("h", "u"; max_local_infile_bytes=big(typemax(Int)) + 1)
     @test N.ConnectOptions("h", "u").client_flags & P.CLIENT_MULTI_STATEMENTS == 0
     @test N.ConnectOptions("h", "u"; db="app").client_flags & P.CLIENT_CONNECT_WITH_DB != 0
     @test N.ConnectOptions("h", "u").client_flags & P.CLIENT_CONNECT_WITH_DB == 0

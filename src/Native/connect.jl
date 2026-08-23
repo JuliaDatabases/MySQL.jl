@@ -48,7 +48,7 @@ function hostport(host::AbstractString, port::Integer)
     return occursin(':', h) ? string("[", h, "]:", port) : string(h, ":", port)
 end
 
-deadline_from(connect_timeout::Union{Nothing, Int}) = return connect_timeout === nothing ? Int64(0) : Int64(time_ns()) + Int64(connect_timeout) * 1_000_000_000
+deadline_from(connect_timeout::Union{Nothing, Int}) = return connect_timeout === nothing ? Int64(0) : P.deadline_after_ns(Int64(connect_timeout) * 1_000_000_000)
 
 function remaining_ns(deadline::Int64)
     deadline == 0 && return Int64(0)

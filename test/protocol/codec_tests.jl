@@ -67,5 +67,9 @@
         @test_throws ArgumentError P.Limits(; max_preauth_packet=2 * P.DEFAULT_MAX_PACKET)
         @test_throws ArgumentError P.Limits(; max_buffered_bytes=0)
         @test P.Limits(; max_buffered_bytes=nothing, max_response_bytes=10).max_buffered_bytes === nothing
+        too_large = big(typemax(Int)) + 1
+        @test_throws ArgumentError P.Limits(; max_columns=too_large)
+        @test_throws ArgumentError P.Limits(; max_buffered_bytes=too_large)
+        @test_throws ArgumentError P.Limits(; max_response_bytes=too_large)
     end
 end
