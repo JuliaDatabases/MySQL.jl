@@ -48,7 +48,7 @@ mutable struct PacketIO
     inbuf::Vector{UInt8}
     header::Vector{UInt8}
     outbuf::Vector{UInt8}
-    response_bytes::Int
+    response_bytes::UInt64
     readbuf::Vector{UInt8}
     readpos::Int
     readlim::Int
@@ -56,7 +56,7 @@ mutable struct PacketIO
     write_timeout_ns::Int64
 end
 
-PacketIO() = PacketIO(0x00, UInt8[], zeros(UInt8, PACKET_HEADER_LEN), UInt8[], 0, Vector{UInt8}(undef, READBUF_SIZE), 1, 0, 0, 0)
+PacketIO() = PacketIO(0x00, UInt8[], zeros(UInt8, PACKET_HEADER_LEN), UInt8[], 0x0000000000000000, Vector{UInt8}(undef, READBUF_SIZE), 1, 0, 0, 0)
 
 buffered_bytes_available(io::PacketIO) = io.readlim - io.readpos + 1
 
@@ -153,11 +153,12 @@ function readpacket!(io::PacketIO, transport::Transport, max_payload::Int; max_r
         nchunks += 1
         first_chunk_len < 0 && (first_chunk_len = len)
         check_limit("packet length", total + len, max_payload)
-        check_limit("response bytes", io.response_bytes + len, max_response)
+        next_response_bytes = io.response_bytes + UInt64(len)
+        max_response === nothing || next_response_bytes <= UInt64(max_response) || throw(ProtocolError("response bytes $(next_response_bytes) exceeds limit $(max_response)"))
         length(dest) < total + len && resize!(dest, total + len)
         packet_read!(io, transport, dest, total + 1, len, buffered)
         total += len
-        io.response_bytes += len
+        io.response_bytes = next_response_bytes
         len < MAX_CHUNK && break
     end
     return PacketView(dest, 1, total, seq, nchunks, first_chunk_len)

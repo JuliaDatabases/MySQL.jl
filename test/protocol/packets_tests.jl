@@ -58,6 +58,15 @@ end
         @test_throws P.ProtocolError P.readpacket!(io, t, 1024; max_response=64)
     end
 
+    @testset "aggregate response accounting does not overflow Int" begin
+        io, t = reader_over(framed(0x00, UInt8[0x01, 0x02]))
+        io.response_bytes = UInt64(typemax(Int))
+        @test P.payload_length(P.readpacket!(io, t, 1024)) == 2
+        @test io.response_bytes == UInt64(typemax(Int)) + 2
+        P.newcommand!(io)
+        @test io.response_bytes == 0
+    end
+
     @testset "writer framing" begin
         function frames(payload)
             out = IOBuffer()

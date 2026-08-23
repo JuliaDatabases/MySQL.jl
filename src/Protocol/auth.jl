@@ -310,7 +310,7 @@ function authenticate!(s::Session, user::AbstractString, password::Union{Nothing
         while true
             response_bytes = s.io.response_bytes
             kind, value = read_auth_packet!(s, round_number, auth_bytes)
-            auth_bytes += s.io.response_bytes - response_bytes
+            auth_bytes += Int(s.io.response_bytes - response_bytes)
             round_number += 1
             if kind == :ok
                 note(:ok)
