@@ -24,10 +24,10 @@ struct PacketView
     first_chunk_len::Int
 end
 
-payload_length(p::PacketView) = p.hi - p.lo + 1
-PacketCursor(p::PacketView) = PacketCursor(p.buf, p.lo, p.hi)
-first_byte(p::PacketView) = payload_length(p) == 0 ? nothing : (@inbounds p.buf[p.lo])
-payload(p::PacketView) = p.buf[p.lo:p.hi]
+payload_length(p::PacketView) = return p.hi - p.lo + 1
+PacketCursor(p::PacketView) = return PacketCursor(p.buf, p.lo, p.hi)
+first_byte(p::PacketView) = return payload_length(p) == 0 ? nothing : (@inbounds p.buf[p.lo])
+payload(p::PacketView) = return p.buf[p.lo:p.hi]
 
 const READBUF_SIZE = 64 * 1024
 
@@ -56,9 +56,9 @@ mutable struct PacketIO
     write_timeout_ns::Int64
 end
 
-PacketIO() = PacketIO(0x00, UInt8[], zeros(UInt8, PACKET_HEADER_LEN), UInt8[], 0x0000000000000000, Vector{UInt8}(undef, READBUF_SIZE), 1, 0, 0, 0)
+PacketIO() = return PacketIO(0x00, UInt8[], zeros(UInt8, PACKET_HEADER_LEN), UInt8[], 0x0000000000000000, Vector{UInt8}(undef, READBUF_SIZE), 1, 0, 0, 0)
 
-buffered_bytes_available(io::PacketIO) = io.readlim - io.readpos + 1
+buffered_bytes_available(io::PacketIO) = return io.readlim - io.readpos + 1
 
 # Re-arms the read deadline before a transport read when a per-read timeout is configured
 # (a no-op otherwise, so the default path costs nothing).
@@ -128,7 +128,7 @@ function newcommand!(io::PacketIO)
     return nothing
 end
 
-@noinline sequence_mismatch(expected::UInt8, got::UInt8) = protocol_error("sequence id mismatch: expected $(Int(expected)), got $(Int(got))")
+@noinline sequence_mismatch(expected::UInt8, got::UInt8) = return protocol_error("sequence id mismatch: expected $(Int(expected)), got $(Int(got))")
 
 """
     readpacket!(io, transport, max_payload; max_response=nothing, dest=io.inbuf, buffered=false) -> PacketView
@@ -188,4 +188,4 @@ function sendpacket!(io::PacketIO, transport::Transport, payload::AbstractVector
 end
 
 # Number of wire chunks `sendpacket!` produces for a payload of `n` bytes.
-chunk_count(n::Integer) = Int(div(n, MAX_CHUNK)) + 1
+chunk_count(n::Integer) = return Int(div(n, MAX_CHUNK)) + 1

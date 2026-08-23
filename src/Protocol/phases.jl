@@ -88,6 +88,6 @@ function uncovered_transitions()
     end
 end
 
-@noinline illegal_transition(from::Phase, event::Symbol, to::Phase) = error("internal error: illegal phase transition $from --$event--> $to")
+@noinline illegal_transition(from::Phase, event::Symbol, to::Phase) = return error("internal error: illegal phase transition $from --$event--> $to")
 
-is_terminal(p::Phase) = p == CLOSED || p == BROKEN
+is_terminal(p::Phase) = return p == CLOSED || p == BROKEN

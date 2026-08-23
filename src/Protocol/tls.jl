@@ -45,7 +45,7 @@ function TLSOptions(; mode=SSL_PREFERRED, ca_file=nothing, cert_file=nothing, ke
     return TLSOptions(m, ca_file === nothing ? nothing : String(ca_file), cert_file === nothing ? nothing : String(cert_file), key_file === nothing ? nothing : String(key_file), server_name === nothing ? nothing : String(server_name), min_version, max_version)
 end
 
-is_ip_literal(host::AbstractString) = occursin(r"^\d{1,3}(\.\d{1,3}){3}$", host) || occursin(':', host)
+is_ip_literal(host::AbstractString) = return occursin(r"^\d{1,3}(\.\d{1,3}){3}$", host) || occursin(':', host)
 
 # SNI is sent for DNS names in every TLS mode; an IP literal is passed only when it is needed
 # for verification (RFC 6066 forbids IP literals in SNI, and Reseau needs the name to check
@@ -64,9 +64,9 @@ function tls_config(opts::TLSOptions, host::AbstractString, handshake_timeout_ns
     return Reseau.TLS.Config(; server_name=tls_server_name(opts, host), verify_peer=verify_peer, verify_hostname=verify_hostname, cert_file=opts.cert_file, key_file=opts.key_file, ca_file=opts.ca_file, handshake_timeout_ns=max(Int64(0), Int64(handshake_timeout_ns)), min_version=opts.min_version === nothing ? Reseau.TLS.TLS1_2_VERSION : opts.min_version, max_version=opts.max_version)
 end
 
-raw_tcp(t::Reseau.TCP.Conn) = t
-raw_tcp(t::FaultTransport) = t.inner isa Reseau.TCP.Conn ? t.inner : throw(ArgumentError("STARTTLS needs a TCP transport"))
-raw_tcp(::Reseau.TLS.Conn) = throw(ArgumentError("the session is already on TLS"))
+raw_tcp(t::Reseau.TCP.Conn) = return t
+raw_tcp(t::FaultTransport) = return t.inner isa Reseau.TCP.Conn ? t.inner : throw(ArgumentError("STARTTLS needs a TCP transport"))
+raw_tcp(::Reseau.TLS.Conn) = return throw(ArgumentError("the session is already on TLS"))
 
 function socket_fd(tcp::Reseau.TCP.Conn)
     raw = Reseau.TCP.rawfd(tcp)
@@ -89,10 +89,10 @@ function has_pending_tcp_bytes(tcp::Reseau.TCP.Conn)
     throw(SystemError("recv(MSG_PEEK)", Int(errno)))
 end
 
-is_secure_transport(t::Reseau.TLS.Conn) = true
-is_secure_transport(t::Reseau.TCP.Conn) = false
-is_secure_transport(t::FaultTransport) = t.inner isa Reseau.TLS.Conn
-is_secure_transport(s::Session) = is_secure_transport(s.transport)
+is_secure_transport(t::Reseau.TLS.Conn) = return true
+is_secure_transport(t::Reseau.TCP.Conn) = return false
+is_secure_transport(t::FaultTransport) = return t.inner isa Reseau.TLS.Conn
+is_secure_transport(s::Session) = return is_secure_transport(s.transport)
 
 """
     starttls!(s, opts, host; handshake_timeout_ns=0) -> Bool

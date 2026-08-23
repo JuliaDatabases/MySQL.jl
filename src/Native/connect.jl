@@ -16,7 +16,7 @@ mutable struct Handle
     auth_trace::Vector{Symbol}
 end
 
-Base.isopen(h::Handle) = isopen(h.session)
+Base.isopen(h::Handle) = return isopen(h.session)
 
 function finalize_handle(h::Handle)
     enqueue_from_finalizer!(h.entry) || finalizer(finalize_handle, h)
@@ -48,7 +48,7 @@ function hostport(host::AbstractString, port::Integer)
     return occursin(':', h) ? string("[", h, "]:", port) : string(h, ":", port)
 end
 
-deadline_from(connect_timeout::Union{Nothing, Int}) = connect_timeout === nothing ? Int64(0) : Int64(time_ns()) + Int64(connect_timeout) * 1_000_000_000
+deadline_from(connect_timeout::Union{Nothing, Int}) = return connect_timeout === nothing ? Int64(0) : Int64(time_ns()) + Int64(connect_timeout) * 1_000_000_000
 
 function remaining_ns(deadline::Int64)
     deadline == 0 && return Int64(0)
@@ -72,7 +72,6 @@ function resolve_bind(
     address = hostport(bind, 0)
     deadline == 0 && return resolver("tcp", address)
     timeout_message = "connect_timeout expired while resolving bind address $bind"
-
     result = Channel{Tuple{Bool, Any}}(1)
     task = errormonitor(Threads.@spawn begin
         try
@@ -156,7 +155,7 @@ function run_init_command!(s::P.Session, sql::String)
     return nothing
 end
 
-timeout_ns(seconds::Union{Nothing, Int}) = seconds === nothing ? Int64(0) : Int64(seconds) * 1_000_000_000
+timeout_ns(seconds::Union{Nothing, Int}) = return seconds === nothing ? Int64(0) : Int64(seconds) * 1_000_000_000
 
 """
     connect(opts::ConnectOptions) -> Handle
@@ -191,4 +190,4 @@ function connect(opts::ConnectOptions)
     end
 end
 
-connect(host::AbstractString, user::AbstractString, password::Union{Nothing, AbstractString}=nothing; kw...) = connect(ConnectOptions(host, user, password; kw...))
+connect(host::AbstractString, user::AbstractString, password::Union{Nothing, AbstractString}=nothing; kw...) = return connect(ConnectOptions(host, user, password; kw...))

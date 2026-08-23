@@ -39,10 +39,10 @@ struct CachingSha2Password <: AuthPlugin end
 struct Sha256Password <: AuthPlugin end
 struct ClearPassword <: AuthPlugin end
 
-plugin_name(::NativePassword) = PLUGIN_NATIVE_PASSWORD
-plugin_name(::CachingSha2Password) = PLUGIN_CACHING_SHA2_PASSWORD
-plugin_name(::Sha256Password) = PLUGIN_SHA256_PASSWORD
-plugin_name(::ClearPassword) = PLUGIN_CLEAR_PASSWORD
+plugin_name(::NativePassword) = return PLUGIN_NATIVE_PASSWORD
+plugin_name(::CachingSha2Password) = return PLUGIN_CACHING_SHA2_PASSWORD
+plugin_name(::Sha256Password) = return PLUGIN_SHA256_PASSWORD
+plugin_name(::ClearPassword) = return PLUGIN_CLEAR_PASSWORD
 
 const SUPPORTED_PLUGINS = Dict{String, AuthPlugin}(
     PLUGIN_NATIVE_PASSWORD => NativePassword(),
@@ -51,7 +51,7 @@ const SUPPORTED_PLUGINS = Dict{String, AuthPlugin}(
     PLUGIN_CLEAR_PASSWORD => ClearPassword(),
 )
 
-is_supported_plugin(name::AbstractString) = haskey(SUPPORTED_PLUGINS, name)
+is_supported_plugin(name::AbstractString) = return haskey(SUPPORTED_PLUGINS, name)
 
 function plugin_for(name::AbstractString)
     return get(SUPPORTED_PLUGINS, name) do
@@ -132,11 +132,11 @@ function rsa_encrypt_password(password::AbstractVector{UInt8}, nonce::AbstractVe
     end
 end
 
-cleartext_password(password::AbstractVector{UInt8}) = vcat(Vector{UInt8}(password), UInt8[0x00])
+cleartext_password(password::AbstractVector{UInt8}) = return vcat(Vector{UInt8}(password), UInt8[0x00])
 
 # ---- policy ----
 
-@noinline rsa_unavailable(plugin::String) = throw(AuthError("$plugin requires a secure connection for full authentication; over plain TCP pass `server_public_key=<PEM path>` or `get_server_public_key=true` to use RSA password exchange, or connect with `ssl_mode=:required`"))
+@noinline rsa_unavailable(plugin::String) = return throw(AuthError("$plugin requires a secure connection for full authentication; over plain TCP pass `server_public_key=<PEM path>` or `get_server_public_key=true` to use RSA password exchange, or connect with `ssl_mode=:required`"))
 
 function require_cleartext_allowed(policy::AuthPolicy)
     policy.enable_cleartext_plugin || throw(AuthError("the server requested mysql_clear_password, which is disabled; pass `enable_cleartext_plugin=true` (or `default_auth=\"mysql_clear_password\"`)"))
@@ -153,7 +153,7 @@ mutable struct AuthState
     full_auth::Bool
 end
 
-AuthState(plugin::AuthPlugin, nonce::AbstractVector{UInt8}) = AuthState(plugin, Vector{UInt8}(nonce), false, false)
+AuthState(plugin::AuthPlugin, nonce::AbstractVector{UInt8}) = return AuthState(plugin, Vector{UInt8}(nonce), false, false)
 
 # Servers append a NUL to the 20-byte scramble in AuthSwitchRequest data.
 function strip_nonce(data::AbstractVector{UInt8})
@@ -167,8 +167,8 @@ end
 
 The auth-response bytes for HandshakeResponse41 or an AuthSwitchResponse.
 """
-initial_response(::NativePassword, password::AbstractVector{UInt8}, nonce::AbstractVector{UInt8}, ::AuthPolicy) = native_scramble(password, nonce)
-initial_response(::CachingSha2Password, password::AbstractVector{UInt8}, nonce::AbstractVector{UInt8}, ::AuthPolicy) = caching_sha2_scramble(password, nonce)
+initial_response(::NativePassword, password::AbstractVector{UInt8}, nonce::AbstractVector{UInt8}, ::AuthPolicy) = return native_scramble(password, nonce)
+initial_response(::CachingSha2Password, password::AbstractVector{UInt8}, nonce::AbstractVector{UInt8}, ::AuthPolicy) = return caching_sha2_scramble(password, nonce)
 
 function initial_response(::Sha256Password, password::AbstractVector{UInt8}, nonce::AbstractVector{UInt8}, policy::AuthPolicy)
     isempty(password) && return UInt8[]
@@ -183,7 +183,7 @@ function initial_response(::ClearPassword, password::AbstractVector{UInt8}, ::Ab
     return cleartext_password(password)
 end
 
-is_pem(data::AbstractVector{UInt8}) = length(data) > 10 && String(data[1:10]) == "-----BEGIN"
+is_pem(data::AbstractVector{UInt8}) = return length(data) > 10 && String(data[1:10]) == "-----BEGIN"
 
 """
     step!(state, data, password, policy) -> Union{Nothing, Vector{UInt8}}
@@ -195,8 +195,8 @@ function step!(state::AuthState, data::AbstractVector{UInt8}, password::Abstract
     return step!(state.plugin, state, data, password, policy)
 end
 
-step!(::NativePassword, ::AuthState, ::AbstractVector{UInt8}, ::AbstractVector{UInt8}, ::AuthPolicy) = protocol_error("mysql_native_password received unexpected continuation data")
-step!(::ClearPassword, ::AuthState, ::AbstractVector{UInt8}, ::AbstractVector{UInt8}, ::AuthPolicy) = protocol_error("mysql_clear_password received unexpected continuation data")
+step!(::NativePassword, ::AuthState, ::AbstractVector{UInt8}, ::AbstractVector{UInt8}, ::AuthPolicy) = return protocol_error("mysql_native_password received unexpected continuation data")
+step!(::ClearPassword, ::AuthState, ::AbstractVector{UInt8}, ::AbstractVector{UInt8}, ::AuthPolicy) = return protocol_error("mysql_clear_password received unexpected continuation data")
 
 function step!(::CachingSha2Password, state::AuthState, data::AbstractVector{UInt8}, password::AbstractVector{UInt8}, policy::AuthPolicy)
     if state.awaiting_public_key
@@ -291,7 +291,7 @@ Policy violations raise `AuthError`, unknown plugins `UnsupportedAuthError`, ser
 """
 function authenticate!(s::Session, user::AbstractString, password::Union{Nothing, AbstractString, AbstractVector{UInt8}}, policy::AuthPolicy; db::AbstractString="", attrs::Vector{Pair{String, String}}=Pair{String, String}[], default_auth::Union{Nothing, AbstractString}=nothing, trace::Union{Nothing, Vector{Symbol}}=nothing)
     require_phase(s, HANDSHAKE)
-    note(event::Symbol) = (trace === nothing || push!(trace, event); nothing)
+    note(event::Symbol) = return (trace === nothing || push!(trace, event); nothing)
     pw = password === nothing ? UInt8[] : password isa AbstractString ? Vector{UInt8}(codeunits(password)) : Vector{UInt8}(password)
     try
         plugin = select_plugin(s.server, default_auth)

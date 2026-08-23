@@ -72,9 +72,9 @@ function Base.write(ft::FaultTransport, bytes::Vector{UInt8})
     return length(bytes)
 end
 
-Base.isopen(ft::FaultTransport) = !ft.closed && isopen(ft.inner)
-Base.eof(ft::FaultTransport) = eof(ft.inner)
-Base.flush(ft::FaultTransport) = (flush(ft.inner); nothing)
+Base.isopen(ft::FaultTransport) = return !ft.closed && isopen(ft.inner)
+Base.eof(ft::FaultTransport) = return eof(ft.inner)
+Base.flush(ft::FaultTransport) = return (flush(ft.inner); nothing)
 
 function Base.close(ft::FaultTransport)
     ft.closed = true
@@ -93,17 +93,17 @@ end
 # Whether the packet reader may batch reads through its read buffer (Reseau's `unsafe_read`
 # costs one `recv` per call, so per-packet exact reads dominate large scans; §8.9). The
 # test-only `FaultTransport` stays byte-exact so fault byte offsets remain deterministic.
-supports_buffered_reads(::Union{Reseau.TCP.Conn, Reseau.TLS.Conn}) = true
-supports_buffered_reads(::FaultTransport) = false
+supports_buffered_reads(::Union{Reseau.TCP.Conn, Reseau.TLS.Conn}) = return true
+supports_buffered_reads(::FaultTransport) = return false
 
 # Reads 1..n available bytes into `buf[offset:end]` (one transport read); 0 means EOF.
 function transport_read_some!(t::Union{Reseau.TCP.Conn, Reseau.TLS.Conn}, buf::Vector{UInt8}, offset::Int, n::Int)
     return Base.readbytes!(t, view(buf, offset:lastindex(buf)), n; all=false)
 end
 
-@inline transport_write(t::Transport, bytes::Vector{UInt8}) = (write(t, bytes); nothing)
+@inline transport_write(t::Transport, bytes::Vector{UInt8}) = return (write(t, bytes); nothing)
 
-transport_isopen(t::Transport) = isopen(t)
+transport_isopen(t::Transport) = return isopen(t)
 
 function transport_close(t::Transport)
     try

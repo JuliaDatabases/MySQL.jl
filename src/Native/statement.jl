@@ -36,8 +36,8 @@ mutable struct Statement <: DBInterface.Statement
     reap::StatementReapEntry
 end
 
-DBInterface.getconnection(stmt::Statement) = stmt.conn
-Base.show(io::IO, stmt::Statement) = print(io, "MySQL.Native.Statement(", repr(stmt.sql), ")")
+DBInterface.getconnection(stmt::Statement) = return stmt.conn
+Base.show(io::IO, stmt::Statement) = return print(io, "MySQL.Native.Statement(", repr(stmt.sql), ")")
 
 function statement_schema(conn::Connection, columns::Vector{P.ColumnDef}, date_and_time::Bool)
     opts = ResultOptions(; date_and_time=date_and_time, zero_dates=conn.results.zero_dates, time_type=conn.results.time_type)
@@ -47,8 +47,9 @@ function statement_schema(conn::Connection, columns::Vector{P.ColumnDef}, date_a
     return names, types, lookup
 end
 
-statement_schema(conn::Connection, ok::P.PrepareOK, date_and_time::Bool) =
-    statement_schema(conn, ok.columns, date_and_time)
+function statement_schema(conn::Connection, ok::P.PrepareOK, date_and_time::Bool)
+    return statement_schema(conn, ok.columns, date_and_time)
+end
 
 function same_column_definition(a::P.ColumnDef, b::P.ColumnDef)
     return a.catalog == b.catalog && a.schema == b.schema && a.table == b.table &&
@@ -187,8 +188,8 @@ function validate_long_data_params(stmt::Statement, params)
     return nothing
 end
 
-long_data_bytes(data::AbstractString) = Vector{UInt8}(codeunits(String(data)))
-long_data_bytes(data::AbstractVector{UInt8}) = Vector{UInt8}(data)
+long_data_bytes(data::AbstractString) = return Vector{UInt8}(codeunits(String(data)))
+long_data_bytes(data::AbstractVector{UInt8}) = return Vector{UInt8}(data)
 
 """
     MySQL.Native.send_long_data!(stmt, parameter_number, data)
@@ -258,7 +259,7 @@ function check_paramcount(stmt::Statement, params)
     return nothing
 end
 
-@noinline closed_statement() = error("prepared mysql statement has been closed")
+@noinline closed_statement() = return error("prepared mysql statement has been closed")
 
 """
     DBInterface.execute(stmt::MySQL.Native.Statement, params=(); mysql_store_result=true, mysql_date_and_time=false) -> BinaryCursor

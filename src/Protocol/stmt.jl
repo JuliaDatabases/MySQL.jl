@@ -18,15 +18,15 @@ struct PrepareOK
     warnings::UInt16
 end
 
-num_params(ok::PrepareOK) = length(ok.params)
-num_columns(ok::PrepareOK) = length(ok.columns)
+num_params(ok::PrepareOK) = return length(ok.params)
+num_columns(ok::PrepareOK) = return length(ok.columns)
 
 """
     stmt_prepare!(s, sql)
 
 Sends `COM_STMT_PREPARE`; read the answer with `read_prepare_response!`.
 """
-stmt_prepare!(s::Session, sql::AbstractString) = send_command!(s, COM_STMT_PREPARE, codeunits(sql); kind=CMD_STMT_PREPARE)
+stmt_prepare!(s::Session, sql::AbstractString) = return send_command!(s, COM_STMT_PREPARE, codeunits(sql); kind=CMD_STMT_PREPARE)
 
 # Reads one metadata block (`n` column definitions, then the EOF that closes it unless
 # DEPRECATE_EOF), bounded by `max_metadata_bytes` before every allocation.
@@ -111,8 +111,9 @@ function build_stmt_execute(statement_id::Integer, param_block::AbstractVector{U
     return buf
 end
 
-stmt_execute!(s::Session, statement_id::Integer, param_block::AbstractVector{UInt8}) =
-    send_command!(s, COM_STMT_EXECUTE, build_stmt_execute(statement_id, param_block); kind=CMD_STMT_EXECUTE)
+function stmt_execute!(s::Session, statement_id::Integer, param_block::AbstractVector{UInt8})
+    return send_command!(s, COM_STMT_EXECUTE, build_stmt_execute(statement_id, param_block); kind=CMD_STMT_EXECUTE)
+end
 
 """
     stmt_reset!(s, statement_id)

@@ -42,7 +42,7 @@ function decode_binary(::Type{T}, buf::Vector{UInt8}, pos::Int, len::Int, opts::
     return decode_binary_value(T, buf, pos, len, opts)
 end
 
-decode_binary(::Type{Missing}, buf::Vector{UInt8}, pos::Int, len::Int, opts::ResultOptions) = missing
+decode_binary(::Type{Missing}, buf::Vector{UInt8}, pos::Int, len::Int, opts::ResultOptions) = return missing
 
 function decode_binary_missing_aware(::Type{T}, buf::Vector{UInt8}, pos::Int, len::Int, opts::ResultOptions) where {T}
     if is_date_type(T) && opts.zero_dates == :missing
@@ -54,10 +54,10 @@ end
 
 # String, bytes, decimal and BIT are the same content bytes on both protocols (BIT is the
 # big-endian value of all bytes; DECIMAL is the ASCII form), so the text decoders apply.
-decode_binary_value(::Type{String}, buf::Vector{UInt8}, pos::Int, len::Int, opts::ResultOptions) = decode_value(String, buf, pos, len, opts)
-decode_binary_value(::Type{Vector{UInt8}}, buf::Vector{UInt8}, pos::Int, len::Int, opts::ResultOptions) = decode_value(Vector{UInt8}, buf, pos, len, opts)
-decode_binary_value(::Type{Dec64}, buf::Vector{UInt8}, pos::Int, len::Int, opts::ResultOptions) = decode_value(Dec64, buf, pos, len, opts)
-decode_binary_value(::Type{API.Bit}, buf::Vector{UInt8}, pos::Int, len::Int, opts::ResultOptions) = decode_value(API.Bit, buf, pos, len, opts)
+decode_binary_value(::Type{String}, buf::Vector{UInt8}, pos::Int, len::Int, opts::ResultOptions) = return decode_value(String, buf, pos, len, opts)
+decode_binary_value(::Type{Vector{UInt8}}, buf::Vector{UInt8}, pos::Int, len::Int, opts::ResultOptions) = return decode_value(Vector{UInt8}, buf, pos, len, opts)
+decode_binary_value(::Type{Dec64}, buf::Vector{UInt8}, pos::Int, len::Int, opts::ResultOptions) = return decode_value(Dec64, buf, pos, len, opts)
+decode_binary_value(::Type{API.Bit}, buf::Vector{UInt8}, pos::Int, len::Int, opts::ResultOptions) = return decode_value(API.Bit, buf, pos, len, opts)
 
 function decode_binary_value(::Type{T}, buf::Vector{UInt8}, pos::Int, len::Int, ::ResultOptions) where {T <: Base.BitInteger}
     u = read_le_uint(buf, pos, min(len, sizeof(T)))
@@ -76,8 +76,8 @@ end
 
 # ---- binary temporal ----
 
-@inline read_u16le(buf, pos) = UInt16(buf[pos]) | (UInt16(buf[pos + 1]) << 8)
-@inline read_u32le(buf, pos) = UInt32(read_le_uint(buf, pos, 4))
+@inline read_u16le(buf, pos) = return UInt16(buf[pos]) | (UInt16(buf[pos + 1]) << 8)
+@inline read_u32le(buf, pos) = return UInt32(read_le_uint(buf, pos, 4))
 
 # DATE/DATETIME/TIMESTAMP content window (length prefix already stripped; `len ∈ {0,4,7,11}`)
 # → (year, month, day, hour, minute, second, micros), or `nothing` if the length is invalid.
@@ -118,8 +118,8 @@ function binary_time_micros(buf::Vector{UInt8}, pos::Int, len::Int)
 end
 
 # Shared with the `zero_dates=:missing` widening check.
-binary_temporal_parts(::Type{T}, buf, pos, len) where {T <: Union{Date, DateTime, DateAndTime}} = binary_date_parts(buf, pos, len)
-binary_temporal_parts(::Type, buf, pos, len) = nothing
+binary_temporal_parts(::Type{T}, buf, pos, len) where {T <: Union{Date, DateTime, DateAndTime}} = return binary_date_parts(buf, pos, len)
+binary_temporal_parts(::Type, buf, pos, len) = return nothing
 
 function decode_binary_value(::Type{Date}, buf::Vector{UInt8}, pos::Int, len::Int, opts::ResultOptions)
     parts = binary_date_parts(buf, pos, len)
@@ -176,42 +176,42 @@ end
 # ---- parameter encoding (COM_STMT_EXECUTE) ----
 
 # `(wire type, unsigned)` of a bound parameter, mirroring the 1.x `mysqltype` mapping.
-param_type(::Missing) = (P.MYSQL_TYPE_NULL, false)
-param_type(::Nothing) = (P.MYSQL_TYPE_NULL, false)
-param_type(::Bool) = (P.MYSQL_TYPE_TINY, false)
-param_type(::Int8) = (P.MYSQL_TYPE_TINY, false)
-param_type(::UInt8) = (P.MYSQL_TYPE_TINY, true)
-param_type(::Int16) = (P.MYSQL_TYPE_SHORT, false)
-param_type(::UInt16) = (P.MYSQL_TYPE_SHORT, true)
-param_type(::Int32) = (P.MYSQL_TYPE_LONG, false)
-param_type(::UInt32) = (P.MYSQL_TYPE_LONG, true)
-param_type(::Int64) = (P.MYSQL_TYPE_LONGLONG, false)
-param_type(::UInt64) = (P.MYSQL_TYPE_LONGLONG, true)
-param_type(::Float32) = (P.MYSQL_TYPE_FLOAT, false)
-param_type(::Float64) = (P.MYSQL_TYPE_DOUBLE, false)
-param_type(::DecFP.DecimalFloatingPoint) = (P.MYSQL_TYPE_STRING, false)
-param_type(::API.Bit) = (P.MYSQL_TYPE_BLOB, false)
-param_type(::Vector{UInt8}) = (P.MYSQL_TYPE_BLOB, false)
-param_type(::DateAndTime) = (P.MYSQL_TYPE_DATETIME, false)
-param_type(::DateTime) = (P.MYSQL_TYPE_TIMESTAMP, false)
-param_type(::Date) = (P.MYSQL_TYPE_DATE, false)
-param_type(::Dates.Time) = (P.MYSQL_TYPE_TIME, false)
-param_type(::AbstractString) = (P.MYSQL_TYPE_STRING, false)
+param_type(::Missing) = return (P.MYSQL_TYPE_NULL, false)
+param_type(::Nothing) = return (P.MYSQL_TYPE_NULL, false)
+param_type(::Bool) = return (P.MYSQL_TYPE_TINY, false)
+param_type(::Int8) = return (P.MYSQL_TYPE_TINY, false)
+param_type(::UInt8) = return (P.MYSQL_TYPE_TINY, true)
+param_type(::Int16) = return (P.MYSQL_TYPE_SHORT, false)
+param_type(::UInt16) = return (P.MYSQL_TYPE_SHORT, true)
+param_type(::Int32) = return (P.MYSQL_TYPE_LONG, false)
+param_type(::UInt32) = return (P.MYSQL_TYPE_LONG, true)
+param_type(::Int64) = return (P.MYSQL_TYPE_LONGLONG, false)
+param_type(::UInt64) = return (P.MYSQL_TYPE_LONGLONG, true)
+param_type(::Float32) = return (P.MYSQL_TYPE_FLOAT, false)
+param_type(::Float64) = return (P.MYSQL_TYPE_DOUBLE, false)
+param_type(::DecFP.DecimalFloatingPoint) = return (P.MYSQL_TYPE_STRING, false)
+param_type(::API.Bit) = return (P.MYSQL_TYPE_BLOB, false)
+param_type(::Vector{UInt8}) = return (P.MYSQL_TYPE_BLOB, false)
+param_type(::DateAndTime) = return (P.MYSQL_TYPE_DATETIME, false)
+param_type(::DateTime) = return (P.MYSQL_TYPE_TIMESTAMP, false)
+param_type(::Date) = return (P.MYSQL_TYPE_DATE, false)
+param_type(::Dates.Time) = return (P.MYSQL_TYPE_TIME, false)
+param_type(::AbstractString) = return (P.MYSQL_TYPE_STRING, false)
 
-@noinline unbindable_param(x) = throw(MySQLInterfaceError("cannot bind a value of type $(typeof(x)) as a MySQL parameter"))
-param_type(x) = unbindable_param(x)
+@noinline unbindable_param(x) = return throw(MySQLInterfaceError("cannot bind a value of type $(typeof(x)) as a MySQL parameter"))
+param_type(x) = return unbindable_param(x)
 
 # The `(type, unsigned)` signature the server caches: a change forces `new_params_bind_flag`.
-param_signature(values) = UInt16[(let (t, uns) = param_type(x); uns ? UInt16(t) | 0x8000 : UInt16(t) end) for x in values]
+param_signature(values) = return UInt16[(let (t, uns) = param_type(x); uns ? UInt16(t) | 0x8000 : UInt16(t) end) for x in values]
 
-encode_param_value!(buf::Vector{UInt8}, x::Union{Bool, Int8, UInt8}) = (P.write_u8!(buf, Core.bitcast(UInt8, x isa Bool ? UInt8(x) : x)); nothing)
-encode_param_value!(buf::Vector{UInt8}, x::Union{Int16, UInt16}) = (P.write_u16!(buf, Core.bitcast(UInt16, x)); nothing)
-encode_param_value!(buf::Vector{UInt8}, x::Union{Int32, UInt32}) = (P.write_u32!(buf, Core.bitcast(UInt32, x)); nothing)
-encode_param_value!(buf::Vector{UInt8}, x::Union{Int64, UInt64}) = (P.write_u64!(buf, Core.bitcast(UInt64, x)); nothing)
-encode_param_value!(buf::Vector{UInt8}, x::Float32) = (P.write_u32!(buf, Core.bitcast(UInt32, x)); nothing)
-encode_param_value!(buf::Vector{UInt8}, x::Float64) = (P.write_u64!(buf, Core.bitcast(UInt64, x)); nothing)
-encode_param_value!(buf::Vector{UInt8}, x::AbstractString) = (P.write_lenenc_string!(buf, String(x)); nothing)
-encode_param_value!(buf::Vector{UInt8}, x::Vector{UInt8}) = (P.write_lenenc_bytes!(buf, x); nothing)
+encode_param_value!(buf::Vector{UInt8}, x::Union{Bool, Int8, UInt8}) = return (P.write_u8!(buf, Core.bitcast(UInt8, x isa Bool ? UInt8(x) : x)); nothing)
+encode_param_value!(buf::Vector{UInt8}, x::Union{Int16, UInt16}) = return (P.write_u16!(buf, Core.bitcast(UInt16, x)); nothing)
+encode_param_value!(buf::Vector{UInt8}, x::Union{Int32, UInt32}) = return (P.write_u32!(buf, Core.bitcast(UInt32, x)); nothing)
+encode_param_value!(buf::Vector{UInt8}, x::Union{Int64, UInt64}) = return (P.write_u64!(buf, Core.bitcast(UInt64, x)); nothing)
+encode_param_value!(buf::Vector{UInt8}, x::Float32) = return (P.write_u32!(buf, Core.bitcast(UInt32, x)); nothing)
+encode_param_value!(buf::Vector{UInt8}, x::Float64) = return (P.write_u64!(buf, Core.bitcast(UInt64, x)); nothing)
+encode_param_value!(buf::Vector{UInt8}, x::AbstractString) = return (P.write_lenenc_string!(buf, String(x)); nothing)
+encode_param_value!(buf::Vector{UInt8}, x::Vector{UInt8}) = return (P.write_lenenc_bytes!(buf, x); nothing)
 # A BIT parameter is the big-endian binary string of its value (no leading zero bytes, at
 # least one byte), matching the native big-endian BIT *decode*. (`API.bitvalue`, used by the
 # Connector/C backend, is a separate 1.x-compatible little-endian encoding.)
@@ -225,8 +225,8 @@ function bit_param_bytes(x::API.Bit)
     end
     return bytes
 end
-encode_param_value!(buf::Vector{UInt8}, x::API.Bit) = (P.write_lenenc_bytes!(buf, bit_param_bytes(x)); nothing)
-encode_param_value!(buf::Vector{UInt8}, x::DecFP.DecimalFloatingPoint) = (P.write_lenenc_string!(buf, string(x)); nothing)
+encode_param_value!(buf::Vector{UInt8}, x::API.Bit) = return (P.write_lenenc_bytes!(buf, bit_param_bytes(x)); nothing)
+encode_param_value!(buf::Vector{UInt8}, x::DecFP.DecimalFloatingPoint) = return (P.write_lenenc_string!(buf, string(x)); nothing)
 
 function encode_param_value!(buf::Vector{UInt8}, x::Date)
     P.write_u8!(buf, 4)
@@ -249,11 +249,13 @@ function encode_datetime_value!(buf::Vector{UInt8}, y, mo, d, h, mi, s, micros)
     return nothing
 end
 
-encode_param_value!(buf::Vector{UInt8}, x::DateTime) =
-    encode_datetime_value!(buf, Dates.year(x), Dates.month(x), Dates.day(x), Dates.hour(x), Dates.minute(x), Dates.second(x), Dates.millisecond(x) * 1000)
+function encode_param_value!(buf::Vector{UInt8}, x::DateTime)
+    return encode_datetime_value!(buf, Dates.year(x), Dates.month(x), Dates.day(x), Dates.hour(x), Dates.minute(x), Dates.second(x), Dates.millisecond(x) * 1000)
+end
 
-encode_param_value!(buf::Vector{UInt8}, x::DateAndTime) =
-    encode_datetime_value!(buf, Dates.year(x), Dates.month(x), Dates.day(x), Dates.hour(x), Dates.minute(x), Dates.second(x), Dates.millisecond(x) * 1000 + Dates.microsecond(x))
+function encode_param_value!(buf::Vector{UInt8}, x::DateAndTime)
+    return encode_datetime_value!(buf, Dates.year(x), Dates.month(x), Dates.day(x), Dates.hour(x), Dates.minute(x), Dates.second(x), Dates.millisecond(x) * 1000 + Dates.microsecond(x))
+end
 
 function encode_param_value!(buf::Vector{UInt8}, x::Dates.Time)
     micros = Dates.millisecond(x) * 1000 + Dates.microsecond(x)

@@ -59,7 +59,7 @@ function Limits(;
     return Limits(Int(max_packet), Int(max_preauth_packet), Int(max_auth_rounds), Int(max_auth_bytes), Int(max_columns), Int(max_result_sets), Int(max_metadata_bytes), max_buffered_bytes === nothing ? nothing : Int(max_buffered_bytes), max_response_bytes === nothing ? nothing : Int(max_response_bytes), Int(max_session_state_bytes))
 end
 
-@noinline limit_exceeded(what::String, value::Integer, limit::Integer) = protocol_error("$what $value exceeds limit $limit")
+@noinline limit_exceeded(what::String, value::Integer, limit::Integer) = return protocol_error("$what $value exceeds limit $limit")
 
 @inline function check_limit(what::String, value::Integer, limit::Integer)
     value <= limit || limit_exceeded(what, value, limit)

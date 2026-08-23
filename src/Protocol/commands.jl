@@ -74,10 +74,10 @@ function send_noresponse!(s::Session, command::UInt8, payload::AbstractVector{UI
     return nothing
 end
 
-query!(s::Session, sql::AbstractString) = send_command!(s, COM_QUERY, codeunits(sql); kind=CMD_QUERY)
-ping!(s::Session) = send_command!(s, COM_PING; kind=CMD_SIMPLE)
-init_db!(s::Session, db::AbstractString) = send_command!(s, COM_INIT_DB, codeunits(db); kind=CMD_SIMPLE)
-reset_connection!(s::Session) = send_command!(s, COM_RESET_CONNECTION; kind=CMD_SIMPLE)
+query!(s::Session, sql::AbstractString) = return send_command!(s, COM_QUERY, codeunits(sql); kind=CMD_QUERY)
+ping!(s::Session) = return send_command!(s, COM_PING; kind=CMD_SIMPLE)
+init_db!(s::Session, db::AbstractString) = return send_command!(s, COM_INIT_DB, codeunits(db); kind=CMD_SIMPLE)
+reset_connection!(s::Session) = return send_command!(s, COM_RESET_CONNECTION; kind=CMD_SIMPLE)
 
 function set_option!(s::Session, option::Integer)
     buf = UInt8[]

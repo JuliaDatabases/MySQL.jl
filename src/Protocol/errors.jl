@@ -26,7 +26,7 @@ struct Error <: ServerError
     sqlstate::String
 end
 
-Error(errno::Integer, msg::AbstractString, sqlstate::AbstractString="") = Error(Cuint(errno), String(msg), String(sqlstate))
+Error(errno::Integer, msg::AbstractString, sqlstate::AbstractString="") = return Error(Cuint(errno), String(msg), String(sqlstate))
 
 """
     StmtError(errno, msg, sqlstate="")
@@ -40,9 +40,9 @@ struct StmtError <: ServerError
     sqlstate::String
 end
 
-StmtError(errno::Integer, msg::AbstractString, sqlstate::AbstractString="") = StmtError(Cuint(errno), String(msg), String(sqlstate))
+StmtError(errno::Integer, msg::AbstractString, sqlstate::AbstractString="") = return StmtError(Cuint(errno), String(msg), String(sqlstate))
 
-Base.showerror(io::IO, e::ServerError) = print(io, "(", e.errno, "): ", e.msg)
+Base.showerror(io::IO, e::ServerError) = return print(io, "(", e.errno, "): ", e.msg)
 
 struct ProtocolError <: MySQLError
     msg::String
@@ -57,7 +57,7 @@ struct UnsupportedAuthError <: MySQLError
     msg::String
 end
 
-UnsupportedAuthError(plugin::AbstractString) = UnsupportedAuthError(String(plugin), "authentication plugin '$plugin' is not supported")
+UnsupportedAuthError(plugin::AbstractString) = return UnsupportedAuthError(String(plugin), "authentication plugin '$plugin' is not supported")
 
 struct TimeoutError <: MySQLError
     msg::String
@@ -78,7 +78,7 @@ struct LocalInfileRefused <: MySQLError
     cause::Union{Nothing, ServerError}
 end
 
-LocalInfileRefused(filename::AbstractString, msg::AbstractString) = LocalInfileRefused(String(filename), String(msg), nothing)
+LocalInfileRefused(filename::AbstractString, msg::AbstractString) = return LocalInfileRefused(String(filename), String(msg), nothing)
 
 function Base.showerror(io::IO, e::Union{ProtocolError, AuthError, TimeoutError, ConversionError, TLSNegotiationError})
     print(io, nameof(typeof(e)), ": ", e.msg)
@@ -95,4 +95,4 @@ function Base.showerror(io::IO, e::LocalInfileRefused)
     return nothing
 end
 
-@noinline protocol_error(msg::String) = throw(ProtocolError(msg))
+@noinline protocol_error(msg::String) = return throw(ProtocolError(msg))

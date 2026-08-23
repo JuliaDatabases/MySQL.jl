@@ -23,8 +23,8 @@ struct ServerInfo
     auth_plugin_data::Vector{UInt8}
 end
 
-is_mariadb(info::ServerInfo) = info.kind == :mariadb
-has_capability(caps::UInt64, flag::UInt64) = (caps & flag) == flag
+is_mariadb(info::ServerInfo) = return info.kind == :mariadb
+has_capability(caps::UInt64, flag::UInt64) = return (caps & flag) == flag
 
 # ASCII-only lowering: the version string is untrusted wire bytes, and `lowercase` throws
 # `InvalidCharError` on invalid UTF-8.

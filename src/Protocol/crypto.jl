@@ -22,7 +22,7 @@ function openssl_error_message()
     return GC.@preserve buf unsafe_string(pointer(buf))
 end
 
-@noinline openssl_failure(what::String) = throw(AuthError("$what: $(openssl_error_message())"))
+@noinline openssl_failure(what::String) = return throw(AuthError("$what: $(openssl_error_message())"))
 
 """
     securezero!(v::Vector{UInt8})
@@ -62,8 +62,8 @@ function with_rsa_public_key(f::F, pem::AbstractVector{UInt8}) where {F}
     end
 end
 
-rsa_key_size(pkey::Ptr{Cvoid}) = Int(ccall((:EVP_PKEY_get_size, libcrypto), Cint, (Ptr{Cvoid},), pkey))
-rsa_key_bits(pkey::Ptr{Cvoid}) = Int(ccall((:EVP_PKEY_get_bits, libcrypto), Cint, (Ptr{Cvoid},), pkey))
+rsa_key_size(pkey::Ptr{Cvoid}) = return Int(ccall((:EVP_PKEY_get_size, libcrypto), Cint, (Ptr{Cvoid},), pkey))
+rsa_key_bits(pkey::Ptr{Cvoid}) = return Int(ccall((:EVP_PKEY_get_bits, libcrypto), Cint, (Ptr{Cvoid},), pkey))
 
 """
     rsa_oaep_sha1_encrypt(pem, message) -> Vector{UInt8}

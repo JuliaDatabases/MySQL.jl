@@ -24,6 +24,15 @@ const NOT_NULL = P.NOT_NULL_FLAG
 const UNSIGNED = P.UNSIGNED_FLAG
 const BINARY = P.BINARY_FLAG
 
+mutable struct AcceptedCounter
+    @atomic value::Int
+end
+
+function increment!(counter::AcceptedCounter)
+    @atomic counter.value += 1
+    return @atomic counter.value
+end
+
 wiredef(type; flags=NOT_NULL, charset=0x2D) = P.ColumnDef("def", "db", "t", "t", "x", "x", UInt16(charset), UInt32(255), UInt8(type), UInt16(flags), UInt8(0))
 
 function decode_text(T, value; opts=N.DEFAULT_RESULT_OPTIONS)
@@ -738,13 +747,13 @@ end
     end
     # reconnect=true: a new session before the next send once the old one is known dead,
     # old cursors invalidated, never inside a transaction and never after a protocol fault
-    accepted = Threads.Atomic{Int}(0)
+    accepted = AcceptedCounter(0)
     listener = Reseau.TCP.listen(Reseau.TCP.loopback_addr(0))
     port = Int(Reseau.TCP.addr(listener).port)
     errormonitor(Threads.@spawn begin
         while true
             c = try; Reseau.TCP.accept(listener); catch; break; end
-            n = Threads.atomic_add!(accepted, 1) + 1
+            n = increment!(accepted)
             errormonitor(Threads.@spawn begin
                 try
                     plain_peer_connect!(c; caps=MYSQL8_SERVER_CAPS & ~P.CLIENT_SSL, after=cc -> begin
@@ -781,7 +790,7 @@ end
             @test DBInterface.execute(conn, "inside reconnect").rows_affected == 4
             42
         end == 42                                                              # START reconnects before entering the transaction
-        @test (@atomic conn.generation) > gen && accepted[] == 2 && isopen(conn)
+        @test (@atomic conn.generation) > gen && (@atomic accepted.value) == 2 && isopen(conn)
         @test_throws P.ProtocolError r.x
         # never inside a transaction
         DBInterface.transaction(conn) do
@@ -795,14 +804,14 @@ end
         conn.handle.session.phase = P.CLOSED
         err = try; DBInterface.execute(conn, "in raw tx"); nothing; catch e; e; end
         @test err isa P.Error && err.errno == P.CR_SERVER_GONE_ERROR
-        @test accepted[] == 2
+        @test (@atomic accepted.value) == 2
         conn.handle.session.status = P.SERVER_STATUS_AUTOCOMMIT
         conn.handle.session.phase = P.READY
         @test_throws P.ProtocolError DBInterface.execute(conn, "peer hangs up")
         @test !isopen(conn)
         err = try; DBInterface.execute(conn, "after broken"); nothing; catch e; e; end
         @test err isa P.Error && err.errno == P.CR_SERVER_GONE_ERROR
-        @test accepted[] == 2                                                  # BROKEN never reconnects
+        @test (@atomic accepted.value) == 2                                    # BROKEN never reconnects
         DBInterface.close!(conn)
     finally
         close(listener)
@@ -815,11 +824,11 @@ end
     # as closed forever.
     listener = Reseau.TCP.listen(Reseau.TCP.loopback_addr(0))
     port = Int(Reseau.TCP.addr(listener).port)
-    accepted = Threads.Atomic{Int}(0)
+    accepted = AcceptedCounter(0)
     server = errormonitor(Threads.@spawn begin
         while true
             c = try; Reseau.TCP.accept(listener); catch; break; end
-            Threads.atomic_add!(accepted, 1)
+            increment!(accepted)
             errormonitor(Threads.@spawn begin
                 try
                     plain_peer_connect!(c; caps=MYSQL8_SERVER_CAPS & ~P.CLIENT_SSL, after=cc -> begin
@@ -836,7 +845,7 @@ end
     try
         conn = DBInterface.connect(N.Connection, "127.0.0.1", "root", "pw"; port=port, ssl_mode=:disabled, connect_timeout=5, reconnect=true)
         @test DBInterface.execute(conn, "select").rows_affected == 0
-        @test accepted[] == 1
+        @test (@atomic accepted.value) == 1
         # kill the session and stop the server so the reconnect dial fails
         P.close!(conn.handle.session)
         close(listener); wait(server)

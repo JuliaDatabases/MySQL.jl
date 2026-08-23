@@ -91,4 +91,4 @@ const CR_SERVER_LOST = 2013
 const CR_SSL_CONNECTION_ERROR = 2026
 const CR_AUTH_PLUGIN_CANNOT_LOAD = 2059
 
-is_client_reserved_errno(code::Integer) = (2000 <= code <= 2999) || (5000 <= code <= 5999)
+is_client_reserved_errno(code::Integer) = return (2000 <= code <= 2999) || (5000 <= code <= 5999)

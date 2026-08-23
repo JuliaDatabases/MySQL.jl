@@ -31,11 +31,11 @@ function Session(transport::Transport; limits::Limits=Limits(), capabilities::UI
     return Session(transport, PacketIO(), limits, CONNECTING, debug, capabilities, capabilities, nothing, 0x0000, 1, false, CMD_QUERY, 0, 0, log)
 end
 
-has_capability(s::Session, flag::UInt64) = has_capability(s.capabilities, flag)
-server_kind(s::Session) = s.server === nothing ? :unknown : s.server.kind
-is_mariadb(s::Session) = server_kind(s) == :mariadb
-deprecate_eof(s::Session) = has_capability(s, CLIENT_DEPRECATE_EOF)
-Base.isopen(s::Session) = !is_terminal(s.phase) && transport_isopen(s.transport)
+has_capability(s::Session, flag::UInt64) = return has_capability(s.capabilities, flag)
+server_kind(s::Session) = return s.server === nothing ? :unknown : s.server.kind
+is_mariadb(s::Session) = return server_kind(s) == :mariadb
+deprecate_eof(s::Session) = return has_capability(s, CLIENT_DEPRECATE_EOF)
+Base.isopen(s::Session) = return !is_terminal(s.phase) && transport_isopen(s.transport)
 
 function transition!(s::Session, event::Symbol, to::Phase)
     t = (s.phase, event, to)
@@ -58,14 +58,14 @@ end
     return nothing
 end
 
-@noinline wrong_phase(s::Session, expected) = error("internal error: operation requires phase $expected, session is $(s.phase)")
+@noinline wrong_phase(s::Session, expected) = return error("internal error: operation requires phase $expected, session is $(s.phase)")
 
 @inline function require_phase(s::Session, expected::Phase)
     s.phase == expected || wrong_phase(s, expected)
     return nothing
 end
 
-max_payload(s::Session) = s.authenticated ? s.limits.max_packet : s.limits.max_preauth_packet
+max_payload(s::Session) = return s.authenticated ? s.limits.max_packet : s.limits.max_preauth_packet
 
 """
     set_timeouts!(s, read_timeout_ns, write_timeout_ns)

@@ -26,7 +26,7 @@ end
 
 const DEFAULT_RESULT_OPTIONS = ResultOptions()
 
-field_type_enum(def::P.ColumnDef) = UInt32(def.type)
+field_type_enum(def::P.ColumnDef) = return UInt32(def.type)
 
 """
     juliatype(def::Protocol.ColumnDef, opts::ResultOptions) -> Type
@@ -43,11 +43,11 @@ function juliatype(def::P.ColumnDef, opts::ResultOptions)
     return T
 end
 
-is_date_type(T) = T === Date || T === DateTime || T === DateAndTime
+is_date_type(T) = return T === Date || T === DateTime || T === DateAndTime
 
-@noinline conversion_error(T, buf::Vector{UInt8}, pos::Int, len::Int) = throw(P.ConversionError("cannot convert \"$(String(buf[pos:(pos + len - 1)]))\" to $T"))
-@noinline conversion_error(T, msg::AbstractString) = throw(P.ConversionError("cannot convert to $T: $msg"))
-@noinline null_in_not_null(T) = throw(P.ConversionError("the server sent NULL for a NOT NULL column of type $T"))
+@noinline conversion_error(T, buf::Vector{UInt8}, pos::Int, len::Int) = return throw(P.ConversionError("cannot convert \"$(String(buf[pos:(pos + len - 1)]))\" to $T"))
+@noinline conversion_error(T, msg::AbstractString) = return throw(P.ConversionError("cannot convert to $T: $msg"))
+@noinline null_in_not_null(T) = return throw(P.ConversionError("the server sent NULL for a NOT NULL column of type $T"))
 
 """
     decode(T, buf, pos, len, opts) -> T
@@ -64,7 +64,7 @@ function decode(::Type{T}, buf::Vector{UInt8}, pos::Int, len::Int, opts::ResultO
     return decode_value(T, buf, pos, len, opts)
 end
 
-decode(::Type{Missing}, buf::Vector{UInt8}, pos::Int, len::Int, opts::ResultOptions) = missing
+decode(::Type{Missing}, buf::Vector{UInt8}, pos::Int, len::Int, opts::ResultOptions) = return missing
 
 # Under `zero_dates=:missing` a zero date decodes to `missing` even though the column type
 # says `T`; this is the only place the decoder may answer `missing` for a non-NULL value.
@@ -82,7 +82,7 @@ function decode_value(::Type{String}, buf::Vector{UInt8}, pos::Int, len::Int, ::
     return GC.@preserve buf unsafe_string(pointer(buf, pos), len)
 end
 
-decode_value(::Type{Vector{UInt8}}, buf::Vector{UInt8}, pos::Int, len::Int, ::ResultOptions) = buf[pos:(pos + len - 1)]
+decode_value(::Type{Vector{UInt8}}, buf::Vector{UInt8}, pos::Int, len::Int, ::ResultOptions) = return buf[pos:(pos + len - 1)]
 
 function decode_value(::Type{Dec64}, buf::Vector{UInt8}, pos::Int, len::Int, opts::ResultOptions)
     s = decode_value(String, buf, pos, len, opts)
@@ -186,9 +186,7 @@ end
 # 0000 with a real month and day is a legal date (`0000-01-01`), not a partial zero.
 function zero_date_kind(parts)
     y, mo, d, h, mi, s, micros = parts
-    if y == 0 && mo == 0 && d == 0 && h == 0 && mi == 0 && s == 0 && micros == 0
-        return :zero
-    end
+    y == 0 && mo == 0 && d == 0 && h == 0 && mi == 0 && s == 0 && micros == 0 && return :zero
     return mo == 0 || d == 0 ? :partial : :none
 end
 

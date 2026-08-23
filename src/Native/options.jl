@@ -91,8 +91,8 @@ function parse_tls_version(spec)
     return (minimum(versions), maximum(versions))
 end
 
-@noinline removed_keyword(k::Symbol) = throw(ArgumentError("the `$k` option was removed: $(REMOVED_KEYWORDS[k])"))
-@noinline deferred_keyword(k::Symbol) = throw(ArgumentError("the `$k` option is not available: $(DEFERRED_KEYWORDS[k])"))
+@noinline removed_keyword(k::Symbol) = return throw(ArgumentError("the `$k` option was removed: $(REMOVED_KEYWORDS[k])"))
+@noinline deferred_keyword(k::Symbol) = return throw(ArgumentError("the `$k` option is not available: $(DEFERRED_KEYWORDS[k])"))
 
 function check_keywords(kw)
     for k in keys(kw)
@@ -340,7 +340,7 @@ function default_attrs()
     return ["_client_name" => "MySQL.jl", "_client_version" => string(pkgversion(MySQL), "-native"), "_os" => string(Sys.KERNEL), "_platform" => string(Sys.ARCH), "_pid" => string(getpid())]
 end
 
-positive_or_nothing(v, name) = v === nothing ? nothing : (v > 0 ? Int(v) : throw(ArgumentError("$name must be positive")))
+positive_or_nothing(v, name) = return v === nothing ? nothing : (v > 0 ? Int(v) : throw(ArgumentError("$name must be positive")))
 
 """
     ConnectOptions(host, user, password=nothing; kw...)
@@ -354,7 +354,7 @@ function ConnectOptions(host::AbstractString, user::AbstractString, password::Un
     kwd = Dict{Symbol, Any}(pairs(kw))
     check_keywords(kwd)
     file = load_option_files(; option_file=get(kwd, :option_file, nothing), read_default_file=get(kwd, :read_default_file, nothing), option_group=get(kwd, :option_group, nothing), read_default_group=get(kwd, :read_default_group, nothing))
-    pick(k, default) = haskey(kwd, k) && kwd[k] !== nothing ? kwd[k] : haskey(file, k) ? file[k] : default
+    pick(k, default) = return haskey(kwd, k) && kwd[k] !== nothing ? kwd[k] : haskey(file, k) ? file[k] : default
     host_s = String(host)
     host_s == "" && haskey(file, :host) && (host_s = file[:host])
     protocol = pick(:protocol, nothing)

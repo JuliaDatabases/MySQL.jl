@@ -50,13 +50,13 @@ struct AuthMoreData
     data::Vector{UInt8}
 end
 
-more_results(status::UInt16) = (status & SERVER_MORE_RESULTS_EXISTS) != 0
-more_results(ok::OKPacket) = more_results(ok.status)
-more_results(eof::EOFPacket) = more_results(eof.status)
-in_transaction(status::UInt16) = (status & SERVER_STATUS_IN_TRANS) != 0
+more_results(status::UInt16) = return (status & SERVER_MORE_RESULTS_EXISTS) != 0
+more_results(ok::OKPacket) = return more_results(ok.status)
+more_results(eof::EOFPacket) = return more_results(eof.status)
+in_transaction(status::UInt16) = return (status & SERVER_STATUS_IN_TRANS) != 0
 
-Error(e::ERRPacket) = Error(e.code, e.msg, e.sqlstate)
-StmtError(e::ERRPacket) = StmtError(e.code, e.msg, e.sqlstate)
+Error(e::ERRPacket) = return Error(e.code, e.msg, e.sqlstate)
+StmtError(e::ERRPacket) = return StmtError(e.code, e.msg, e.sqlstate)
 
 # ---- OK ----
 
@@ -194,7 +194,7 @@ end
 
 # EOF packets are at most 5 bytes (header + warnings + status); longer 0xFE packets are OK
 # packets (DEPRECATE_EOF) or rows.
-is_eof_packet(p::PacketView) = first_byte(p) == EOF_HEADER && payload_length(p) < 9
+is_eof_packet(p::PacketView) = return first_byte(p) == EOF_HEADER && payload_length(p) < 9
 
 function parse_err(p::PacketView, caps::UInt64)
     c = PacketCursor(p)
@@ -310,7 +310,7 @@ end
 # A 0xFE-headed packet is a terminator only when the logical packet is shorter than
 # 0xFFFFFF: a text row whose first value is an 8-byte-lenenc string is ≥ 2^24 bytes and is
 # therefore carried in a full-size first chunk.
-is_row_terminator(p::PacketView) = first_byte(p) == EOF_HEADER && p.first_chunk_len < MAX_CHUNK
+is_row_terminator(p::PacketView) = return first_byte(p) == EOF_HEADER && p.first_chunk_len < MAX_CHUNK
 
 """
     classify_row(p, binary::Bool) -> :row | :terminator | :err
@@ -332,8 +332,9 @@ Splits a text row into per-column windows of the packet buffer: `offsets[i]`/`le
 describe column `i`; NULL columns get `lengths[i] == -1`. Both vectors are resized to the
 number of columns found and reused across rows.
 """
-scan_text_row!(p::PacketView, ncols::Int, offsets::Vector{Int}, lengths::Vector{Int}) =
-    scan_text_row!(PacketCursor(p), ncols, offsets, lengths)
+function scan_text_row!(p::PacketView, ncols::Int, offsets::Vector{Int}, lengths::Vector{Int})
+    return scan_text_row!(PacketCursor(p), ncols, offsets, lengths)
+end
 
 function scan_text_row!(c::PacketCursor, ncols::Int, offsets::Vector{Int}, lengths::Vector{Int})
     resize!(offsets, ncols)
@@ -363,7 +364,7 @@ function fixed_binary_width(type::UInt8)
     return nothing
 end
 
-is_binary_temporal(type::UInt8) = type == MYSQL_TYPE_DATE || type == MYSQL_TYPE_DATETIME ||
+is_binary_temporal(type::UInt8) = return type == MYSQL_TYPE_DATE || type == MYSQL_TYPE_DATETIME ||
     type == MYSQL_TYPE_TIMESTAMP || type == MYSQL_TYPE_TIME
 
 function is_binary_lenenc(type::UInt8)
@@ -421,8 +422,9 @@ just like `scan_text_row!` does for text rows: `offsets[i]`/`lengths[i]` describ
 offset 2). `coltypes` supplies each column's wire type so the self-describing temporal and
 fixed-width values can be measured. Both vectors are resized to the column count and reused.
 """
-scan_binary_row!(coltypes::Vector{UInt8}, p::PacketView, offsets::Vector{Int}, lengths::Vector{Int}) =
-    scan_binary_row!(PacketCursor(p), coltypes, offsets, lengths)
+function scan_binary_row!(coltypes::Vector{UInt8}, p::PacketView, offsets::Vector{Int}, lengths::Vector{Int})
+    return scan_binary_row!(PacketCursor(p), coltypes, offsets, lengths)
+end
 
 function scan_binary_row!(c::PacketCursor, coltypes::Vector{UInt8}, offsets::Vector{Int}, lengths::Vector{Int})
     ncols = length(coltypes)

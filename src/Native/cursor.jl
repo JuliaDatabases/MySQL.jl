@@ -59,13 +59,13 @@ end
 const TextRow = Row{false}
 const BinaryRow = Row{true}
 
-getcursor(r::Row) = getfield(r, :cursor)
-getrownumber(r::Row) = getfield(r, :rownumber)
-getepoch(r::Row) = getfield(r, :epoch)
+getcursor(r::Row) = return getfield(r, :cursor)
+getrownumber(r::Row) = return getfield(r, :rownumber)
+getepoch(r::Row) = return getfield(r, :epoch)
 
-@noinline wrongrow(i) = throw(ArgumentError("row $i is no longer valid; mysql results are forward-only iterators where each row is only valid when iterated"))
-@noinline cursor_invalidated() = throw(P.ProtocolError("cursor invalidated: another command ran on the connection, or it was reconnected or closed"))
-@noinline wrong_streaming_task() = throw(MySQLInterfaceError("a streaming cursor must be consumed by only one task"))
+@noinline wrongrow(i) = return throw(ArgumentError("row $i is no longer valid; mysql results are forward-only iterators where each row is only valid when iterated"))
+@noinline cursor_invalidated() = return throw(P.ProtocolError("cursor invalidated: another command ran on the connection, or it was reconnected or closed"))
+@noinline wrong_streaming_task() = return throw(MySQLInterfaceError("a streaming cursor must be consumed by only one task"))
 
 function claim_streaming_owner!(c::Cursor{B, false}) where {B}
     owner = c.owner
@@ -85,20 +85,20 @@ function check_active(c::Cursor{B, false}) where {B}
 end
 
 # Buffered cursors own their bytes: they stay readable after later commands.
-check_active(::Cursor{B, true}) where {B} = nothing
+check_active(::Cursor{B, true}) where {B} = return nothing
 
 # Scanning one row into per-column windows and decoding one value are the only two points
 # where the two protocols differ. The cursor-owned scratch `PacketCursor` is rebound per
 # row (a fresh one is a heap allocation, §8.9).
-scan_row!(c::Cursor{false}, p::P.PacketView) = P.scan_text_row!(P.reset!(c.scratch, p.buf, p.lo, p.hi), c.nfields, c.offsets, c.lengths)
-scan_row!(c::Cursor{true}, p::P.PacketView) = P.scan_binary_row!(P.reset!(c.scratch, p.buf, p.lo, p.hi), c.coltypes, c.offsets, c.lengths)
+scan_row!(c::Cursor{false}, p::P.PacketView) = return P.scan_text_row!(P.reset!(c.scratch, p.buf, p.lo, p.hi), c.nfields, c.offsets, c.lengths)
+scan_row!(c::Cursor{true}, p::P.PacketView) = return P.scan_binary_row!(P.reset!(c.scratch, p.buf, p.lo, p.hi), c.coltypes, c.offsets, c.lengths)
 
-decode_column(c::Cursor{false}, ::Type{T}, i::Int) where {T} = decode(T, c.buf, c.offsets[i], c.lengths[i], c.opts)
-decode_column(c::Cursor{true}, ::Type{T}, i::Int) where {T} = decode_binary(T, c.buf, c.offsets[i], c.lengths[i], c.opts)
+decode_column(c::Cursor{false}, ::Type{T}, i::Int) where {T} = return decode(T, c.buf, c.offsets[i], c.lengths[i], c.opts)
+decode_column(c::Cursor{true}, ::Type{T}, i::Int) where {T} = return decode_binary(T, c.buf, c.offsets[i], c.lengths[i], c.opts)
 
 # ---- Tables.jl row interface ----
 
-Tables.columnnames(r::Row) = getcursor(r).names
+Tables.columnnames(r::Row) = return getcursor(r).names
 
 function Tables.getcolumn(r::Row, ::Type{T}, i::Int, nm::Symbol) where {T}
     c = getcursor(r)
@@ -107,17 +107,17 @@ function Tables.getcolumn(r::Row, ::Type{T}, i::Int, nm::Symbol) where {T}
     return decode_column(c, T, i)
 end
 
-Tables.getcolumn(r::Row, i::Int) = Tables.getcolumn(r, getcursor(r).types[i], i, getcursor(r).names[i])
-Tables.getcolumn(r::Row, nm::Symbol) = Tables.getcolumn(r, getcursor(r).lookup[nm])
+Tables.getcolumn(r::Row, i::Int) = return Tables.getcolumn(r, getcursor(r).types[i], i, getcursor(r).names[i])
+Tables.getcolumn(r::Row, nm::Symbol) = return Tables.getcolumn(r, getcursor(r).lookup[nm])
 
-Tables.isrowtable(::Type{<:Cursor}) = true
-Tables.schema(c::Cursor) = Tables.Schema(c.names, c.types)
+Tables.isrowtable(::Type{<:Cursor}) = return true
+Tables.schema(c::Cursor) = return Tables.Schema(c.names, c.types)
 
-Base.eltype(::Cursor{false}) = TextRow
-Base.eltype(::Cursor{true}) = BinaryRow
-Base.IteratorSize(::Type{Cursor{B, true}}) where {B} = Base.HasLength()
-Base.IteratorSize(::Type{Cursor{B, false}}) where {B} = Base.SizeUnknown()
-Base.length(c::Cursor) = c.nrows
+Base.eltype(::Cursor{false}) = return TextRow
+Base.eltype(::Cursor{true}) = return BinaryRow
+Base.IteratorSize(::Type{Cursor{B, true}}) where {B} = return Base.HasLength()
+Base.IteratorSize(::Type{Cursor{B, false}}) where {B} = return Base.SizeUnknown()
+Base.length(c::Cursor) = return c.nrows
 
 # ---- construction from a command response ----
 
@@ -166,7 +166,7 @@ function release_token!(c::Cursor)
     return nothing
 end
 
-@noinline buffered_limit_exceeded(limit) = P.ProtocolError("buffered result exceeded max_buffered_bytes=$limit bytes; use mysql_store_result=false or raise max_buffered_bytes")
+@noinline buffered_limit_exceeded(limit) = return P.ProtocolError("buffered result exceeded max_buffered_bytes=$limit bytes; use mysql_store_result=false or raise max_buffered_bytes")
 
 function charge_buffered!(conn::Connection, s::P.Session, n::Int)
     current = conn.buffered_bytes
@@ -295,7 +295,7 @@ end
 The `last_insert_id` the server reported in this cursor's own OK packet (the DML result, or
 the result-set terminator), not the connection's current state.
 """
-DBInterface.lastrowid(c::Cursor) = c.ok === nothing ? UInt64(0) : c.ok.last_insert_id
+DBInterface.lastrowid(c::Cursor) = return c.ok === nothing ? UInt64(0) : c.ok.last_insert_id
 
 """
     DBInterface.close!(c::MySQL.Native.Cursor)
@@ -429,8 +429,8 @@ end
 
 const TextCursors = Cursors{false}
 
-Base.eltype(::Cursors{binary, buffered}) where {binary, buffered} = Cursor{binary, buffered}
-Base.IteratorSize(::Type{<:Cursors}) = Base.SizeUnknown()
+Base.eltype(::Cursors{binary, buffered}) where {binary, buffered} = return Cursor{binary, buffered}
+Base.IteratorSize(::Type{<:Cursors}) = return Base.SizeUnknown()
 
 function DBInterface.executemultiple(conn::Connection, sql::AbstractString, params=(); mysql_store_result::Bool=true, mysql_date_and_time::Bool=false)
     first = DBInterface.execute(conn, sql, params; mysql_store_result=mysql_store_result, mysql_date_and_time=mysql_date_and_time)

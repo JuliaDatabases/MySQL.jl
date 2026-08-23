@@ -14,7 +14,7 @@ mutable struct ReapEntry
     next::Union{Nothing, ReapEntry}
 end
 
-ReapEntry(transport::P.Transport) = ReapEntry(:live, transport, nothing)
+ReapEntry(transport::P.Transport) = return ReapEntry(:live, transport, nothing)
 
 const REAPER_LOCK = Threads.SpinLock()
 const REAPER_QUEUE = Ref{Union{Nothing, ReapEntry}}(nothing)
@@ -95,7 +95,7 @@ function reap_now!()
     return n
 end
 
-pending_reaps() = lock(() -> REAPER_QUEUE_LENGTH[], REAPER_LOCK)
+pending_reaps() = return lock(() -> REAPER_QUEUE_LENGTH[], REAPER_LOCK)
 
 const REAPER_SETUP_LOCK = ReentrantLock()
 

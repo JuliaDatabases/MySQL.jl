@@ -86,14 +86,14 @@ function Base.show(io::IO, conn::Connection)
     return nothing
 end
 
-@noinline closed_connection() = error("mysql connection has been closed or disconnected")
+@noinline closed_connection() = return error("mysql connection has been closed or disconnected")
 
 function checkconn(conn::Connection)
     conn.handle === nothing && closed_connection()
     return nothing
 end
 
-session(conn::Connection) = (checkconn(conn); conn.handle.session)
+session(conn::Connection) = return (checkconn(conn); conn.handle.session)
 
 """
     Base.isopen(conn)
@@ -127,7 +127,7 @@ function DBInterface.close!(conn::Connection)
     return nothing
 end
 
-Base.close(conn::Connection) = DBInterface.close!(conn)
+Base.close(conn::Connection) = return DBInterface.close!(conn)
 
 # ---- response ownership ----
 
@@ -368,4 +368,4 @@ end
 
 Backtick-quotes an identifier, doubling embedded backticks.
 """
-escape_identifier(name::AbstractString) = string('`', replace(String(name), "`" => "``"), '`')
+escape_identifier(name::AbstractString) = return string('`', replace(String(name), "`" => "``"), '`')

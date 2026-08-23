@@ -10,7 +10,7 @@ mutable struct PacketCursor
     stop::Int
 end
 
-PacketCursor(buf::Vector{UInt8}) = PacketCursor(buf, 1, length(buf))
+PacketCursor(buf::Vector{UInt8}) = return PacketCursor(buf, 1, length(buf))
 
 # Rebinds a reusable cursor (a fresh `PacketCursor` is a heap allocation; the per-row scan
 # paths reuse one per result cursor, §8.9).
@@ -21,10 +21,10 @@ function reset!(c::PacketCursor, buf::Vector{UInt8}, lo::Int, hi::Int)
     return c
 end
 
-remaining(c::PacketCursor) = c.stop - c.pos + 1
-atend(c::PacketCursor) = c.pos > c.stop
+remaining(c::PacketCursor) = return c.stop - c.pos + 1
+atend(c::PacketCursor) = return c.pos > c.stop
 
-@noinline truncated(what::String) = protocol_error("malformed packet: truncated $what")
+@noinline truncated(what::String) = return protocol_error("malformed packet: truncated $what")
 
 @inline function need!(c::PacketCursor, n::Int, what::String)
     remaining(c) >= n || truncated(what)
@@ -53,11 +53,11 @@ end
     return v
 end
 
-read_u16!(c::PacketCursor) = UInt16(read_fixed_uint!(c, 2, "int<2>"))
-read_u24!(c::PacketCursor) = UInt32(read_fixed_uint!(c, 3, "int<3>"))
-read_u32!(c::PacketCursor) = UInt32(read_fixed_uint!(c, 4, "int<4>"))
-read_u48!(c::PacketCursor) = read_fixed_uint!(c, 6, "int<6>")
-read_u64!(c::PacketCursor) = read_fixed_uint!(c, 8, "int<8>")
+read_u16!(c::PacketCursor) = return UInt16(read_fixed_uint!(c, 2, "int<2>"))
+read_u24!(c::PacketCursor) = return UInt32(read_fixed_uint!(c, 3, "int<3>"))
+read_u32!(c::PacketCursor) = return UInt32(read_fixed_uint!(c, 4, "int<4>"))
+read_u48!(c::PacketCursor) = return read_fixed_uint!(c, 6, "int<6>")
+read_u64!(c::PacketCursor) = return read_fixed_uint!(c, 8, "int<8>")
 
 """
     read_lenenc!(c) -> UInt64
@@ -152,7 +152,7 @@ end
 
 # ---- writers (append to a Vector{UInt8}) ----
 
-write_u8!(buf::Vector{UInt8}, v::Integer) = (push!(buf, UInt8(v & 0xFF)); nothing)
+write_u8!(buf::Vector{UInt8}, v::Integer) = return (push!(buf, UInt8(v & 0xFF)); nothing)
 
 function write_fixed_uint!(buf::Vector{UInt8}, v::Unsigned, nbytes::Int)
     x = UInt64(v)
@@ -163,10 +163,10 @@ function write_fixed_uint!(buf::Vector{UInt8}, v::Unsigned, nbytes::Int)
     return nothing
 end
 
-write_u16!(buf::Vector{UInt8}, v::Integer) = write_fixed_uint!(buf, UInt16(v), 2)
-write_u24!(buf::Vector{UInt8}, v::Integer) = write_fixed_uint!(buf, UInt32(v), 3)
-write_u32!(buf::Vector{UInt8}, v::Integer) = write_fixed_uint!(buf, UInt32(v), 4)
-write_u64!(buf::Vector{UInt8}, v::Integer) = write_fixed_uint!(buf, UInt64(v), 8)
+write_u16!(buf::Vector{UInt8}, v::Integer) = return write_fixed_uint!(buf, UInt16(v), 2)
+write_u24!(buf::Vector{UInt8}, v::Integer) = return write_fixed_uint!(buf, UInt32(v), 3)
+write_u32!(buf::Vector{UInt8}, v::Integer) = return write_fixed_uint!(buf, UInt32(v), 4)
+write_u64!(buf::Vector{UInt8}, v::Integer) = return write_fixed_uint!(buf, UInt64(v), 8)
 
 function lenenc_size(v::Integer)
     x = UInt64(v)
@@ -199,7 +199,7 @@ function write_lenenc_bytes!(buf::Vector{UInt8}, bytes::AbstractVector{UInt8})
     return nothing
 end
 
-write_lenenc_string!(buf::Vector{UInt8}, s::AbstractString) = write_lenenc_bytes!(buf, codeunits(s))
+write_lenenc_string!(buf::Vector{UInt8}, s::AbstractString) = return write_lenenc_bytes!(buf, codeunits(s))
 
 function write_nul_string!(buf::Vector{UInt8}, s::AbstractString)
     occursin('\0', s) && throw(ArgumentError("string<NUL> value cannot contain a NUL byte"))
@@ -208,8 +208,8 @@ function write_nul_string!(buf::Vector{UInt8}, s::AbstractString)
     return nothing
 end
 
-write_bytes!(buf::Vector{UInt8}, bytes::AbstractVector{UInt8}) = (append!(buf, bytes); nothing)
-write_string!(buf::Vector{UInt8}, s::AbstractString) = (append!(buf, codeunits(s)); nothing)
+write_bytes!(buf::Vector{UInt8}, bytes::AbstractVector{UInt8}) = return (append!(buf, bytes); nothing)
+write_string!(buf::Vector{UInt8}, s::AbstractString) = return (append!(buf, codeunits(s)); nothing)
 
 function write_zeros!(buf::Vector{UInt8}, n::Int)
     for _ in 1:n

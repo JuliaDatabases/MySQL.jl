@@ -216,7 +216,6 @@ function run_correctness_gates(plain_port, tls_port)
             @test run_text(native) == run_text(c)
             bn = @b run_text(native) samples = 1 evals = 1
             alloc_gate!("text scan 1M rows", bn.allocs, 1_000_000, 2)
-
             stmt_n = DBInterface.prepare(native, "SELECT i, f, s, n FROM perf1m")
             stmt_c = DBInterface.prepare(c, "SELECT i, f, s, n FROM perf1m")
             try
@@ -227,7 +226,6 @@ function run_correctness_gates(plain_port, tls_port)
                 DBInterface.close!(stmt_n)
                 DBInterface.close!(stmt_c)
             end
-
             @test run_nulls(native) == run_nulls(c)
             bn = @b run_nulls(native) samples = 1 evals = 1
             alloc_gate!("tiny/NULL scan 1M rows", bn.allocs, 1_000_000, 1)
@@ -262,7 +260,6 @@ function run_correctness_gates(plain_port, tls_port)
             finally
                 DBInterface.close!(small)
             end
-
             # 300 rows of 1 MiB: streaming has no aggregate cap by default.
             stream = connect_native(plain_port; ssl_mode=:disabled)
             try
@@ -276,7 +273,6 @@ function run_correctness_gates(plain_port, tls_port)
             finally
                 DBInterface.close!(stream)
             end
-
             multi = connect_native(plain_port; ssl_mode=:disabled, multi_statements=true, max_buffered_bytes=3 * 1024 * 1024)
             try
                 sql = "SELECT REPEAT('a', 1048576) UNION ALL SELECT REPEAT('b', 1048576); SELECT REPEAT('c', 1048576) UNION ALL SELECT REPEAT('d', 1048576)"

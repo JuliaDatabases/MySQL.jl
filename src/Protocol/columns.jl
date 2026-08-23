@@ -48,8 +48,8 @@ function parse_column_def(p::PacketView; extended_metadata::Bool=false)
     return ColumnDef(catalog, schema, table, org_table, name, org_name, charset, length, type, flags, decimals)
 end
 
-has_flag(def::ColumnDef, flag::UInt16) = (def.flags & flag) != 0
-is_not_null(def::ColumnDef) = has_flag(def, NOT_NULL_FLAG)
+has_flag(def::ColumnDef, flag::UInt16) = return (def.flags & flag) != 0
+is_not_null(def::ColumnDef) = return has_flag(def, NOT_NULL_FLAG)
 # `NUM_FLAG` is not sent on the wire: libmysqlclient sets it client-side for the numeric
 # wire types (`IS_NUM` in mysql_com.h), and that is what the 1.x type mapping observed. A
 # wire-supplied NUM_FLAG is not trusted either — the unsigned mapping applies only to wire
@@ -60,9 +60,9 @@ function is_numeric_type(type::UInt8)
     return type == MYSQL_TYPE_YEAR || type == MYSQL_TYPE_NEWDECIMAL
 end
 
-is_unsigned(def::ColumnDef) = has_flag(def, UNSIGNED_FLAG) && is_numeric_type(def.type)
-is_binary(def::ColumnDef) = has_flag(def, BINARY_FLAG)
-is_blob(def::ColumnDef) = has_flag(def, BLOB_FLAG)
+is_unsigned(def::ColumnDef) = return has_flag(def, UNSIGNED_FLAG) && is_numeric_type(def.type)
+is_binary(def::ColumnDef) = return has_flag(def, BINARY_FLAG)
+is_blob(def::ColumnDef) = return has_flag(def, BLOB_FLAG)
 
 const FIELD_TYPE_NAMES = Dict{UInt8, String}(
     MYSQL_TYPE_DECIMAL => "DECIMAL", MYSQL_TYPE_TINY => "TINY", MYSQL_TYPE_SHORT => "SHORT",
@@ -77,7 +77,7 @@ const FIELD_TYPE_NAMES = Dict{UInt8, String}(
     MYSQL_TYPE_STRING => "STRING", MYSQL_TYPE_GEOMETRY => "GEOMETRY",
 )
 
-field_type_name(type::UInt8) = get(() -> "type$(Int(type))", FIELD_TYPE_NAMES, type)
+field_type_name(type::UInt8) = return get(() -> "type$(Int(type))", FIELD_TYPE_NAMES, type)
 
 function Base.show(io::IO, def::ColumnDef)
     print(io, "ColumnDef(", repr(def.name), " ", field_type_name(def.type), " charset=", def.charset, " len=", def.length, " flags=0x", string(def.flags, base=16, pad=4), ")")
