@@ -377,9 +377,7 @@ function binary_row_short_temporals()
     end
     append!(buf, nullbytes)
     P.write_u8!(buf, 0)                        # dt len 0 (zero datetime)
-    P.write_u8!(buf, 7)                        # da: DATE with a 7-byte datetime form
-    P.write_u16!(buf, 2024); P.write_u8!(buf, 5); P.write_u8!(buf, 1)
-    P.write_u8!(buf, 0); P.write_u8!(buf, 0); P.write_u8!(buf, 0)
+    P.write_u8!(buf, 0)                        # da len 0 (zero date)
     P.write_u8!(buf, 8)                        # tm: TIME len 8
     P.write_u8!(buf, 0); P.write_u32!(buf, 0)
     P.write_u8!(buf, 3); P.write_u8!(buf, 4); P.write_u8!(buf, 5)

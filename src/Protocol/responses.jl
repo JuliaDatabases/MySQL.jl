@@ -377,6 +377,7 @@ end
 
 function valid_binary_temporal_length(type::UInt8, len::Int)
     type == MYSQL_TYPE_TIME && return len == 0 || len == 8 || len == 12
+    type == MYSQL_TYPE_DATE && return len == 0 || len == 4
     return len == 0 || len == 4 || len == 7 || len == 11
 end
 

@@ -122,6 +122,7 @@ binary_temporal_parts(::Type{T}, buf, pos, len) where {T <: Union{Date, DateTime
 binary_temporal_parts(::Type, buf, pos, len) = return nothing
 
 function decode_binary_value(::Type{Date}, buf::Vector{UInt8}, pos::Int, len::Int, opts::ResultOptions)
+    (len == 0 || len == 4) || conversion_error(Date, "binary DATE value has invalid length $len")
     parts = binary_date_parts(buf, pos, len)
     parts === nothing && conversion_error(Date, buf, pos, len)
     kind = zero_date_kind(parts)

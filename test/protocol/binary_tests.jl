@@ -224,6 +224,8 @@ end
 
     @test_throws P.ProtocolError P.scan_binary_row!(UInt8[P.MYSQL_TYPE_DATETIME], pv(UInt8[0x00, 0x00, 0x03, 0x00, 0x00, 0x00]), Int[], Int[])
     @test_throws P.ProtocolError P.scan_binary_row!(UInt8[P.MYSQL_TYPE_TIME], pv(UInt8[0x00, 0x00, 0x07, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]), Int[], Int[])
+    @test_throws P.ProtocolError P.scan_binary_row!(UInt8[P.MYSQL_TYPE_DATE], pv(UInt8[0x00, 0x00, 0x07, 0xe8, 0x07, 0x02, 0x1d, 0x0d, 0x0e, 0x0f]), Int[], Int[])
+    @test_throws P.ProtocolError P.scan_binary_row!(UInt8[P.MYSQL_TYPE_DATE], pv(UInt8[0x00, 0x00, 0x0b, 0xe8, 0x07, 0x02, 0x1d, 0x0d, 0x0e, 0x0f, 0x00, 0x00, 0x00, 0x00]), Int[], Int[])
     @test_throws P.ProtocolError P.scan_binary_row!(UInt8[P.MYSQL_TYPE_NULL], pv(UInt8[0x00, 0x00, 0x00]), Int[], Int[])
     @test_throws P.ProtocolError P.scan_binary_row!(UInt8[P.MYSQL_TYPE_LONG], pv(UInt8[0x00, 0x00, 0x01]), Int[], Int[])
     @test_throws P.ProtocolError P.scan_binary_row!(UInt8[P.MYSQL_TYPE_VAR_STRING], pv(UInt8[0x00, 0x00, 0x03, 0x61]), Int[], Int[])
@@ -242,6 +244,7 @@ end
     @test N.decode_binary(UInt64, fill(0xFF, 8), 1, 8, o) === typemax(UInt64)
     @test N.decode_binary(UInt64, UInt8[0xE8, 0x07], 1, 2, o) === UInt64(2024)   # YEAR: 2-byte wire → UInt64
     @test N.decode_binary(Int8, Vector{UInt8}(codeunits("Management")), 1, 10, o) === Int8('M')  # preserved ENUM/Cchar truncation
+    @test_throws P.ConversionError N.decode_binary(Date, UInt8[0xe8, 0x07, 0x02, 0x1d, 0x0d, 0x0e, 0x0f], 1, 7, o)
     # floats
     @test N.decode_binary(Float32, reinterpret(UInt8, [1.25f0]) |> collect, 1, 4, o) === 1.25f0
     @test N.decode_binary(Float64, reinterpret(UInt8, [-2.5]) |> collect, 1, 8, o) === -2.5
