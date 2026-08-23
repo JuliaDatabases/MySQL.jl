@@ -85,7 +85,7 @@ function resolve_bind(
     left = deadline - Int64(time_ns())
     left > 0 || throw(P.TimeoutError(timeout_message))
     seconds = left / 1_000_000_000
-    status = timedwait(() -> isready(result), seconds; pollint=min(seconds, 0.01))
+    status = timedwait(() -> isready(result), seconds; pollint=clamp(seconds, 0.001, 0.01))
     if status === :timed_out && !isready(result)
         throw(P.TimeoutError(timeout_message))
     end
@@ -147,21 +147,16 @@ function bootstrap_charset!(s::P.Session, ok::P.OKPacket)
     return true
 end
 
-function run_init_command!(s::P.Session, sql::String, read_timeout::Union{Nothing, Int})
-    read_timeout === nothing || P.set_read_deadline!(s.transport, Int64(time_ns()) + Int64(read_timeout) * 1_000_000_000)
-    try
-        P.query!(s, sql)
-        P.read_command_response!(s)
-        while !P.is_terminal(s.phase) && s.phase != P.READY
-            P.drain_step!(s)
-        end
-    finally
-        if read_timeout !== nothing && P.transport_isopen(s.transport)
-            P.set_read_deadline!(s.transport, 0)
-        end
+function run_init_command!(s::P.Session, sql::String)
+    P.query!(s, sql)
+    P.read_command_response!(s)
+    while !P.is_terminal(s.phase) && s.phase != P.READY
+        P.drain_step!(s)
     end
     return nothing
 end
+
+timeout_ns(seconds::Union{Nothing, Int}) = seconds === nothing ? Int64(0) : Int64(seconds) * 1_000_000_000
 
 """
     connect(opts::ConnectOptions) -> Handle
@@ -169,7 +164,8 @@ end
 
 Establishes an authenticated, utf8mb4-bootstrapped session: dial, greeting, STARTTLS per
 `ssl_mode`, authentication, charset bootstrap, then `init_command`. `connect_timeout` bounds
-everything up to the bootstrap as a single deadline. Any failure closes the transport.
+everything up to the bootstrap as a single deadline; afterwards `read_timeout` and
+`write_timeout` bound each transport read and write. Any failure closes the transport.
 """
 function connect(opts::ConnectOptions)
     deadline = deadline_from(opts.connect_timeout)
@@ -185,7 +181,9 @@ function connect(opts::ConnectOptions)
         ok = P.authenticate!(s, opts.user, opts.password, policy; db=opts.db, attrs=opts.attrs, default_auth=opts.default_auth, trace=trace)
         bootstrapped = bootstrap_charset!(s, ok)
         deadline == 0 || apply_deadline!(s.transport, Int64(0))
-        opts.init_command === nothing || run_init_command!(s, opts.init_command, opts.read_timeout)
+        # from here on `read_timeout`/`write_timeout` apply per transport operation
+        P.set_timeouts!(s, timeout_ns(opts.read_timeout), timeout_ns(opts.write_timeout))
+        opts.init_command === nothing || run_init_command!(s, opts.init_command)
         return register!(Handle(s, opts, ReapEntry(s.transport), bootstrapped, trace))
     catch
         P.is_terminal(s.phase) || P.close!(s)

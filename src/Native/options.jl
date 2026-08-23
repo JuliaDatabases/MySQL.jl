@@ -245,11 +245,15 @@ overrides `[client]` independent of file order. `!include`/`!includedir` directi
 rejected (fail closed), and unknown keys are ignored.
 """
 function read_option_file(path::AbstractString; group::AbstractString="client")
+    return open(io -> read_option_file(io, path; group=group), path)
+end
+
+function read_option_file(io::IO, path::AbstractString; group::AbstractString="client")
     client_opts = Dict{Symbol, String}()
     group_opts = Dict{Symbol, String}()
     current = ""
     requested_group = lowercase(group)
-    for (lineno, raw) in enumerate(eachline(path))
+    for (lineno, raw) in enumerate(eachline(io))
         line = strip(raw)
         (isempty(line) || startswith(line, '#') || startswith(line, ';')) && continue
         (startswith(line, '!') || startswith(lowercase(line), "?includedir")) && throw(ArgumentError("$path:$lineno: `$(first(split(line)))` directives are not supported (fail closed)"))
@@ -303,7 +307,7 @@ function client_flags(; found_rows::Bool=false, no_schema::Bool=false, ignore_sp
 end
 
 function default_attrs()
-    return ["_client_name" => "MySQL.jl", "_client_version" => "2.0.0-native", "_os" => string(Sys.KERNEL), "_platform" => string(Sys.ARCH), "_pid" => string(getpid())]
+    return ["_client_name" => "MySQL.jl", "_client_version" => string(pkgversion(MySQL), "-native"), "_os" => string(Sys.KERNEL), "_platform" => string(Sys.ARCH), "_pid" => string(getpid())]
 end
 
 positive_or_nothing(v, name) = v === nothing ? nothing : (v > 0 ? Int(v) : throw(ArgumentError("$name must be positive")))

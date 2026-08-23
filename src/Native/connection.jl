@@ -2,6 +2,15 @@
 # `Protocol.Session`, pending-response draining, cursor invalidation tokens, the narrow
 # reconnect rule, transactions that hold the lock, and `escape`.
 
+# A closed statement's COM_STMT_CLOSE, parked until the next command (never sent from a
+# finalizer); allocated with its Statement so parking never allocates.
+mutable struct StatementReapEntry
+    statement_id::UInt32
+    generation::Int
+    next::Union{Nothing, StatementReapEntry}
+    parked::Bool
+end
+
 """
     MySQL.Native.Connection
 
@@ -11,13 +20,6 @@ keyword of `MySQL.Connection` is accepted (removed ones explain why they fail).
 Operations are serialized by the connection lock; a streaming cursor and a transaction are
 owned by the task that created them.
 """
-mutable struct StatementReapEntry
-    statement_id::UInt32
-    generation::Int
-    next::Union{Nothing, StatementReapEntry}
-    parked::Bool
-end
-
 mutable struct Connection <: DBInterface.Connection
     handle::Union{Nothing, Handle}
     options::ConnectOptions
@@ -32,7 +34,7 @@ mutable struct Connection <: DBInterface.Connection
     buffered_bytes::Int
     transaction_owner::Union{Nothing, Task}
     results::ResultOptions
-    reaplock::Threads.SpinLock
+    reaplock::ReentrantLock
     stmts_to_close::Union{Nothing, StatementReapEntry}
     @atomic statement_reaping_open::Bool
 end
@@ -44,14 +46,15 @@ function strip_scheme(host::AbstractString)
 end
 
 """
-    DBInterface.connect(MySQL.Native.Connection, host, user, passwd=nothing; db="", port=nothing, kw...)
+    DBInterface.connect(MySQL.Native.Connection, host, user, passwd=nothing; db=nothing, port=nothing, kw...)
 
 Connects with the native backend. Keywords are those of `MySQL.Connection` plus the
 native-only options (`ssl_mode=:preferred`, `get_server_public_key`, `tls_version`,
 `zero_dates`, `time_type`, `local_infile_handler`, `max_buffered_bytes`, …); see
-`MySQL.Native.ConnectOptions`.
+`MySQL.Native.ConnectOptions`. An omitted `db`/`port` falls back to the option files'
+`database`/`port` (when option files are read), like `host`/`user`/`password`.
 """
-function DBInterface.connect(::Type{Connection}, host::AbstractString, user::AbstractString, passwd::Union{AbstractString, Nothing}=nothing; db::AbstractString="", port::Union{Integer, Nothing}=nothing, kw...)
+function DBInterface.connect(::Type{Connection}, host::AbstractString, user::AbstractString, passwd::Union{AbstractString, Nothing}=nothing; db::Union{AbstractString, Nothing}=nothing, port::Union{Integer, Nothing}=nothing, kw...)
     opts = ConnectOptions(strip_scheme(host), user, passwd; db=db, port=port, kw...)
     h = connect(opts)
     results = ResultOptions(; zero_dates=opts.zero_dates, time_type=opts.time_type)
@@ -69,7 +72,7 @@ function DBInterface.connect(::Type{Connection}, host::AbstractString, user::Abs
         0,
         nothing,
         results,
-        Threads.SpinLock(),
+        ReentrantLock(),
         nothing,
         true,
     )
@@ -153,13 +156,14 @@ end
 
 # Reconnect only before a send, only on a transport known to be closed, never from a
 # protocol fault and never inside a transaction. Statements and cursors of the old session
-# are invalidated by the generation bump.
+# are invalidated by the generation bump. A failed reconnect keeps the (closed) handle so
+# the next command reports the connection error again and retries, instead of reporting a
+# closed connection.
 function ensure_live!(conn::Connection)
     h = conn.handle
     isopen(h.session) && return nothing
     can_reconnect = conn.options.reconnect && conn.transaction_owner === nothing && h.session.phase != P.BROKEN && !P.in_transaction(h.session.status)
     can_reconnect || throw(P.Error(P.CR_SERVER_GONE_ERROR, "MySQL server has gone away", "HY000"))
-    conn.handle = nothing
     close!(h)
     conn.handle = connect(conn.options)
     invalidate_cursors!(conn)
@@ -167,14 +171,13 @@ function ensure_live!(conn::Connection)
 end
 
 # Every command starts here (under the lock): live connection, no pending response, fresh
-# per-command buffered budget.
+# per-command buffered budget. `read_timeout`/`write_timeout` need no work here: the
+# session re-arms them before every transport read and write.
 function begin_command!(conn::Connection)
     checkconn(conn)
     drain_pending!(conn)
     ensure_live!(conn)
     s = conn.handle.session
-    P.set_read_deadline!(s.transport, deadline_from(conn.options.read_timeout))
-    P.set_write_deadline!(s.transport, deadline_from(conn.options.write_timeout))
     reap_statements!(conn, s)
     conn.buffered_bytes = 0
     return s
@@ -219,7 +222,8 @@ function park_statement!(conn::Connection, entry::StatementReapEntry)
     return nothing
 end
 
-# A finalizer may only trylock. The caller re-registers the finalizer when this returns false.
+# A finalizer may only trylock (never block or yield). The caller re-registers the finalizer
+# when this returns false.
 function try_park_statement!(conn::Connection, entry::StatementReapEntry)
     if trylock(conn.reaplock)
         try

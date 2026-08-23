@@ -261,11 +261,12 @@ end
 @noinline closed_statement() = error("prepared mysql statement has been closed")
 
 """
-    DBInterface.execute(stmt::MySQL.Native.Statement, params=(); mysql_store_result=true) -> BinaryCursor
+    DBInterface.execute(stmt::MySQL.Native.Statement, params=(); mysql_store_result=true, mysql_date_and_time=false) -> BinaryCursor
 
 Executes the prepared statement with `params` bound as the `?` markers and returns a
 binary-protocol cursor. `mysql_store_result=false` streams rows (the connection is busy until
-the cursor is exhausted or closed).
+the cursor is exhausted or closed). `mysql_date_and_time` applies only to statements whose
+column metadata is determined at execute time (the prepare-time keyword wins otherwise).
 """
 function DBInterface.execute(stmt::Statement, params=(); mysql_store_result::Bool=true, mysql_date_and_time::Bool=false)
     conn = stmt.conn
