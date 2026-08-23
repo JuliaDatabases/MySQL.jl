@@ -31,12 +31,12 @@ stmt_prepare!(s::Session, sql::AbstractString) = send_command!(s, COM_STMT_PREPA
 # Reads one metadata block (`n` column definitions, then the EOF that closes it unless
 # DEPRECATE_EOF), bounded by `max_metadata_bytes` before every allocation.
 function read_definition_block!(s::Session, n::Int)
-    defs = Vector{ColumnDef}(undef, n)
-    for i in 1:n
+    defs = ColumnDef[]
+    for _ in 1:n
         cp = readpacket!(s; packet_limit=s.limits.max_metadata_bytes - s.metadata_bytes)
         s.metadata_bytes += payload_length(cp)
         s.metadata_bytes <= s.limits.max_metadata_bytes || throw(fault!(s, ProtocolError("prepared-statement metadata exceeded $(s.limits.max_metadata_bytes) bytes")))
-        defs[i] = guarded(() -> parse_column_def(cp), s)
+        push!(defs, guarded(() -> parse_column_def(cp), s))
     end
     if !deprecate_eof(s)
         ep = readpacket!(s)

@@ -58,6 +58,35 @@ column_count(n) = begin
     buf
 end
 
+function declared_column_allocation(n::Int)
+    s = P.Session(P.FaultTransport(IOBuffer(framed(0x00, column_count(n)))); limits=P.Limits(; max_columns=n, max_metadata_bytes=1))
+    s.authenticated = true
+    s.phase = P.CMD_SENT
+    try
+        P.read_command_response!(s)
+    catch
+    end
+    return nothing
+end
+
+function declared_prepare_allocation(n::Int)
+    payload = UInt8[P.OK_HEADER]
+    P.write_u32!(payload, 1)
+    P.write_u16!(payload, n)
+    P.write_u16!(payload, 0)
+    P.write_u8!(payload, 0)
+    P.write_u16!(payload, 0)
+    s = P.Session(P.FaultTransport(IOBuffer(framed(0x00, payload))); limits=P.Limits(; max_columns=n, max_metadata_bytes=1))
+    s.authenticated = true
+    s.phase = P.CMD_SENT
+    s.command_kind = P.CMD_STMT_PREPARE
+    try
+        P.read_prepare_response!(s)
+    catch
+    end
+    return nothing
+end
+
 const COL1 = Vectors.payload(Vectors.COLUMN_DEF_COL1)
 
 mutable struct FailingUpload <: IO
@@ -641,6 +670,16 @@ end
             @test_throws P.ProtocolError P.read_command_response!(s)
             @test s.phase == P.BROKEN
         end
+        # A hostile but user-permitted count must not allocate its full definition vector
+        # before the first metadata packet is read and charged to max_metadata_bytes.
+        declared_column_allocation(1)
+        small = @allocated declared_column_allocation(1)
+        large = @allocated declared_column_allocation(100_000)
+        @test large <= small + 65_536
+        declared_prepare_allocation(1)
+        small = @allocated declared_prepare_allocation(1)
+        large = @allocated declared_prepare_allocation(60_000)
+        @test large <= small + 65_536
         with_peer(conn -> (server_handshake!(conn); await_eof(conn))) do client
             s = P.Session(client; limits=P.Limits(; max_packet=128))
             client_handshake!(s)

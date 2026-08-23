@@ -185,13 +185,13 @@ function read_result_header!(s::Session, p::PacketView, binary::Bool)
     0 < ncols_wire <= UInt64(s.limits.max_columns) || throw(fault!(s, ProtocolError("column count $ncols_wire is outside 1:$(s.limits.max_columns)")))
     ncols = Int(ncols_wire)
     transition!(s, :column_count, COLUMN_DEFS)
-    columns = Vector{ColumnDef}(undef, ncols)
+    columns = ColumnDef[]
     metadata_start = s.metadata_bytes
     for i in 1:ncols
         cp = readpacket!(s; packet_limit=s.limits.max_metadata_bytes - s.metadata_bytes)
         s.metadata_bytes += payload_length(cp)
         s.metadata_bytes <= s.limits.max_metadata_bytes || throw(fault!(s, ProtocolError("column metadata exceeded $(s.limits.max_metadata_bytes) bytes")))
-        columns[i] = guarded(() -> parse_column_def(cp), s)
+        push!(columns, guarded(() -> parse_column_def(cp), s))
         transition!(s, :column_def, COLUMN_DEFS)
     end
     if deprecate_eof(s)
