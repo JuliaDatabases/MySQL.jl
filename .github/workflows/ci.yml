@@ -9,6 +9,16 @@ on:
     - cron: "17 6 * * *"
   workflow_dispatch:
 jobs:
+  cleanroom:
+    name: Native clean-room source check
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: "1.10"
+      - run: julia --startup-file=no scripts/check_native_cleanroom.jl
   test:
     name: Julia ${{ matrix.version }} - ${{ matrix.os }} - ${{ matrix.arch }} - ${{ github.event_name }}
     if: github.event_name != 'schedule'
@@ -54,6 +64,8 @@ jobs:
       - uses: julia-actions/julia-buildpkg@v1
       - uses: julia-actions/julia-runtest@v1
       - uses: julia-actions/julia-processcoverage@v1
+      - run: julia --startup-file=no scripts/check_native_coverage.jl lcov.info 0.85
+        if: runner.os == 'Linux' && matrix.version == 1
       - uses: codecov/codecov-action@v5
         with:
           files: lcov.info
