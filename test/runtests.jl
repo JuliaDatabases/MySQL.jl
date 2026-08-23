@@ -40,8 +40,15 @@ end
 
 function performance_gate_plan(env=ENV; docker::Bool=docker_available())
     docker || return (correctness=false, timing=false)
-    timing_default = haskey(env, "CI") ? "0" : "1"
-    return (correctness=true, timing=get(env, "MYSQL_PERF_GATES", timing_default) != "0")
+    # The §8.9 native-vs-Connector/C gates (1M-row scans, 64 MiB blob, 100k executemany) are
+    # heavy; under CI's coverage instrumentation they blow the test-job time budget, and the
+    # two-backend compat manifest already asserts value parity in the PR live lanes. So under
+    # CI they are opt-in via MYSQL_PERF_GATES=1 (the dedicated `perf` job sets it); local runs
+    # run them by default. MYSQL_PERF_GATES enables the correctness gates and the timing ratios
+    # together, so a single flag controls the whole §8.9 block.
+    gates_default = haskey(env, "CI") ? "0" : "1"
+    enabled = get(env, "MYSQL_PERF_GATES", gates_default) != "0"
+    return (correctness=enabled, timing=enabled)
 end
 
 function pick_port()
@@ -113,8 +120,9 @@ end
 @testset "MySQL" begin
 
 @testset "performance gate selection" begin
-    @test performance_gate_plan(Dict("CI" => "true"); docker=true) == (correctness=true, timing=false)
+    @test performance_gate_plan(Dict("CI" => "true"); docker=true) == (correctness=false, timing=false)
     @test performance_gate_plan(Dict("CI" => "true", "MYSQL_PERF_GATES" => "1"); docker=true) == (correctness=true, timing=true)
+    @test performance_gate_plan(Dict("CI" => "true", "MYSQL_PERF_GATES" => "0"); docker=true) == (correctness=false, timing=false)
     @test performance_gate_plan(Dict{String, String}(); docker=true) == (correctness=true, timing=true)
     @test performance_gate_plan(Dict{String, String}(); docker=false) == (correctness=false, timing=false)
 end
