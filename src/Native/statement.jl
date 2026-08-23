@@ -163,9 +163,13 @@ end
 
 function validate_long_data_ids(stmt::Statement)
     for chunk in stmt.long_data
-        Int(chunk.parameter_number) < stmt.nparams || throw(MySQLInterfaceError(
-            "long-data parameter $(chunk.parameter_number) is outside 0:$(stmt.nparams - 1) after re-prepare",
-        ))
+        if Int(chunk.parameter_number) >= stmt.nparams
+            parameter_number = chunk.parameter_number
+            empty!(stmt.long_data)
+            throw(MySQLInterfaceError(
+                "long-data parameter $parameter_number is outside 0:$(stmt.nparams - 1) after re-prepare",
+            ))
+        end
     end
     return nothing
 end
@@ -178,6 +182,7 @@ function replay_long_data!(s::P.Session, stmt::Statement)
 end
 
 function validate_long_data_params(stmt::Statement, params)
+    validate_long_data_ids(stmt)
     for chunk in stmt.long_data
         value = params[Int(chunk.parameter_number) + 1]
         type, _ = param_type(value)

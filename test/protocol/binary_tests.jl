@@ -939,6 +939,29 @@ end
     end
 end
 
+@testset "re-prepare discards out-of-range long data" begin
+    with_native(c -> begin
+        expect_prepare(c)
+        send_prepare_ok(c, 1, 85, paramdefs(2), P.ColumnDef[])
+        @test expect_long_data(c) == (UInt32(85), UInt16(1), UInt8[0x73, 0x74, 0x61, 0x6c, 0x65])
+        expect_prepare(c)
+        send_prepare_ok(c, 1, 86, paramdefs(1), P.ColumnDef[])
+        payload = expect_execute(c)
+        @test execute_new_params_flag(payload, 1) == 0x01
+        send_ok(c, 1)
+    end) do conn
+        stmt = DBInterface.prepare(conn, "INSERT INTO t VALUES (?, ?)")
+        N.send_long_data!(stmt, 1, "stale")
+        stmt.generation -= 1
+        err = try; DBInterface.execute(stmt, ("keep", "ignored")); nothing; catch e; e; end
+        @test err isa MySQL.MySQLInterfaceError
+        @test occursin("outside 0:0", sprint(showerror, err))
+        @test stmt.nparams == 1 && isempty(stmt.long_data)
+        @test DBInterface.execute(stmt, ("inline",)).rows_affected == 0
+        DBInterface.close!(stmt)
+    end
+end
+
 @testset "statement reset clears retained long data" begin
     payload = Ref(UInt8[])
     with_native(c -> begin
