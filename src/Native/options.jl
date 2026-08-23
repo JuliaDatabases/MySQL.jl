@@ -103,10 +103,38 @@ function check_keywords(kw)
     return nothing
 end
 
-function protocol_is_tcp(protocol)
-    protocol === nothing && return true
-    p = protocol isa Symbol ? protocol : protocol isa AbstractString ? Symbol(lowercase(protocol)) : Symbol(lowercase(replace(string(protocol), "MYSQL_PROTOCOL_" => "")))
-    return p == :tcp || p == :default
+function protocol_kind(protocol)
+    protocol === nothing && return :default
+    p = if protocol isa Symbol
+        protocol
+    elseif protocol isa AbstractString
+        Symbol(lowercase(protocol))
+    elseif protocol isa API.mysql_protocol_type
+        Symbol(lowercase(replace(string(protocol), "MYSQL_PROTOCOL_" => "")))
+    else
+        throw(ArgumentError("protocol must be :default, :tcp, :socket, :pipe, or the matching MySQL.API value"))
+    end
+    p in (:default, :tcp, :socket, :pipe, :memory) || throw(ArgumentError("unknown protocol $(repr(protocol))"))
+    return p
+end
+
+function select_transport(host::String, protocol; named_pipe::Bool=false)
+    kind = protocol_kind(protocol)
+    kind == :tcp && return :tcp
+    kind != :default && return kind
+    named_pipe && return :pipe
+    if Sys.iswindows()
+        return host == "." ? :pipe : :tcp
+    end
+    return host == "" || host == "localhost" ? :socket : :tcp
+end
+
+function require_tcp_transport(host::String, protocol; named_pipe::Bool=false)
+    transport = select_transport(host, protocol; named_pipe=named_pipe)
+    transport == :tcp && return nothing
+    transport == :socket && deferred_keyword(:unix_socket)
+    transport == :pipe && deferred_keyword(:named_pipe)
+    throw(ArgumentError("the `$transport` protocol is not available: the native backend currently supports TCP only"))
 end
 
 # ---- ssl conflict table ----
@@ -323,17 +351,15 @@ read), and resolves the ssl conflict table.
 function ConnectOptions(host::AbstractString, user::AbstractString, password::Union{Nothing, AbstractString}=nothing; kw...)
     kwd = Dict{Symbol, Any}(pairs(kw))
     check_keywords(kwd)
-    for (k, msg) in DEFERRED_KEYWORDS
-        v = get(kwd, k, nothing)
-        (v === nothing || v === false) || deferred_keyword(k)
-    end
     file = load_option_files(; option_file=get(kwd, :option_file, nothing), read_default_file=get(kwd, :read_default_file, nothing), option_group=get(kwd, :option_group, nothing), read_default_group=get(kwd, :read_default_group, nothing))
     pick(k, default) = haskey(kwd, k) && kwd[k] !== nothing ? kwd[k] : haskey(file, k) ? file[k] : default
-    protocol_is_tcp(pick(:protocol, nothing)) || throw(ArgumentError("only the TCP protocol is supported at the moment"))
-    haskey(file, :unix_socket) && delete!(file, :unix_socket)
     host_s = String(host)
     host_s == "" && haskey(file, :host) && (host_s = file[:host])
-    isempty(host_s) && throw(ArgumentError("an empty host selects a Unix socket in MySQL.jl 1.x; the native backend currently supports TCP hosts only"))
+    protocol = pick(:protocol, nothing)
+    named_pipe = get(kwd, :named_pipe, false)
+    named_pipe isa Bool || throw(ArgumentError("named_pipe must be Bool or nothing"))
+    require_tcp_transport(host_s, protocol; named_pipe=named_pipe)
+    isempty(host_s) && (host_s = "localhost")
     user_s = String(user)
     user_s == "" && haskey(file, :user) && (user_s = file[:user])
     pw = password === nothing ? (haskey(file, :password) ? file[:password] : nothing) : String(password)

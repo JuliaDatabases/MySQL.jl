@@ -6,10 +6,20 @@
     @test_throws ArgumentError N.ConnectOptions("h", "u"; compress=true)
     @test N.ConnectOptions("h", "u"; compress=false) isa N.ConnectOptions
     @test_logs (:warn, r"deprecated") N.ConnectOptions("h", "u"; data_truncation=true)
-    @test_throws ArgumentError N.ConnectOptions("h", "u"; unix_socket="/tmp/mysql.sock")
+    @test N.ConnectOptions("h", "u"; unix_socket="/tmp/mysql.sock").host == "h"
     @test_throws ArgumentError N.ConnectOptions("h", "u"; named_pipe=true)
     @test_throws ArgumentError N.ConnectOptions("h", "u"; protocol=:socket)
-    @test_throws ArgumentError N.ConnectOptions("", "u")
+    @test N.ConnectOptions("h", "u"; named_pipe=true, protocol=:tcp).host == "h"
+    if Sys.iswindows()
+        @test_throws ArgumentError N.ConnectOptions(".", "u")
+    else
+        @test_throws ArgumentError N.ConnectOptions("", "u")
+        @test_throws ArgumentError N.ConnectOptions("localhost", "u")
+        @test_throws ArgumentError N.ConnectOptions("localhost", "u"; protocol=:default)
+        @test_throws ArgumentError N.ConnectOptions("localhost", "u"; protocol=MySQL.API.MYSQL_PROTOCOL_DEFAULT)
+        @test N.ConnectOptions("", "u"; protocol=:tcp).host == "localhost"
+        @test N.ConnectOptions("localhost", "u"; protocol=:tcp).host == "localhost"
+    end
     @test N.ConnectOptions("h", "u"; protocol=:tcp).port == 3306
     @test N.ConnectOptions("h", "u"; protocol=MySQL.API.MYSQL_PROTOCOL_TCP).port == 3306
     @test_throws ArgumentError N.ConnectOptions("h", "u"; protocol=MySQL.API.MYSQL_PROTOCOL_SOCKET)
@@ -160,6 +170,14 @@ end
         write(socket_protocol, "[client]\nprotocol=socket\n")
         @test_throws ArgumentError N.ConnectOptions("h", "u"; option_file=socket_protocol)
         @test N.ConnectOptions("h", "u"; option_file=socket_protocol, protocol=:tcp).host == "h"
+        socket_path = joinpath(dir, "socket-path.cnf")
+        write(socket_path, "[client]\nhost=localhost\nsocket=/tmp/mysql-option.sock\n")
+        if Sys.iswindows()
+            @test N.ConnectOptions("", "u"; option_file=socket_path).host == "localhost"
+        else
+            @test_throws ArgumentError N.ConnectOptions("", "u"; option_file=socket_path)
+            @test N.ConnectOptions("", "u"; option_file=socket_path, protocol=:tcp).host == "localhost"
+        end
         # missing file is skipped; .mylogin.cnf is skipped with a warning
         @test N.ConnectOptions("h", "u"; option_file=joinpath(dir, "missing.cnf")).host == "h"
         login = joinpath(dir, ".mylogin.cnf")

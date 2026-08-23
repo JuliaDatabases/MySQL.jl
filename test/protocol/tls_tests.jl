@@ -132,7 +132,7 @@ end
         end
         # ssl_verify_server_cert=true ⇒ :verify_identity
         with_server(conn -> tls_peer_connect!(conn)) do port
-            h = native_connect(port; host="localhost", ssl_verify_server_cert=true, ssl_ca=certfile("ca.crt"))
+            h = native_connect(port; host="localhost", protocol=:tcp, ssl_verify_server_cert=true, ssl_ca=certfile("ca.crt"))
             @test P.is_secure_transport(h.session)
             N.close!(h)
         end
