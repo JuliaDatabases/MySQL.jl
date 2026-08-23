@@ -208,6 +208,22 @@ end
     end
 end
 
+@testset "invalid UTF-8 column metadata faults before Symbol conversion" begin
+    invalid_name = String(UInt8[0xFF])
+    invalid = coldef(invalid_name)
+    with_native(c -> begin
+        expect_query(c)
+        send_packet(c, 1, column_count(1))
+        try
+            send_packet(c, 2, invalid)
+        catch
+        end
+    end) do conn
+        @test_throws P.ProtocolError DBInterface.execute(conn, "SELECT invalid_name")
+        @test !isopen(conn)
+    end
+end
+
 @testset "text cursor: values, NULLs and the row-validity contract" begin
     rows = [text_row("-7", "18446744073709551615", "1.5", "12.345", "héllo", "\x00\x01", "\x01\x02", "2024-02-29 13:14:15.250500", "2024-02-29", "838:59:59", "2024"),
             text_row(nothing, nothing, nothing, nothing, nothing, nothing, nothing, nothing, nothing, nothing, nothing)]
