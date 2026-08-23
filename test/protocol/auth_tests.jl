@@ -33,6 +33,18 @@ const POLICY_TLS_VERIFIED = P.AuthPolicy(; secure_transport=true, identity_verif
         @test P.nonce_masked_password(UInt8[0x41], UInt8[0x01, 0x02]) == UInt8[0x40, 0x02]
         @test P.cleartext_password(PW) == vcat(PW, 0x00)
         @test P.strip_nonce(vcat(NONCE, 0x00)) == NONCE && P.strip_nonce(NONCE) == NONCE
+        captured = Ref{Vector{UInt8}}()
+        result = P.secret_hash_concat(UInt8[0x01], UInt8[0x02]) do input
+            captured[] = input
+            return copy(input)
+        end
+        @test result == UInt8[0x01, 0x02]
+        @test captured[] == zeros(UInt8, 2)
+        @test_throws ErrorException P.secret_hash_concat(UInt8[0x03], UInt8[0x04]) do input
+            captured[] = input
+            error("injected digest failure")
+        end
+        @test captured[] == zeros(UInt8, 2)
     end
 
     @testset "plugin registry and selection" begin

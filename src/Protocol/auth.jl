@@ -68,6 +68,29 @@ function xor_bytes!(a::Vector{UInt8}, b::AbstractVector{UInt8})
     return a
 end
 
+function secret_concat(a::AbstractVector{UInt8}, b::AbstractVector{UInt8})
+    out = Vector{UInt8}(undef, length(a) + length(b))
+    copyto!(out, 1, a, firstindex(a), length(a))
+    copyto!(out, length(a) + 1, b, firstindex(b), length(b))
+    return out
+end
+
+function secret_hash_concat(hash::F, a::AbstractVector{UInt8}, b::AbstractVector{UInt8}) where {F}
+    input = secret_concat(a, b)
+    try
+        return hash(input)
+    finally
+        securezero!(input)
+    end
+end
+
+function nul_terminated_password(password::AbstractVector{UInt8})
+    out = Vector{UInt8}(undef, length(password) + 1)
+    copyto!(out, 1, password, firstindex(password), length(password))
+    out[end] = 0x00
+    return out
+end
+
 """
     native_scramble(password, nonce) -> 20 bytes
 
@@ -77,13 +100,20 @@ function native_scramble(password::AbstractVector{UInt8}, nonce::AbstractVector{
     isempty(password) && return UInt8[]
     length(nonce) == SCRAMBLE_LENGTH || throw(AuthError("mysql_native_password needs a $SCRAMBLE_LENGTH-byte nonce, got $(length(nonce))"))
     stage1 = SHA.sha1(password)
-    stage2 = SHA.sha1(stage1)
-    mixed = SHA.sha1(vcat(Vector{UInt8}(nonce), stage2))
     try
-        return xor_bytes!(stage1, mixed)
+        stage2 = SHA.sha1(stage1)
+        try
+            mixed = secret_hash_concat(SHA.sha1, nonce, stage2)
+            try
+                return xor_bytes!(copy(stage1), mixed)
+            finally
+                securezero!(mixed)
+            end
+        finally
+            securezero!(stage2)
+        end
     finally
-        securezero!(stage2)
-        securezero!(mixed)
+        securezero!(stage1)
     end
 end
 
@@ -96,20 +126,27 @@ function caching_sha2_scramble(password::AbstractVector{UInt8}, nonce::AbstractV
     isempty(password) && return UInt8[]
     length(nonce) == SCRAMBLE_LENGTH || throw(AuthError("caching_sha2_password needs a $SCRAMBLE_LENGTH-byte nonce, got $(length(nonce))"))
     stage1 = SHA.sha256(password)
-    stage2 = SHA.sha256(stage1)
-    mixed = SHA.sha256(vcat(stage2, Vector{UInt8}(nonce)))
     try
-        return xor_bytes!(stage1, mixed)
+        stage2 = SHA.sha256(stage1)
+        try
+            mixed = secret_hash_concat(SHA.sha256, stage2, nonce)
+            try
+                return xor_bytes!(copy(stage1), mixed)
+            finally
+                securezero!(mixed)
+            end
+        finally
+            securezero!(stage2)
+        end
     finally
-        securezero!(stage2)
-        securezero!(mixed)
+        securezero!(stage1)
     end
 end
 
 # password ‖ NUL, XORed with the nonce cycled over the length.
 function nonce_masked_password(password::AbstractVector{UInt8}, nonce::AbstractVector{UInt8})
     isempty(nonce) && throw(AuthError("RSA password exchange needs a non-empty nonce"))
-    plain = vcat(Vector{UInt8}(password), UInt8[0x00])
+    plain = nul_terminated_password(password)
     n = length(nonce)
     @inbounds for i in eachindex(plain)
         plain[i] ⊻= nonce[mod1(i, n)]
@@ -132,7 +169,7 @@ function rsa_encrypt_password(password::AbstractVector{UInt8}, nonce::AbstractVe
     end
 end
 
-cleartext_password(password::AbstractVector{UInt8}) = return vcat(Vector{UInt8}(password), UInt8[0x00])
+cleartext_password(password::AbstractVector{UInt8}) = return nul_terminated_password(password)
 
 # ---- policy ----
 
