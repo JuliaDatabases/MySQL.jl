@@ -264,18 +264,18 @@ source are never read.
   and the membership hash cost ~15% of a 1M-row scan. Coverage recording and the
   transition log are preserved.
 - **§8.9 measurements** (Chairmarks; mysql:8.4 in Docker, Apple Silicon host, quiet run):
-  text scan 0.98×, binary (prepared) scan 1.09×, tiny/NULL scan 0.93×, 10k round trips
-  plain 0.75× / TLS 1.00×, 100k `executemany` 0.80×, 64 MiB blob 0.86× of Connector/C —
-  all gates met. **Round-trip-bound gates sit near a transport latency floor**: bare
-  COM_PING — identical bytes, no protocol-layer work — measures ~165 µs/rt native vs
-  ~130 µs/rt Connector/C, because Reseau's event-loop read wake adds a fixed latency over
-  a blocking `recv`; on a loaded host even a zero-overhead client can miss 0.75× on that
-  floor (an earlier loaded run measured `executemany` at 0.68× with a 35 µs/rt ping gap
-  explaining the whole shortfall). When a round-trip-bound gate misses its raw ratio, the
-  harness measures the COM_PING floor of both backends, asserts the protocol-layer cost
-  net of the floor difference, and records the raw ratio as an explicit `@test_skip`
-  (never a fake pass). Closing the floor gap needs a Reseau-level read-wake improvement
-  (spin-before-park or same-thread poll). **Under `Pkg.test` the timing gates run in a
+  text scan 1.18×, binary (prepared) scan 1.05×, tiny/NULL scan 1.17×, 10k round trips
+  plain 0.96× / TLS 0.92×, 100k `executemany` 0.85×, 64 MiB blob 0.98× of Connector/C;
+  allocations per native row are 2/2/1 at gates 2/2/1. All raw gates met. Plain gates run
+  against a server started with `--tls-version=` and assert an empty session `Ssl_cipher`
+  for both clients. The TLS round-trip gate uses a second server and asserts a nonempty
+  cipher for both. This is necessary because MariaDB Connector/C 3.4 cannot force
+  `SSL_MODE_DISABLED`. **Round-trip-bound gates sit near a transport latency floor.** If a
+  raw ratio misses, the harness measures five samples of 2,000 end-to-end COM_PING commands
+  on each backend. COM_PING uses identical wire bytes but includes each client's minimal
+  command wrapper, so the adjusted assertion is diagnostic evidence, not a replacement
+  pass: the raw miss is recorded as `@test_skip`. The adjusted cost must remain nonnegative
+  and meet the ratio. **Under `Pkg.test` the timing ratios run in a
   child process with `--check-bounds=auto`**: Pkg.test forces `--check-bounds=yes`, which
   slows the pure-Julia backend 2–3× on byte-heavy paths (64 MiB blob fetch 64 ms → 147 ms
   measured) while Connector/C's C code is untouched — a rigged race, not production
@@ -285,8 +285,9 @@ source are never read.
   connections all return `Prepared_stmt_count`/`Threads_connected` to baseline with the
   reaper queue empty, weak refs cleared, fds and RSS stable; finalizers provably park
   without I/O (server-side counts cannot move without a command on the owning
-  connection); a parked statement never disturbs the active streaming cursor; a read
-  deadline closes the connection deterministically.
+  connection); a statement preserved through the first streaming row, then finalized late,
+  is only parked and cannot disturb that active cursor; a read deadline closes the
+  connection deterministically.
 - **Deferred (not faked)**: Windows named-pipe lane (§8.12, needs a Windows runner);
   external interop matrix ProxySQL/TiDB/Vitess/Aurora (§8.5, needs those servers);
   MYSQL_TYPE_VECTOR classic framing (undocumented); server cursors / COM_STMT_FETCH /
