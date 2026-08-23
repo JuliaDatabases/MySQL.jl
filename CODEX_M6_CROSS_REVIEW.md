@@ -4,7 +4,7 @@ Review date: 2026-08-23
 
 Reviewed range: `origin/main..native-m3`, starting from review head
 `20ed4edf59c7f5424f8d7dc794bbea911ba195a3`. The code fixes end at
-`e93a9a7cdd1d7887c7f67cdb7b2f687e0bf8ede5`.
+`95b582da8f8cf0b800204d60514591b71d68290c`.
 
 I reviewed the full branch against `MySQL-native-protocol-plan.md`,
 `docs/src/migration.md`, `docs/protocol-notes.md`, the earlier M3/M4 reviews, and
@@ -44,14 +44,15 @@ surfaces. I also rechecked the two prior adversarial-fix rounds.
 | 26 | High | `src/Native/statement.jl:164` | Re-prepare could reduce the parameter count and then replay retained long data for a parameter that no longer existed. Invalid retained chunks are now discarded before replay and execution fails locally. (`981a40b`) | `test/protocol/binary_tests.jl:944` simulates a two-parameter statement becoming one parameter and verifies recovery. |
 | 27 | High | `src/Native/connect.jl:165`, `src/Native/connect.jl:202` | `init_command` used generic draining for later `LOCAL INFILE` results. It sent an empty upload instead of invoking the configured handler. Init processing now uses the normal bounded upload handler for every result. (`5b3f552`) | `test/protocol/tls_tests.jl:299` verifies a later init result requests and receives the handler payload. |
 | 28 | High | `src/Protocol/columns.jl:35` | Invalid UTF-8 in a column name reached `Symbol(col.name)` and escaped as `InvalidCharError`, outside the malformed-stream contract. All six string fields in a column definition are now validated before native metadata use. (`e93a9a7`) | `test/protocol/cursor_tests.jl:211` sends an invalid name and verifies `ProtocolError` plus connection fault. |
+| 29 | Medium | `test/runtests.jl:36`, `test/runtests.jl:126` | The recent CI policy set `MYSQL_PERF_GATES=0` and skipped the entire Docker §8.9 block, although the contract disabled only unstable timing ratios. Correctness, limit, and allocation gates now always run when Docker is available; the setting controls only timing. (`95b582d`) | `test/runtests.jl:110` covers CI default, explicit timing opt-in, local default, and no-Docker plans. The final full run executed every recovered gate. |
 
 ## Validation
 
 - Baseline before review fixes:
   - Serverless, Julia 1.12, 4 threads: 1443/1443.
   - Serverless, Julia 1.12, 1 thread: 1443/1443.
-- Final serverless suite at code head `e93a9a7`:
-  - `julia --project=. -t 4 --startup-file=no -e 'include("test/protocol/runtests.jl")'`: 1515/1515 in 1m14.6s.
+- Final serverless suite at code head `95b582d`:
+  - `julia --project=. -t 4 --startup-file=no -e 'include("test/protocol/runtests.jl")'`: 1515/1515 in 1m18.2s.
   - `julia --project=. -t 1 --startup-file=no -e 'include("test/protocol/runtests.jl")'`: 1515/1515 in 1m21.1s.
   - Julia 1.10.11 clean compatibility environment: 1515/1515 in 57.9s.
 - Malformed-stream fuzzing:
@@ -60,9 +61,11 @@ surfaces. I also rechecked the two prior adversarial-fix rounds.
   - Native line coverage: 2719/2787 executable lines, 97.56%.
   - Clean-room scan: 28 source files, zero forbidden references.
 - Full gate:
-  - `CI=true julia --project=. --startup-file=no -e 'using Pkg; Pkg.test()'`: 2020/2020 in 3m13.2s with `--check-bounds=yes`.
+  - `CI=true julia --project=. --startup-file=no -e 'using Pkg; Pkg.test()'`: 2045/2045 in 4m29.0s with `--check-bounds=yes`.
   - The full gate ran native live lanes on `mysql:8.4` and `mariadb:11.4`, the two-backend compatibility manifest, the lifecycle soak, and the stable Connector/C tests.
-  - CI intentionally skipped only the timing-ratio performance gate. Its correctness and allocation smoke coverage remains in the serverless/full suites and the dedicated perf job.
+  - The same run executed the 1M-row text, binary, and tiny/NULL correctness and allocation gates, 100k `executemany`, the 64 MiB blob gate, and the >256 MiB streaming/buffer-limit gates.
+  - Allocation results were 2.000 per row for text, 2.000 per row for binary, and 1.000 per row for tiny/NULL, at their respective limits of 2, 2, and 1.
+  - CI intentionally skipped only the timing ratios. The dedicated perf job runs those ratios with production bounds semantics.
 - Manual compatibility check during review:
   - MySQL 8.4: 70/70 surface assertions plus all existing value rows passed against both the native and Connector/C backends.
 - Repository checks:
