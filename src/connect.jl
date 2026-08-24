@@ -18,13 +18,14 @@ end
 
 Base.isopen(h::Handle) = return isopen(h.session)
 
-function finalize_handle(h::Handle)
+@noinline function finalize_handle(h::Handle)
     enqueue_from_finalizer!(h.entry) || trim_finalizer!(finalize_handle, h)
     return nothing
 end
 
 function register!(h::Handle)
     ensure_reaper!()
+    TRIM_CALL_EDGE[] && finalize_handle(h)
     trim_finalizer!(finalize_handle, h)
     return h
 end
@@ -63,20 +64,28 @@ function apply_deadline!(t::P.Transport, deadline::Int64)
     return nothing
 end
 
-# A named functor (not a closure) runs the resolver on its own task, so a `juliac --trim`
-# build can compile the task body (registered as an entrypoint in MySQL.jl).
+# A concrete channel element (tuple types are covariant, so `Tuple{Bool, Any}` is abstract
+# and a `put!` with it cannot be statically resolved by `--trim`).
+struct BindResolveOutcome
+    ok::Bool
+    value::Any
+end
+
+# A named functor (not a closure) runs the resolver on its own task; `resolve_bind` gives
+# `--trim` a static call edge to this `@noinline` body so its specialization is emitted.
 struct BindResolve{F}
     resolver::F
     address::String
-    result::Channel{Tuple{Bool, Any}}
+    result::Channel{BindResolveOutcome}
 end
 
-function (t::BindResolve)()
-    try
-        put!(t.result, (true, t.resolver("tcp", t.address)))
+@noinline function (t::BindResolve)()
+    outcome = try
+        BindResolveOutcome(true, t.resolver("tcp", t.address))
     catch err
-        put!(t.result, (false, err))
+        BindResolveOutcome(false, err)
     end
+    put!(t.result, outcome)
     return nothing
 end
 
@@ -89,8 +98,10 @@ function resolve_bind(
     address = hostport(bind, 0)
     deadline == 0 && return resolver("tcp", address)::Reseau.HostResolvers.ResolvedConnectAddrs
     timeout_message = "connect_timeout expired while resolving bind address $bind"
-    result = Channel{Tuple{Bool, Any}}(1)
-    task = Task(BindResolve(resolver, address, result))
+    result = Channel{BindResolveOutcome}(1)
+    work = BindResolve(resolver, address, result)
+    TRIM_CALL_EDGE[] && work()
+    task = Task(work)
     task.sticky = false
     errormonitor(task)
     schedule(task)
@@ -101,10 +112,10 @@ function resolve_bind(
     if status === :timed_out && !isready(result)
         throw(P.TimeoutError(timeout_message))
     end
-    ok, value = take!(result)
+    outcome = take!(result)
     wait(task)
-    ok || throw(value)
-    return value::Reseau.HostResolvers.ResolvedConnectAddrs
+    outcome.ok || throw(outcome.value)
+    return outcome.value::Reseau.HostResolvers.ResolvedConnectAddrs
 end
 
 function dial_one(address::String, deadline::Int64, local_addr)

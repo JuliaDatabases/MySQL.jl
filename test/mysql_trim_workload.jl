@@ -217,9 +217,9 @@ function check(cond::Bool, what::String)::Nothing
 end
 
 function run_workload(port::Int)::Nothing
-    # no connect_timeout: Reseau's deadline-armed dial waits on timer machinery that a
-    # trimmed build does not carry (its own trim suite only exercises pre-expired
-    # deadlines); the scripted loopback peer answers immediately anyway
+    # no connect_timeout: Reseau <= 1.4.1's deadline-armed dial parks on tasks a trimmed
+    # build never ran (fixed in Reseau#151); the scripted loopback peer answers immediately
+    # anyway — re-add once the fixed Reseau is released
     conn = DBInterface.connect(MySQL.Connection, "127.0.0.1", "root", "secret"; port=port, ssl_mode=:disabled)
     try
         check(isopen(conn)::Bool, "connection is open")
@@ -289,19 +289,46 @@ const SERVER_LISTENER = Ref{Union{Nothing, TCP.Listener}}(nothing)
 const SERVER_ERROR = Ref{Any}(nothing)
 
 function server_task_entry()::Nothing
-    conn = nothing
     try
-        conn = TCP.accept(SERVER_LISTENER[]::TCP.Listener)
-        serve_connection!(conn)
-    catch err
-        SERVER_ERROR[] = err
-    finally
-        conn === nothing || close(conn)
+        while true
+            conn = TCP.accept(SERVER_LISTENER[]::TCP.Listener)
+            try
+                serve_connection!(conn)
+            catch err
+                SERVER_ERROR[] === nothing && (SERVER_ERROR[] = err)
+            finally
+                close(conn)
+            end
+        end
+    catch
+        # closed listener ends the accept loop
     end
     return nothing
 end
 
 Base.Experimental.entrypoint(server_task_entry, ())
+
+# Opened in its own @noinline function so no stack slot roots the connection: the GC must
+# be able to collect it, driving finalizer -> reaper queue -> timer-woken reap.
+@noinline function abandon_connection(port::Int)::Nothing
+    conn = DBInterface.connect(MySQL.Connection, "127.0.0.1", "root", "secret"; port=port, ssl_mode=:disabled)
+    check(MySQL.ping(conn), "abandoned-connection ping")
+    return nothing
+end
+
+function exercise_reaper(port::Int)::Nothing
+    closed_before = MySQL.REAPER_STATS[].closed
+    abandon_connection(port)
+    GC.gc()
+    GC.gc()
+    t0 = time_ns()
+    while MySQL.REAPER_STATS[].closed == closed_before && time_ns() - t0 < Int64(5_000_000_000)
+        yield()
+    end
+    check(MySQL.REAPER_STATS[].closed > closed_before, "reaper closed the abandoned transport")
+    check(MySQL.pending_reaps() == 0, "reaper queue drained")
+    return nothing
+end
 
 function run_trim_workload()::Nothing
     listener = TCP.listen(TCP.loopback_addr(0))
@@ -313,6 +340,7 @@ function run_trim_workload()::Nothing
     schedule(server_task)
     try
         run_workload(port)
+        exercise_reaper(port)
     finally
         close(listener)
         wait(server_task)

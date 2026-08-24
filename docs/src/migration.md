@@ -158,9 +158,11 @@ schema-aware sinks make. The runtime-schema conveniences (`Tables.columntable`, 
 `row.name` access, `MySQL.load`) build columns from runtime `Type` values and are not
 statically resolvable; use them from regular Julia. A custom `local_infile_handler` (and
 the `IO` it returns) is dispatched dynamically and works in a trimmed binary only if its
-methods were compiled in. Avoid `connect_timeout`/`read_timeout`/`write_timeout` in trimmed
-executables for now: Reseau's deadline-armed waits depend on timer machinery that a trimmed
-build does not currently carry.
+methods were compiled in. `read_timeout`/`write_timeout` work in trimmed executables (the
+trim workload exercises armed deadlines, including abandoned-connection reaping);
+`connect_timeout` hangs with Reseau ≤ 1.4.1 — its deadline-armed dial parked on tasks a
+trimmed build never ran, fixed in
+[Reseau #151](https://github.com/JuliaServices/Reseau.jl/pull/151).
 
 ## Security: what `ssl_mode=:preferred` does and does not give you
 

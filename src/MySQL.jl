@@ -34,16 +34,4 @@ include("cursor.jl")
 include("statement.jl")
 include("load.jl")
 
-# `juliac --trim` compiles only code reachable from registered entrypoints. Runtime-invoked
-# callbacks — the reaper's timer tick and atexit hook, GC finalizers, and the bind-resolver
-# task — are dispatched dynamically at run time, so their specializations are registered
-# explicitly (a no-op cost outside juliac builds).
-@static if isdefined(Base.Experimental, :entrypoint)
-    Base.Experimental.entrypoint(reaper_tick, (Timer,))
-    Base.Experimental.entrypoint(reaper_atexit, ())
-    Base.Experimental.entrypoint(finalize_handle, (Handle,))
-    Base.Experimental.entrypoint(finalize_statement, (Statement,))
-    Base.Experimental.entrypoint(Tuple{BindResolve{typeof(Reseau.HostResolvers.resolve_tcp_addrs)}})
-end
-
 end # module

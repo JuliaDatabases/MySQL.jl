@@ -103,6 +103,7 @@ function DBInterface.prepare(conn::Connection, sql::AbstractString; mysql_date_a
             false,
             StatementReapEntry(ok.statement_id, generation, nothing, false),
         )
+        TRIM_CALL_EDGE[] && finalize_statement(stmt)
         trim_finalizer!(finalize_statement, stmt)
         return stmt
     end
@@ -382,7 +383,7 @@ function DBInterface.close!(stmt::Statement)
     return nothing
 end
 
-function finalize_statement(stmt::Statement)
+@noinline function finalize_statement(stmt::Statement)
     stmt.closed && return nothing
     conn = stmt.conn
     (@atomic conn.statement_reaping_open) || return nothing

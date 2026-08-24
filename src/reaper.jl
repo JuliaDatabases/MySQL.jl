@@ -13,6 +13,14 @@
 # concrete argument types at every call site.
 trim_finalizer!(f::F, o::T) where {F, T} = return (ccall(:jl_gc_add_finalizer_th, Cvoid, (Ptr{Cvoid}, Any, Any), Core.getptls(), o, f); nothing)
 
+# Never true at run time, but not foldable at compile time. Runtime-invoked callbacks —
+# finalizers, timer/atexit hooks, task bodies — are dispatched dynamically, which
+# `juliac --trim` does not trace; guarding a direct call on this gives the compiler a
+# static call edge so the standalone specialization is emitted into trimmed executables.
+# (The callees are `@noinline` so the edge survives as a real call; entrypoint
+# registrations made from package top level or `__init__` never reach the juliac driver.)
+const TRIM_CALL_EDGE = Ref(false)
+
 mutable struct ReapEntry
     @atomic state::Symbol          # :live → :pending → :closing → :closed
     transport::Union{Nothing, P.Transport}
@@ -96,7 +104,15 @@ function reap_now!()
         end
         entry = next
     end
-    n > 0 && lock(() -> (REAPER_STATS[] = (enqueued=REAPER_STATS[].enqueued, closed=REAPER_STATS[].closed + n)), REAPER_LOCK)
+    if n > 0
+        # explicit lock/unlock: a closure would box `n` (and allocate under the SpinLock)
+        lock(REAPER_LOCK)
+        try
+            REAPER_STATS[] = (enqueued=REAPER_STATS[].enqueued, closed=REAPER_STATS[].closed + n)
+        finally
+            unlock(REAPER_LOCK)
+        end
+    end
     return n
 end
 
@@ -104,19 +120,29 @@ pending_reaps() = return lock(() -> REAPER_QUEUE_LENGTH[], REAPER_LOCK)
 
 const REAPER_SETUP_LOCK = ReentrantLock()
 
-# Named functions (not closures) so a `juliac --trim` build can compile them: runtime
-# callbacks (timer ticks, atexit hooks) are invoked dynamically, and their specializations
-# are registered as entrypoints in MySQL.jl.
-function reaper_tick(::Timer)
-    try
-        reap_now!()
-    catch err
-        @warn "MySQL reaper failed" exception=(err, catch_backtrace()) maxlog=10
+# The reaper runs as a named task that *waits* on a plain repeating `Timer` rather than a
+# `Timer(callback)`: Base dispatches timer callbacks from an internal closure task, which
+# a trimmed executable cannot run, while `wait(::Timer)` is woken from the event loop's C
+# side. The task body and the atexit hook are `@noinline` with static call edges below.
+@noinline function reaper_loop()
+    t = REAPER_TIMER[]
+    t === nothing && return nothing
+    while isopen(t)
+        try
+            wait(t)
+        catch
+            break   # timer closed
+        end
+        try
+            reap_now!()
+        catch err
+            @warn "MySQL reaper failed" exception=(err, catch_backtrace()) maxlog=10
+        end
     end
     return nothing
 end
 
-reaper_atexit() = return (try; reap_now!(); catch; end; nothing)
+@noinline reaper_atexit() = return (try; reap_now!(); catch; end; nothing)
 
 # Starts the timer once. A ReentrantLock (not the finalizer-safe spinlock) because creating a
 # Timer and registering the atexit hook may yield.
@@ -124,7 +150,13 @@ function ensure_reaper!()
     lock(REAPER_SETUP_LOCK)
     try
         REAPER_TIMER[] === nothing || return nothing
-        REAPER_TIMER[] = Timer(reaper_tick, REAPER_INTERVAL_S; interval=REAPER_INTERVAL_S)
+        REAPER_TIMER[] = Timer(REAPER_INTERVAL_S; interval=REAPER_INTERVAL_S)
+        if TRIM_CALL_EDGE[]
+            reaper_loop()
+            reaper_atexit()
+        end
+        task = Task(reaper_loop)
+        schedule(task)
         atexit(reaper_atexit)
     finally
         unlock(REAPER_SETUP_LOCK)
