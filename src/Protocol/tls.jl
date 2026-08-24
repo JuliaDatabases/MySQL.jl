@@ -14,12 +14,22 @@ confidentiality against passive observers and no protection against an active MI
 
 const SSL_MODE_NAMES = Dict{Symbol, SSLMode}(:disabled => SSL_DISABLED, :preferred => SSL_PREFERRED, :required => SSL_REQUIRED, :verify_ca => SSL_VERIFY_CA, :verify_identity => SSL_VERIFY_IDENTITY)
 
-function ssl_mode(x)
-    x isa SSLMode && return x
-    sym = x isa Symbol ? x : Symbol(replace(lowercase(string(x)), "-" => "_", "ssl_mode_" => ""))
+@noinline unknown_ssl_mode(sym::Symbol) = return throw(ArgumentError("unknown ssl_mode :$sym; expected one of :disabled, :preferred, :required, :verify_ca, :verify_identity"))
+
+function ssl_mode_named(sym::Symbol)::SSLMode
     return get(SSL_MODE_NAMES, sym) do
-        throw(ArgumentError("unknown ssl_mode $(repr(x)); expected one of :disabled, :preferred, :required, :verify_ca, :verify_identity"))
+        unknown_ssl_mode(sym)
     end
+end
+
+ssl_mode_string(str::String)::SSLMode = return ssl_mode_named(Symbol(replace(lowercase(str), "-" => "_", "ssl_mode_" => "")))
+
+@inline function ssl_mode(x)::SSLMode
+    x isa SSLMode && return x
+    x isa Symbol && return ssl_mode_named(x)
+    x isa String && return ssl_mode_string(x)
+    x isa SubString{String} && return ssl_mode_string(String(x))
+    throw(ArgumentError("ssl_mode must be a Symbol or String naming one of :disabled, :preferred, :required, :verify_ca, :verify_identity"))
 end
 
 """
@@ -58,10 +68,33 @@ function tls_server_name(opts::TLSOptions, host::AbstractString)
     return nothing
 end
 
+# Reseau's `Config` constructors take `Union{Nothing, ...}` arguments, and a call whose
+# arguments are still unions is not statically resolvable under `--trim=safe`. The nested
+# `=== nothing` branches below narrow each optional (SNI name, the client cert/key pair,
+# the CA file) to a concrete type before the one positional `Config` call in each leaf.
+@inline function tls_config_leaf(sn::Union{Nothing, String}, vp::Bool, vh::Bool, cf::Union{Nothing, String}, kf::Union{Nothing, String}, caf::Union{Nothing, String}, hs::Int64, minv::UInt16, maxv::UInt16)
+    return Reseau.TLS.Config(sn, vp, vh, Reseau.TLS.ClientAuthMode.NoClientCert, cf, kf, caf, nothing, String[], UInt16[], hs, minv, maxv, false)
+end
+
+@inline function tls_config_ca(sn, vp::Bool, vh::Bool, cf, kf, caf::Union{Nothing, String}, hs::Int64, minv::UInt16, maxv::UInt16)
+    caf === nothing && return tls_config_leaf(sn, vp, vh, cf, kf, nothing, hs, minv, maxv)
+    return tls_config_leaf(sn, vp, vh, cf, kf, caf, hs, minv, maxv)
+end
+
+@inline function tls_config_cert(sn, vp::Bool, vh::Bool, cf::Union{Nothing, String}, kf::Union{Nothing, String}, caf, hs::Int64, minv::UInt16, maxv::UInt16)
+    (cf === nothing || kf === nothing) && return tls_config_ca(sn, vp, vh, nothing, nothing, caf, hs, minv, maxv)
+    return tls_config_ca(sn, vp, vh, cf, kf, caf, hs, minv, maxv)
+end
+
 function tls_config(opts::TLSOptions, host::AbstractString, handshake_timeout_ns::Integer)
     verify_peer = opts.mode == SSL_VERIFY_CA || opts.mode == SSL_VERIFY_IDENTITY
     verify_hostname = opts.mode == SSL_VERIFY_IDENTITY
-    return Reseau.TLS.Config(; server_name=tls_server_name(opts, host), verify_peer=verify_peer, verify_hostname=verify_hostname, cert_file=opts.cert_file, key_file=opts.key_file, ca_file=opts.ca_file, handshake_timeout_ns=max(Int64(0), Int64(handshake_timeout_ns)), min_version=opts.min_version === nothing ? Reseau.TLS.TLS1_2_VERSION : opts.min_version, max_version=opts.max_version)
+    sn = tls_server_name(opts, host)
+    hs = max(Int64(0), Int64(handshake_timeout_ns))
+    minv = opts.min_version === nothing ? Reseau.TLS.TLS1_2_VERSION : opts.min_version
+    maxv = opts.max_version === nothing ? Reseau.TLS.TLS1_3_VERSION : opts.max_version
+    sn === nothing && return tls_config_cert(nothing, verify_peer, verify_hostname, opts.cert_file, opts.key_file, opts.ca_file, hs, minv, maxv)
+    return tls_config_cert(sn, verify_peer, verify_hostname, opts.cert_file, opts.key_file, opts.ca_file, hs, minv, maxv)
 end
 
 raw_tcp(t::Reseau.TCP.Conn) = return t
@@ -127,7 +160,7 @@ function starttls!(s::Session, opts::TLSOptions, host::AbstractString; handshake
     return true
 end
 
-function tls_failure(err)
+@inline function tls_failure(err)
     err isa Reseau.TLS.TLSHandshakeTimeoutError && return Reseau.IOPoll.DeadlineExceededError()
     is_deadline_error(err) && return err
     (err isa Reseau.TLS.TLSError && is_deadline_error(err.cause)) && return err.cause

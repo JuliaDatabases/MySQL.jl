@@ -1,6 +1,6 @@
 # Binary-protocol value codecs. Decoding maps a prepared-statement result value (a content
 # window produced by `Protocol.scan_binary_row!`) to the same Julia type the text path
-# produces (`Native.juliatype`), preserving the 1.x prepared-statement observable behaviour
+# produces (`MySQL.juliatype`), preserving the 1.x prepared-statement observable behaviour
 # except where §4.2 marks a Fix (BIT big-endian, TIME range/days/sign, unified zero-date
 # policy). Encoding serialises a bound parameter to its wire `(type, unsigned)` and value
 # bytes for `COM_STMT_EXECUTE`, mirroring the 1.x `mysqltype`/`bind!` mapping.
@@ -57,7 +57,7 @@ end
 decode_binary_value(::Type{String}, buf::Vector{UInt8}, pos::Int, len::Int, opts::ResultOptions) = return decode_value(String, buf, pos, len, opts)
 decode_binary_value(::Type{Vector{UInt8}}, buf::Vector{UInt8}, pos::Int, len::Int, opts::ResultOptions) = return decode_value(Vector{UInt8}, buf, pos, len, opts)
 decode_binary_value(::Type{Dec64}, buf::Vector{UInt8}, pos::Int, len::Int, opts::ResultOptions) = return decode_value(Dec64, buf, pos, len, opts)
-decode_binary_value(::Type{API.Bit}, buf::Vector{UInt8}, pos::Int, len::Int, opts::ResultOptions) = return decode_value(API.Bit, buf, pos, len, opts)
+decode_binary_value(::Type{Bit}, buf::Vector{UInt8}, pos::Int, len::Int, opts::ResultOptions) = return decode_value(Bit, buf, pos, len, opts)
 
 function decode_binary_value(::Type{T}, buf::Vector{UInt8}, pos::Int, len::Int, ::ResultOptions) where {T <: Base.BitInteger}
     u = read_le_uint(buf, pos, min(len, sizeof(T)))
@@ -143,7 +143,7 @@ function decode_binary_value(::Type{DateTime}, buf::Vector{UInt8}, pos::Int, len
     micros < 1_000_000 || conversion_error(DateTime, buf, pos, len)
     # Preserve 1.x prepared-statement behaviour: sub-millisecond precision warns and then
     # truncates to milliseconds (the text path warns and fails; both mirror `MYSQL_TIME`).
-    micros % 1000 == 0 || API.dateandtime_warning()
+    micros % 1000 == 0 || dateandtime_warning()
     Dates.validargs(DateTime, y, mo, d, h, mi, s, micros ÷ 1000) === nothing || conversion_error(DateTime, buf, pos, len)
     return DateTime(y, mo, d, h, mi, s, micros ÷ 1000)
 end
@@ -191,7 +191,7 @@ param_type(::UInt64) = return (P.MYSQL_TYPE_LONGLONG, true)
 param_type(::Float32) = return (P.MYSQL_TYPE_FLOAT, false)
 param_type(::Float64) = return (P.MYSQL_TYPE_DOUBLE, false)
 param_type(::DecFP.DecimalFloatingPoint) = return (P.MYSQL_TYPE_STRING, false)
-param_type(::API.Bit) = return (P.MYSQL_TYPE_BLOB, false)
+param_type(::Bit) = return (P.MYSQL_TYPE_BLOB, false)
 param_type(::Vector{UInt8}) = return (P.MYSQL_TYPE_BLOB, false)
 param_type(::DateAndTime) = return (P.MYSQL_TYPE_DATETIME, false)
 param_type(::DateTime) = return (P.MYSQL_TYPE_TIMESTAMP, false)
@@ -214,9 +214,9 @@ encode_param_value!(buf::Vector{UInt8}, x::Float64) = return (P.write_u64!(buf, 
 encode_param_value!(buf::Vector{UInt8}, x::AbstractString) = return (P.write_lenenc_string!(buf, String(x)); nothing)
 encode_param_value!(buf::Vector{UInt8}, x::Vector{UInt8}) = return (P.write_lenenc_bytes!(buf, x); nothing)
 # A BIT parameter is the big-endian binary string of its value (no leading zero bytes, at
-# least one byte), matching the native big-endian BIT *decode*. (`API.bitvalue`, used by the
-# Connector/C backend, is a separate 1.x-compatible little-endian encoding.)
-function bit_param_bytes(x::API.Bit)
+# least one byte), matching the big-endian BIT *decode*. (Connector/C's 1.x `bitvalue`
+# encoding was little-endian; documented as a Fix in the migration guide.)
+function bit_param_bytes(x::Bit)
     v = x.bits
     n = max(1, cld(64 - leading_zeros(v), 8))
     bytes = Vector{UInt8}(undef, n)
@@ -226,7 +226,7 @@ function bit_param_bytes(x::API.Bit)
     end
     return bytes
 end
-encode_param_value!(buf::Vector{UInt8}, x::API.Bit) = return (P.write_lenenc_bytes!(buf, bit_param_bytes(x)); nothing)
+encode_param_value!(buf::Vector{UInt8}, x::Bit) = return (P.write_lenenc_bytes!(buf, bit_param_bytes(x)); nothing)
 encode_param_value!(buf::Vector{UInt8}, x::DecFP.DecimalFloatingPoint) = return (P.write_lenenc_string!(buf, string(x)); nothing)
 
 function encode_param_value!(buf::Vector{UInt8}, x::Date)

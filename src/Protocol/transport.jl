@@ -3,7 +3,7 @@
 # `Sockets` dependency.
 
 """
-    FaultTransport(inner; fail_read_at=-1, fail_write_at=-1, read_error, write_error, after_write_error=nothing)
+    FaultTransport(inner; fail_read_at=-1, fail_write_at=-1, read_error, write_error, after_write_error=nothing, discard_writes=false)
 
 Test-only transport wrapper that injects faults at byte offsets:
 
@@ -13,11 +13,13 @@ Test-only transport wrapper that injects faults at byte offsets:
   first writes the bytes up to `n` (a short write), then throws `write_error`
 - `after_write_error`: thrown *after* a write completed in full — models an interruption
   between a successful send and the state advancement that follows it
+- `discard_writes`: writes are counted but never forwarded to `inner` (a read-only script)
 
-Counters are plain integers; a `FaultTransport` is used from one task.
+Byte counters are plain integers (a `FaultTransport` is used from one task); `close_count`
+is atomic because the reaper's timer task may race an explicit close in tests.
 """
-mutable struct FaultTransport <: IO
-    inner::IO
+mutable struct FaultTransport{T <: IO} <: IO
+    inner::T
     read_bytes::Int
     write_bytes::Int
     fail_read_at::Int
@@ -26,13 +28,18 @@ mutable struct FaultTransport <: IO
     write_error::Exception
     after_write_error::Union{Nothing, Exception}
     closed::Bool
+    discard_writes::Bool
+    @atomic close_count::Int
 end
 
-function FaultTransport(inner::IO; fail_read_at::Integer=-1, fail_write_at::Integer=-1, read_error::Exception=EOFError(), write_error::Exception=EOFError(), after_write_error::Union{Nothing, Exception}=nothing)
-    return FaultTransport(inner, 0, 0, Int(fail_read_at), Int(fail_write_at), read_error, write_error, after_write_error, false)
+function FaultTransport(inner::IO; fail_read_at::Integer=-1, fail_write_at::Integer=-1, read_error::Exception=EOFError(), write_error::Exception=EOFError(), after_write_error::Union{Nothing, Exception}=nothing, discard_writes::Bool=false)
+    return FaultTransport{typeof(inner)}(inner, 0, 0, Int(fail_read_at), Int(fail_write_at), read_error, write_error, after_write_error, false, discard_writes, 0)
 end
 
-const Transport = Union{Reseau.TCP.Conn, Reseau.TLS.Conn, FaultTransport}
+# A closed union of concrete types: the packet hot path stays an `isa` split, `--trim=safe`
+# can resolve every transport operation statically, and no transport type (so no `close`
+# method) can be defined after the reaper's timer task fixes its world age.
+const Transport = Union{Reseau.TCP.Conn, Reseau.TLS.Conn, FaultTransport{IOBuffer}, FaultTransport{Reseau.TCP.Conn}}
 
 function Base.unsafe_read(ft::FaultTransport, ptr::Ptr{UInt8}, nbytes::UInt)
     n = Int(nbytes)
@@ -57,11 +64,11 @@ function Base.unsafe_write(ft::FaultTransport, ptr::Ptr{UInt8}, nbytes::UInt)
     n = Int(nbytes)
     if ft.fail_write_at >= 0 && ft.write_bytes + n > ft.fail_write_at
         allowed = max(0, ft.fail_write_at - ft.write_bytes)
-        allowed > 0 && unsafe_write(ft.inner, ptr, UInt(allowed))
+        (allowed > 0 && !ft.discard_writes) && unsafe_write(ft.inner, ptr, UInt(allowed))
         ft.write_bytes += allowed
         throw(ft.write_error)
     end
-    unsafe_write(ft.inner, ptr, nbytes)
+    ft.discard_writes || unsafe_write(ft.inner, ptr, nbytes)
     ft.write_bytes += n
     ft.after_write_error === nothing || throw(ft.after_write_error)
     return n
@@ -78,6 +85,7 @@ Base.flush(ft::FaultTransport) = return (flush(ft.inner); nothing)
 
 function Base.close(ft::FaultTransport)
     ft.closed = true
+    @atomic ft.close_count += 1
     close(ft.inner)
     return nothing
 end
@@ -143,11 +151,18 @@ function set_write_deadline!(t::FaultTransport, deadline_ns::Integer)
     return nothing
 end
 
-# A deadline expiry surfaces directly on TCP and wrapped in TLSError on TLS.
-function is_deadline_error(err)
-    err isa Reseau.IOPoll.DeadlineExceededError && return true
-    err isa Reseau.HostResolvers.DialTimeoutError && return true
-    err isa Reseau.HostResolvers.OpError && return is_deadline_error(err.err)
-    err isa Reseau.TLS.TLSError && return is_deadline_error(err.cause)
+# A deadline expiry surfaces directly on TCP and wrapped in TLSError on TLS (or one level
+# deeper inside a resolver OpError). Non-recursive and `@inline` so exception paths carry
+# no dynamic `::Any`-argument call under `--trim=safe`.
+@inline is_plain_deadline_error(err) = return err isa Reseau.IOPoll.DeadlineExceededError || err isa Reseau.HostResolvers.DialTimeoutError
+
+@inline function is_deadline_error(err)
+    is_plain_deadline_error(err) && return true
+    if err isa Reseau.HostResolvers.OpError
+        e = err.err
+        is_plain_deadline_error(e) && return true
+        return e isa Reseau.TLS.TLSError && is_plain_deadline_error(e.cause)
+    end
+    err isa Reseau.TLS.TLSError && return is_plain_deadline_error(err.cause)
     return false
 end

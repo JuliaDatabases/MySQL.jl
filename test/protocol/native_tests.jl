@@ -20,20 +20,20 @@ struct LocalInfileFunctor end
         @test_throws ArgumentError N.ConnectOptions("", "u")
         @test_throws ArgumentError N.ConnectOptions("localhost", "u")
         @test_throws ArgumentError N.ConnectOptions("localhost", "u"; protocol=:default)
-        @test_throws ArgumentError N.ConnectOptions("localhost", "u"; protocol=MySQL.API.MYSQL_PROTOCOL_DEFAULT)
+        @test_throws ArgumentError N.ConnectOptions("localhost", "u"; protocol="default")
         @test N.ConnectOptions("", "u"; protocol=:tcp).host == "localhost"
         @test N.ConnectOptions("localhost", "u"; protocol=:tcp).host == "localhost"
     end
     @test N.ConnectOptions("h", "u"; protocol=:tcp).port == 3306
-    @test N.ConnectOptions("h", "u"; protocol=MySQL.API.MYSQL_PROTOCOL_TCP).port == 3306
-    @test_throws ArgumentError N.ConnectOptions("h", "u"; protocol=MySQL.API.MYSQL_PROTOCOL_SOCKET)
+    @test N.ConnectOptions("h", "u"; protocol="tcp").port == 3306
+    @test_throws ArgumentError N.ConnectOptions("h", "u"; protocol="socket")
     @test_throws ArgumentError N.ConnectOptions("h", "u"; charset_name="latin1")
     @test N.ConnectOptions("h", "u"; charset_name="UTF8MB4").port == 3306
     @test_throws ArgumentError N.ConnectOptions("h", "u"; ssl_ca="a", ssl_capath="b")
     @test N.ConnectOptions("h", "u"; ssl_capath="/etc/ssl/certs").tls.ca_file == "/etc/ssl/certs"
     @test_throws ArgumentError N.ConnectOptions("h", "u"; local_files=true)
     @test N.ConnectOptions("h", "u"; local_files=true, local_infile_handler=identity).client_flags & P.CLIENT_LOCAL_FILES != 0
-    @test N.ConnectOptions("h", "u"; local_files=true, local_infile_handler=LocalInfileFunctor()).local_infile_handler isa LocalInfileFunctor
+    @test N.ConnectOptions("h", "u"; local_files=true, local_infile_handler=LocalInfileFunctor()).local_infile_handler.f isa LocalInfileFunctor
     @test_throws ArgumentError N.ConnectOptions("h", "u"; local_infile_handler=1)
     @test N.ConnectOptions("h", "u"; port=0).port == 3306
     @test_throws ArgumentError N.ConnectOptions("h", "u"; port=70000)
@@ -78,13 +78,13 @@ end
     @test R(; ssl_verify_server_cert=true, ssl_enforce=true, has_ca=true) == P.SSL_VERIFY_IDENTITY
     @test R(; ssl_mode=:required, has_ca=true) == P.SSL_REQUIRED              # explicit mode wins
     @test R(; ssl_mode="VERIFY_CA") == P.SSL_VERIFY_CA
-    @test R(; ssl_mode=MySQL.API.SSL_MODE_VERIFY_IDENTITY) == P.SSL_VERIFY_IDENTITY
+    @test R(; ssl_mode="SSL_MODE_VERIFY_IDENTITY") == P.SSL_VERIFY_IDENTITY
     @test R(; ssl_mode=:disabled, ssl_enforce=false, ssl_verify_server_cert=false) == P.SSL_DISABLED   # explicit false never lowers/raises
     @test_throws ArgumentError R(; ssl_mode=:disabled, ssl_enforce=true)
     @test_throws ArgumentError R(; ssl_mode=:preferred, ssl_enforce=true)
     @test_throws ArgumentError R(; ssl_mode=:required, ssl_verify_server_cert=true)
     @test_throws ArgumentError R(; ssl_mode=:bogus)
-    @test N.ConnectOptions("h", "u"; ssl_mode=MySQL.API.SSL_MODE_REQUIRED).tls.mode == P.SSL_REQUIRED
+    @test N.ConnectOptions("h", "u"; ssl_mode="required").tls.mode == P.SSL_REQUIRED
     @test N.ConnectOptions("h", "u"; ssl_enforce=true).tls.mode == P.SSL_REQUIRED
     @test N.ConnectOptions("h", "u"; ssl_verify_server_cert=false).tls.mode == P.SSL_PREFERRED
     @test P.tls_server_name(P.TLSOptions(; mode=:preferred), "127.0.0.1") === nothing
@@ -247,26 +247,14 @@ function multi_accept_server(f::Function)
     end
 end
 
-mutable struct CloseCounterIO <: IO
-    @atomic closes::Int
-end
-
-Base.isopen(io::CloseCounterIO) = (@atomic io.closes) == 0
-
-function Base.close(io::CloseCounterIO)
-    @atomic io.closes += 1
-    return nothing
-end
-
 function synthetic_reap_entries(n::Int)
     entries = N.ReapEntry[]
-    counters = CloseCounterIO[]
+    counters = P.FaultTransport{IOBuffer}[]
     refs = WeakRef[]
     for _ in 1:n
-        counter = CloseCounterIO(0)
-        transport = P.FaultTransport(counter)
+        transport = P.FaultTransport(IOBuffer())
         push!(entries, N.ReapEntry(transport))
-        push!(counters, counter)
+        push!(counters, transport)
         push!(refs, WeakRef(transport))
     end
     return entries, counters, refs
@@ -373,12 +361,11 @@ end
     @test N.REAPER_TIMER[] isa Timer
 
     # The timer task's world age is fixed at its creation (during an earlier test file's
-    # first native connect), which predates this file's `Base.close(::CloseCounterIO)`
-    # method: without the reaper's `invokelatest` the timer would swallow the MethodError
-    # and mark the entry :closed with the transport never closed. Wait on the timer only —
-    # no manual `reap_now!` (which would run in the current world and mask the bug).
-    let counter = CloseCounterIO(0)
-        entry = N.ReapEntry(P.FaultTransport(counter))
+    # first native connect). `P.Transport` is a closed union whose `close` methods predate
+    # any timer, so the timer must close an entry enqueued much later without help. Wait on
+    # the timer only — no manual `reap_now!`.
+    let counter = P.FaultTransport(IOBuffer())
+        entry = N.ReapEntry(counter)
         while (@atomic entry.state) == :live
             N.enqueue_from_finalizer!(entry) || yield()
         end
@@ -387,12 +374,12 @@ end
             sleep(0.05)
         end
         @test (@atomic entry.state) == :closed
-        @test (@atomic counter.closes) == 1
+        @test (@atomic counter.close_count) == 1
     end
 
     # A busy queue lock leaves ownership live so an explicit close can still claim it.
-    counter = CloseCounterIO(0)
-    entry = N.ReapEntry(P.FaultTransport(counter))
+    counter = P.FaultTransport(IOBuffer())
+    entry = N.ReapEntry(counter)
     lock(N.REAPER_LOCK)
     try
         @test !N.enqueue_from_finalizer!(entry)
@@ -401,7 +388,7 @@ end
     finally
         unlock(N.REAPER_LOCK)
     end
-    @test (@atomic counter.closes) == 1
+    @test (@atomic counter.close_count) == 1
 
     # Exercise the finalizer enqueue path concurrently without opening 10,000 sockets.
     entries, counters, refs = synthetic_reap_entries(10_000)
@@ -424,18 +411,19 @@ end
     # :pending → :closing gates the single close). This has failed rarely inside the full
     # suite on Julia 1.12 while a 120-round standalone loop stays clean — the same region
     # as the known non-reproducible 1.12 GC flake — so dump the evidence on any recurrence.
-    exactly_once = all(counter -> (@atomic counter.closes) == 1, counters)
+    exactly_once = all(counter -> (@atomic counter.close_count) == 1, counters)
     if !exactly_once
-        bad = findall(counter -> (@atomic counter.closes) != 1, counters)
-        @warn "reaper stress anomaly" nbad=length(bad) closes=[(@atomic counters[i].closes) for i in first(bad, 5)] states=[(@atomic entries[i].state) for i in first(bad, 5)]
+        bad = findall(counter -> (@atomic counter.close_count) != 1, counters)
+        @warn "reaper stress anomaly" nbad=length(bad) closes=[(@atomic counters[i].close_count) for i in first(bad, 5)] states=[(@atomic entries[i].state) for i in first(bad, 5)]
     end
     @test exactly_once
+    empty!(counters)   # the counters ARE the transports; drop them so the WeakRefs can clear
     @test all(entry -> entry.transport === nothing, entries)
     @test N.pending_reaps() == 0
-    warm = N.ReapEntry(P.FaultTransport(CloseCounterIO(0)))
+    warm = N.ReapEntry(P.FaultTransport(IOBuffer()))
     @test N.enqueue_from_finalizer!(warm)
     N.reap_now!()
-    measured = N.ReapEntry(P.FaultTransport(CloseCounterIO(0)))
+    measured = N.ReapEntry(P.FaultTransport(IOBuffer()))
     @test finalizer_enqueue_allocations(measured) == 0
     N.reap_now!()
     GC.gc(); GC.gc()

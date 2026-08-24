@@ -7,8 +7,8 @@
 # prepared statement (`DBInterface.execute(stmt, params)`).
 
 """
-    MySQL.Native.TextCursor{buffered}
-    MySQL.Native.BinaryCursor{buffered}
+    MySQL.TextCursor{buffered}
+    MySQL.BinaryCursor{buffered}
 
 The cursor returned by `DBInterface.execute`: `TextCursor` for `execute(conn, sql)` (text
 protocol), `BinaryCursor` for `execute(stmt, params)` (binary protocol). It iterates rows and
@@ -121,13 +121,13 @@ Base.length(c::Cursor) = return c.nrows
 
 # ---- construction from a command response ----
 
-function empty_cursor(conn::Connection, sql::String, token::Int, ok::P.OKPacket, binary::Bool, buffered::Bool, opts::ResultOptions, number::Int)
+function empty_cursor(conn::Connection, sql::String, token::Int, ok::P.OKPacket, ::Val{binary}, ::Val{buffered}, opts::ResultOptions, number::Int) where {binary, buffered}
     c = Cursor{binary, buffered}(conn, sql, token, @atomic(conn.generation), nothing, Symbol[], Type[], Dict{Symbol, Int}(), UInt8[], 0, -1, Core.bitcast(Int64, ok.affected_rows), ok, ok.status, ok.warnings, UInt8[], UInt8[], Int[], Int[], Int[], P.PacketCursor(UInt8[]), 0, 0, number, true, false, opts)
     P.more_results(ok) || release_token!(c)
     return c
 end
 
-function result_cursor(conn::Connection, sql::String, token::Int, header::P.ResultHeader, binary::Bool, buffered::Bool, opts::ResultOptions, number::Int)
+function result_cursor(conn::Connection, sql::String, token::Int, header::P.ResultHeader, ::Val{binary}, ::Val{buffered}, opts::ResultOptions, number::Int) where {binary, buffered}
     n = length(header.columns)
     s = session(conn)
     if buffered
@@ -143,9 +143,12 @@ function result_cursor(conn::Connection, sql::String, token::Int, header::P.Resu
     return c
 end
 
-function make_cursor(conn::Connection, sql::String, token::Int, resp, binary::Bool, buffered::Bool, opts::ResultOptions, number::Int)
-    resp isa P.OKPacket && return empty_cursor(conn, sql, token, resp, binary, buffered, opts, number)
-    return result_cursor(conn, sql, token, resp::P.ResultHeader, binary, buffered, opts, number)
+# `binary`/`buffered` travel as `Val`s so every cursor construction (and the row scan
+# machinery behind it) is concretely typed — `--trim=safe` needs the resolution, and the
+# runtime saves the abstract-cursor dispatch.
+function make_cursor(conn::Connection, sql::String, token::Int, resp, ::Val{binary}, ::Val{buffered}, opts::ResultOptions, number::Int) where {binary, buffered}
+    resp isa P.OKPacket && return empty_cursor(conn, sql, token, resp, Val(binary), Val(buffered), opts, number)
+    return result_cursor(conn, sql, token, resp::P.ResultHeader, Val(binary), Val(buffered), opts, number)
 end
 
 # The terminator of this cursor's result set. Buffered cursors can release response
@@ -290,7 +293,7 @@ end
 end
 
 """
-    DBInterface.lastrowid(c::MySQL.Native.Cursor)
+    DBInterface.lastrowid(c::MySQL.Cursor)
 
 The `last_insert_id` the server reported in this cursor's own OK packet (the DML result, or
 the result-set terminator), not the connection's current state.
@@ -298,7 +301,7 @@ the result-set terminator), not the connection's current state.
 DBInterface.lastrowid(c::Cursor) = return c.ok === nothing ? UInt64(0) : c.ok.last_insert_id
 
 """
-    DBInterface.close!(c::MySQL.Native.Cursor)
+    DBInterface.close!(c::MySQL.Cursor)
 
 Discards whatever the server still has to send for the command that produced `c` (remaining
 rows and result sets). The cursor's retained buffered rows stay readable; a streaming cursor
@@ -334,7 +337,7 @@ function read_response!(conn::Connection, s::P.Session)
 end
 
 """
-    DBInterface.execute(conn::MySQL.Native.Connection, sql; mysql_store_result=true, mysql_date_and_time=false) -> TextCursor
+    DBInterface.execute(conn::MySQL.Connection, sql; mysql_store_result=true, mysql_date_and_time=false) -> TextCursor
 
 Runs `sql` with the text protocol and returns a cursor over the first result. With
 `mysql_store_result=false` rows are streamed (the connection is busy until the cursor is
@@ -350,14 +353,16 @@ function DBInterface.execute(conn::Connection, sql::AbstractString, params=(); m
         token = new_token!(conn)
         P.query!(s, sql)
         resp = read_response!(conn, s)
-        return make_cursor(conn, String(sql), token, resp, false, mysql_store_result, opts, 1)
+        return mysql_store_result ?
+            make_cursor(conn, String(sql), token, resp, Val(false), Val(true), opts, 1) :
+            make_cursor(conn, String(sql), token, resp, Val(false), Val(false), opts, 1)
     end
 end
 
 # ---- multiple results ----
 
 """
-    DBInterface.executemultiple(conn::MySQL.Native.Connection, sql; kw...) -> Cursors
+    DBInterface.executemultiple(conn::MySQL.Connection, sql; kw...) -> Cursors
 
 Iterates every result of a multi-statement (needs `multi_statements=true`) or CALL response
 as a **distinct** cursor with its own metadata and OK snapshot; DML results and the final OK
@@ -408,7 +413,7 @@ function Base.iterate(tc::Cursors{binary, buffered}, first::Bool=true) where {bi
         while resp isa P.LocalInfileRequest
             resp = handle_local_infile!(conn, s, resp)
         end
-        tc.current = make_cursor(conn, tc.sql, new_token!(conn), resp, binary, buffered, tc.opts, cur.current_resultsetnumber + 1)
+        tc.current = make_cursor(conn, tc.sql, new_token!(conn), resp, Val(binary), Val(buffered), tc.opts, cur.current_resultsetnumber + 1)
         return (tc.current, false)
     end
 end

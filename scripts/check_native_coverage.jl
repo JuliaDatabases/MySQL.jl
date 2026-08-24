@@ -1,4 +1,4 @@
-const NATIVE_SOURCE = r"(?:^|/)src/(?:Protocol|Native)/"
+const NATIVE_SOURCE = r"(?:^|/)src/"
 
 function usage()
     return error("usage: julia scripts/check_native_coverage.jl <lcov.info> [minimum_fraction]")
@@ -36,7 +36,7 @@ function main(args::Vector{String})
     0.0 <= minimum <= 1.0 || error("minimum_fraction must be between 0 and 1")
     isfile(path) || error("coverage file does not exist: $path")
     coverage = read_native_coverage(path)
-    isempty(coverage) && error("$path contains no src/Protocol or src/Native coverage records")
+    isempty(coverage) && error("$path contains no src/ coverage records")
     total = length(coverage)
     covered = count(>(0), values(coverage))
     fraction = covered / total

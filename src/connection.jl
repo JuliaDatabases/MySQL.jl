@@ -12,11 +12,11 @@ mutable struct StatementReapEntry
 end
 
 """
-    MySQL.Native.Connection
+    MySQL.Connection
 
-A connection on the native wire-protocol backend. Obtain one with
-`DBInterface.connect(MySQL.Native.Connection, host, user, password; kw...)`; every
-keyword of `MySQL.Connection` is accepted (removed ones explain why they fail).
+A MySQL connection. Obtain one with
+`DBInterface.connect(MySQL.Connection, host, user, password; kw...)`; see
+`MySQL.ConnectOptions` for the accepted keywords (removed 1.x ones explain why they fail).
 Operations are serialized by the connection lock; a streaming cursor and a transaction are
 owned by the task that created them.
 """
@@ -25,7 +25,7 @@ mutable struct Connection <: DBInterface.Connection
     options::ConnectOptions
     host::String
     user::String
-    port::String
+    port::Int
     db::String
     lock::ReentrantLock
     @atomic generation::Int
@@ -39,20 +39,20 @@ mutable struct Connection <: DBInterface.Connection
     @atomic statement_reaping_open::Bool
 end
 
-# Preserved 1.x quirk: a `mysql://` substring anywhere in the host is stripped.
+# A leading `mysql://` scheme prefix on the host is stripped (2.0 change: 1.x stripped up
+# to a `mysql://` substring found *anywhere* in the host).
 function strip_scheme(host::AbstractString)
-    rng = findfirst("mysql://", host)
-    return rng === nothing ? String(host) : String(host[(last(rng) + 1):end])
+    return startswith(host, "mysql://") ? String(SubString(host, ncodeunits("mysql://") + 1)) : String(host)
 end
 
 """
-    DBInterface.connect(MySQL.Native.Connection, host, user, passwd=nothing; db=nothing, port=nothing, kw...)
+    DBInterface.connect(MySQL.Connection, host, user, passwd=nothing; db=nothing, port=nothing, kw...)
 
-Connects with the native backend. Keywords are those of `MySQL.Connection` plus the
-native-only options (`ssl_mode=:preferred`, `get_server_public_key`, `tls_version`,
-`zero_dates`, `time_type`, `local_infile_handler`, `max_buffered_bytes`, …); see
-`MySQL.Native.ConnectOptions`. An omitted `db`/`port` falls back to the option files'
-`database`/`port` (when option files are read), like `host`/`user`/`password`.
+Connects to a MySQL server. Keywords are the 1.x connection options plus
+`ssl_mode=:preferred`, `get_server_public_key`, `tls_version`, `zero_dates`, `time_type`,
+`local_infile_handler`, `max_buffered_bytes`, …; see `MySQL.ConnectOptions`. An omitted
+`db`/`port` falls back to the option files' `database`/`port` (when option files are read),
+like `host`/`user`/`password`.
 """
 function DBInterface.connect(::Type{Connection}, host::AbstractString, user::AbstractString, passwd::Union{AbstractString, Nothing}=nothing; db::Union{AbstractString, Nothing}=nothing, port::Union{Integer, Nothing}=nothing, kw...)
     opts = ConnectOptions(strip_scheme(host), user, passwd; db=db, port=port, kw...)
@@ -63,7 +63,7 @@ function DBInterface.connect(::Type{Connection}, host::AbstractString, user::Abs
         opts,
         opts.host,
         opts.user,
-        string(opts.port),
+        opts.port,
         opts.db,
         ReentrantLock(),
         1,
@@ -80,8 +80,8 @@ end
 
 function Base.show(io::IO, conn::Connection)
     lock(conn.lock) do
-        opts = conn.handle === nothing ? "disconnected" : "host=\"$(conn.host)\", user=\"$(conn.user)\", port=\"$(conn.port)\", db=\"$(conn.db)\""
-        print(io, "MySQL.Native.Connection($opts)")
+        opts = conn.handle === nothing ? "disconnected" : "host=\"$(conn.host)\", user=\"$(conn.user)\", port=$(conn.port), db=\"$(conn.db)\""
+        print(io, "MySQL.Connection($opts)")
     end
     return nothing
 end
@@ -99,12 +99,12 @@ session(conn::Connection) = return (checkconn(conn); conn.handle.session)
     Base.isopen(conn)
 
 A local check (the transport is open and the session is not closed or broken); it does not
-detect a peer that went away silently — use `MySQL.Native.ping`.
+detect a peer that went away silently — use `MySQL.ping`.
 """
 function Base.isopen(conn::Connection)
     return lock(conn.lock) do
         conn.handle !== nothing && isopen(conn.handle)
-    end
+    end::Bool
 end
 
 """
@@ -276,7 +276,7 @@ function execute_ok!(conn::Connection, sql::AbstractString)
 end
 
 """
-    MySQL.Native.ping(conn) -> Bool
+    MySQL.ping(conn) -> Bool
 
 COM_PING round trip; throws when the connection is unusable.
 """
@@ -326,7 +326,7 @@ end
 # ---- escaping ----
 
 """
-    MySQL.Native.escape(conn, str) -> String
+    MySQL.escape(conn, str) -> String
 
 Escapes `str` for use inside a single-quoted SQL literal on this connection's character set
 (utf8mb4): `\\`, `'`, `"`, NUL, newline, carriage return and Control-Z are backslash-escaped;
@@ -364,7 +364,7 @@ function escape_literal(str::AbstractString, no_backslash_escapes::Bool)
 end
 
 """
-    MySQL.Native.escape_identifier(name) -> String
+    MySQL.escape_identifier(name) -> String
 
 Backtick-quotes an identifier, doubling embedded backticks.
 """

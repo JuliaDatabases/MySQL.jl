@@ -24,7 +24,7 @@ function parse_image_ref(ref::String)
 end
 
 function docker_available()
-    # The live lanes, §8.9 gates, and Connector/C integration tests all need Linux server
+    # The live lanes, §8.9 gates, and server integration tests all need Linux server
     # images. Windows CI runners ship the Docker CLI but only Windows-container mode, so a
     # `docker pull mysql:8.4` fails ("no matching manifest for windows/amd64"); skip Docker
     # there. macOS runners have no Docker CLI and are skipped by the check below.
@@ -40,9 +40,9 @@ end
 
 function performance_gate_plan(env=ENV; docker::Bool=docker_available())
     docker || return (correctness=false, timing=false)
-    # The §8.9 native-vs-Connector/C gates (1M-row scans, 64 MiB blob, 100k executemany) are
+    # The §8.9 gates (1M-row scans, 64 MiB blob, 100k executemany) are
     # heavy; under CI's coverage instrumentation they blow the test-job time budget, and the
-    # two-backend compat manifest already asserts value parity in the PR live lanes. So under
+    # behavior manifest already asserts values in the PR live lanes. So under
     # CI they are opt-in via MYSQL_PERF_GATES=1 (the dedicated `perf` job sets it); local runs
     # run them by default. MYSQL_PERF_GATES enables the correctness gates and the timing ratios
     # together, so a single flag controls the whole §8.9 block.
@@ -127,7 +127,7 @@ end
     @test performance_gate_plan(Dict{String, String}(); docker=false) == (correctness=false, timing=false)
 end
 
-# The Docker integration (native live lanes, the GC-thrash leak soak, and the Connector/C
+# The Docker integration (live lanes, the GC-thrash leak soak, and the server
 # integration tests) is heavy and, on shared CI runners, the soak can hang the Julia 1.12+
 # runtime. The cross-platform test matrix therefore runs serverless-only (MYSQL_INTEGRATION=0)
 # and a dedicated Linux job on Julia 1.10 runs the integration. Locally it is on by default.
@@ -136,6 +136,10 @@ run_integration = docker_available() && get(ENV, "MYSQL_INTEGRATION", "1") != "0
 # Native wire-protocol tests (no database server needed)
 include("protocol/runtests.jl")
 
+# JuliaC --trim=safe compilation of the main entrypoints (test/mysql_trim_workload.jl);
+# needs no server (scripted loopback peer). Julia 1.12+ only; skip with MYSQL_RUN_TRIM_TESTS=0.
+include("trim_compile_tests.jl")
+
 # Native backend against real servers (Harbor containers; skipped without Docker/integration)
 if run_integration
     include("protocol/live_tests.jl")
@@ -143,7 +147,7 @@ else
     @info "skipping native live lanes (serverless-only run: MYSQL_INTEGRATION=0 or no Docker)"
 end
 
-# §8.9 performance/allocation gates: native vs Connector/C on a dedicated server. The
+# §8.9 performance/allocation gates on a dedicated server. The
 # timing *ratios* are off by default on CI: shared runners cannot hold a 0.75×/1.0× ratio
 # reliably. The `perf` CI job (and any local run) opts back in with MYSQL_PERF_GATES=1; the
 # correctness/limit/allocation gates always run when Docker is available.
@@ -155,9 +159,9 @@ if perf_plan.correctness
             PerfGates.run_correctness_gates(plain_port, tls_port)
             if perf_plan.timing
                 if Base.JLOptions().check_bounds == 1
-                    # Pkg.test forces --check-bounds=yes, which slows the pure-Julia backend
-                    # while leaving Connector/C's C code untouched. Run only ratios in a
-                    # production-bounds child that drops inherited coverage instrumentation.
+                    # Pkg.test forces --check-bounds=yes, which slows the byte-heavy scan
+                    # paths 2-3x. Run only timings in a production-bounds child that drops
+                    # inherited coverage instrumentation.
                     script = joinpath(@__DIR__, "perf", "run_perf_gates.jl")
                     project = Base.active_project()
                     cmd = `$(Base.julia_cmd()) --startup-file=no --check-bounds=auto --code-coverage=none --threads=$(Threads.nthreads()) --project=$project $script $plain_port $tls_port`
@@ -176,27 +180,8 @@ else
     @info "skipping §8.9 Docker gates (Docker unavailable)"
 end
 
-let mysql = MySQL.API.init()
-    MySQL.setoptions!(mysql)
-    @test MySQL.API.getoption(mysql, MySQL.API.MYSQL_OPT_SSL_VERIFY_SERVER_CERT) == false
-    MySQL.setoptions!(mysql; ssl_verify_server_cert=true)
-    @test MySQL.API.getoption(mysql, MySQL.API.MYSQL_OPT_SSL_VERIFY_SERVER_CERT) == true
-    MySQL.setoptions!(mysql; connect_timeout=7)
-    @test Int(MySQL.API.getoption(mysql, MySQL.API.MYSQL_OPT_CONNECT_TIMEOUT)) == 7
-    MySQL.setoptions!(mysql; max_allowed_packet=1024)
-    @test Int(MySQL.API.getoption(mysql, MySQL.API.MYSQL_OPT_MAX_ALLOWED_PACKET)) == 1024
-    MySQL.setoptions!(mysql; bind="127.0.0.1")
-    @test MySQL.API.getoption(mysql, MySQL.API.MYSQL_OPT_BIND) == "127.0.0.1"
-    # ssl_mode maps onto real Connector/C options (#240): VERIFY_* turns on
-    # server certificate verification even though the kwarg default is false
-    MySQL.setoptions!(mysql; ssl_mode=MySQL.API.SSL_MODE_VERIFY_CA)
-    @test MySQL.API.getoption(mysql, MySQL.API.MYSQL_OPT_SSL_VERIFY_SERVER_CERT) == true
-    # SSL_MODE_DISABLED cannot be honored by libmariadb 3.4+ and must say so
-    @test_logs (:warn, r"SSL_MODE_DISABLED cannot be honored") MySQL.setoptions!(mysql; ssl_mode=MySQL.API.SSL_MODE_DISABLED)
-end
-
 if !run_integration
-    @info "skipping MySQL Connector/C integration tests (serverless-only run or no Docker)."
+    @info "skipping MySQL integration tests (serverless-only run or no Docker)."
     @test true
 else
     with_mysql() do cfg
@@ -216,7 +201,7 @@ conn = DBInterface.connect(MySQL.Connection, SubString(test_host()), SubString(t
 DBInterface.close!(conn)
 
 # load host/user + options from file
-conn = DBInterface.connect(MySQL.Connection, "", ""; port=0, option_file=test_option_file())
+conn = DBInterface.connect(MySQL.Connection, "", ""; option_file=test_option_file())
 @test isopen(conn)
 
 DBInterface.execute(conn, "DROP DATABASE if exists mysqltest")
@@ -267,11 +252,13 @@ expected = (
   Name       = Union{Missing, String}["John", "Tom", "Jim", "Tim"],
   Photo      = Union{Missing, Vector{UInt8}}[b"abc", b"def", b"ghi", b"jkl"],
   JobType    = Union{Missing, String}["HR", "HR", "Management", "Accounts"],
-  Senior     = Union{Missing, MySQL.API.Bit}[MySQL.API.Bit(1), MySQL.API.Bit(1), MySQL.API.Bit(0), MySQL.API.Bit(1)],
+  Senior     = Union{Missing, MySQL.Bit}[MySQL.Bit(1), MySQL.Bit(1), MySQL.Bit(0), MySQL.Bit(1)],
 )
 
 cursor = DBInterface.execute(conn, "select * from Employee")
-@test DBInterface.lastrowid(cursor) == 1
+# 2.0: lastrowid is a snapshot from the cursor's own OK/terminator, so a SELECT cursor
+# reports 0 (1.x reported the connection's sticky last insert id)
+@test DBInterface.lastrowid(cursor) == 0
 @test eltype(cursor) == MySQL.TextRow
 @test Tables.istable(cursor)
 @test Tables.rowaccess(cursor)
@@ -296,8 +283,8 @@ res = DBInterface.execute(conn, "select * from Employee") |> columntable
 # as a prepared statement
 stmt = DBInterface.prepare(conn, "select * from Employee")
 cursor = DBInterface.execute(stmt)
-@test DBInterface.lastrowid(cursor) == 1
-@test eltype(cursor) == MySQL.Row
+@test DBInterface.lastrowid(cursor) == 0
+@test eltype(cursor) == MySQL.BinaryRow
 @test Tables.istable(cursor)
 @test Tables.rowaccess(cursor)
 @test Tables.rows(cursor) === cursor
@@ -545,7 +532,7 @@ res = DBInterface.execute(stmt) |> columntable
 res = DBInterface.execute(stmt)
 res = DBInterface.execute(stmt)
 
-multi_conn = connect_mysql(db="mysqltest")
+multi_conn = connect_mysql(db="mysqltest", multi_statements=true)
 results = DBInterface.executemultiple(multi_conn, "select * from Employee; select DeptNo, OfficeNo from Employee where OfficeNo IS NOT NULL")
 state = iterate(results)
 @test state !== nothing
@@ -564,7 +551,7 @@ ret = columntable(res)
 DBInterface.close!(multi_conn)
 
 # multiple-queries not supported by mysql w/ prepared statements
-@test_throws MySQL.API.StmtError DBInterface.prepare(conn, "select * from Employee; select DeptNo, OfficeNo from Employee where OfficeNo IS NOT NULL")
+@test_throws MySQL.StmtError DBInterface.prepare(conn, "select * from Employee; select DeptNo, OfficeNo from Employee where OfficeNo IS NOT NULL")
 
 # GitHub issue [#173](https://github.com/JuliaDatabases/MySQL.jl/issues/173)
 DBInterface.execute(conn, "DROP TABLE if exists unsigned_float")
@@ -676,8 +663,7 @@ abandon_stmts(conn, n) = (for _ = 1:n; DBInterface.execute(DBInterface.prepare(c
         # and the next operation reaps them
         result = DBInterface.execute(conn, "SELECT a FROM FinalizerReap") |> Tables.columntable
         @test result.a == [1]
-        @test isempty(conn.mysql.stmts_to_close)
-        @test isempty(conn.mysql.results_to_free)
+        @test conn.stmts_to_close === nothing
         if Threads.nthreads() > 1
             # concurrent smoke test: GC-driven statement finalizers must not
             # corrupt a lock-serialized workload (pre-fix this aborts/errors
@@ -720,8 +706,8 @@ end
 
 # https://github.com/JuliaDatabases/MySQL.jl/issues/240
 @testset "ssl_mode mapping (#240)" begin
-    # SSL_MODE_REQUIRED / VERIFY_* map onto real Connector/C options and connect fine
-    conn = connect_mysql(; ssl_mode=MySQL.API.SSL_MODE_REQUIRED)
+    # ssl_mode=:required forces TLS
+    conn = connect_mysql(; ssl_mode=:required)
     try
         cipher = DBInterface.execute(conn, "SHOW STATUS LIKE 'Ssl_cipher'") |> Tables.columntable
         @test !isempty(cipher.Value[1])   # TLS actually negotiated

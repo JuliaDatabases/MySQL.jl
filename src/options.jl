@@ -4,6 +4,13 @@
 const DEFAULT_PORT = 3306
 const UTF8MB4 = "utf8mb4"
 
+# Concrete box for the user-supplied `local_infile_handler` callable: the field type stays
+# a 2-member concrete union so every call site is statically resolvable; only the actual
+# handler invocation (`call_infile_handler`) is dynamic.
+struct LocalInfileHandlerBox
+    f::Any
+end
+
 """
     ConnectOptions
 
@@ -28,7 +35,7 @@ struct ConnectOptions
     can_handle_expired_passwords::Bool
     limits::P.Limits
     attrs::Vector{Pair{String, String}}
-    local_infile_handler::Any
+    local_infile_handler::Union{Nothing, LocalInfileHandlerBox}
     max_local_infile_bytes::Int
     debug::Bool
     zero_dates::Symbol
@@ -77,10 +84,10 @@ const TLS_VERSION_NAMES = Dict{String, UInt16}("tlsv1.2" => P.Reseau.TLS.TLS1_2_
 
 # `tls_version="TLSv1.2,TLSv1.3"` (libmysqlclient's option): the allowed protocol versions.
 # Returns `(min_version, max_version)`; `nothing` means TLS 1.2 and 1.3 are both allowed.
-function parse_tls_version(spec)
+function parse_tls_version(spec::Union{Nothing, String})
     spec === nothing && return (nothing, nothing)
     versions = UInt16[]
-    for part in split(String(spec), ',')
+    for part in split(spec, ',')
         name = lowercase(strip(part))
         isempty(name) && continue
         push!(versions, get(TLS_VERSION_NAMES, name) do
@@ -94,6 +101,45 @@ end
 @noinline removed_keyword(k::Symbol) = return throw(ArgumentError("the `$k` option was removed: $(REMOVED_KEYWORDS[k])"))
 @noinline deferred_keyword(k::Symbol) = return throw(ArgumentError("the `$k` option is not available: $(DEFERRED_KEYWORDS[k])"))
 
+# ---- typed option extraction ----
+# Option values arrive as `Any` (a keyword Dict merged with option-file strings). Every
+# extraction goes through an `@inline` converter over a closed set of accepted concrete
+# types, so `--trim=safe` resolves the whole constructor statically. The accepted types are
+# the documented ones: strings are `String`/`SubString{String}`, integers the standard
+# machine types or their decimal string form, booleans `Bool`.
+
+@noinline option_type_error(name::String, T::DataType) = return throw(ArgumentError("the `$name` connection option does not accept a value of type $T"))
+
+@inline function option_string(v, name::String)::String
+    v isa String && return v
+    v isa SubString{String} && return String(v)
+    option_type_error(name, typeof(v))
+end
+
+@inline option_string_or_nothing(v, name::String) = return v === nothing ? nothing : option_string(v, name)
+
+@inline function option_bool(v, name::String)::Bool
+    v isa Bool && return v
+    option_type_error(name, typeof(v))
+end
+
+@inline option_bool_or(v, name::String, default::Bool)::Bool = return v === nothing ? default : option_bool(v, name)
+@inline option_bool_or_nothing(v, name::String) = return v === nothing ? nothing : option_bool(v, name)
+
+@noinline option_int_range_error(name::String) = return throw(ArgumentError("$name must be representable as Int"))
+@noinline option_int_parse_error(name::String) = return throw(ArgumentError("$name must be an integer representable as Int"))
+
+@inline function option_int_checked(v, name::String)::Int
+    (typemin(Int) <= v <= typemax(Int)) || option_int_range_error(name)
+    return v % Int
+end
+
+@inline function option_int_parsed(v::AbstractString, name::String)::Int
+    parsed = tryparse(Int, v)
+    parsed === nothing && option_int_parse_error(name)
+    return parsed
+end
+
 function check_keywords(kw)
     for k in keys(kw)
         k in KNOWN_KEYWORDS || throw(ArgumentError("unknown connection option `$k`"))
@@ -103,18 +149,18 @@ function check_keywords(kw)
     return nothing
 end
 
-function protocol_kind(protocol)
+@inline function protocol_kind(protocol)::Symbol
     protocol === nothing && return :default
     p = if protocol isa Symbol
         protocol
-    elseif protocol isa AbstractString
+    elseif protocol isa String
         Symbol(lowercase(protocol))
-    elseif protocol isa API.mysql_protocol_type
-        Symbol(lowercase(replace(string(protocol), "MYSQL_PROTOCOL_" => "")))
+    elseif protocol isa SubString{String}
+        Symbol(lowercase(String(protocol)))
     else
-        throw(ArgumentError("protocol must be :default, :tcp, :socket, :pipe, or the matching MySQL.API value"))
+        throw(ArgumentError("protocol must be the Symbol or String form of :default, :tcp, :socket, or :pipe"))
     end
-    p in (:default, :tcp, :socket, :pipe, :memory) || throw(ArgumentError("unknown protocol $(repr(protocol))"))
+    (p === :default || p === :tcp || p === :socket || p === :pipe || p === :memory) || throw(ArgumentError("unknown protocol :$p"))
     return p
 end
 
@@ -146,7 +192,7 @@ An explicit `ssl_mode` wins; otherwise `ssl_verify_server_cert=true` ⇒ `:verif
 `ssl_enforce=true` ⇒ `:required`, CA material ⇒ `:verify_ca`, else `:preferred`. Explicit
 `false` values never lower an explicit mode; contradictory explicit combinations are errors.
 """
-function resolve_ssl_mode(; ssl_mode=nothing, ssl_enforce=nothing, ssl_verify_server_cert=nothing, has_ca::Bool=false)
+@inline function resolve_ssl_mode(; ssl_mode=nothing, ssl_enforce=nothing, ssl_verify_server_cert=nothing, has_ca::Bool=false)
     if ssl_mode !== nothing
         mode = P.ssl_mode(ssl_mode)
         ssl_enforce === true && mode in (P.SSL_DISABLED, P.SSL_PREFERRED) && throw(ArgumentError("ssl_mode=$(Symbol(lowercase(string(mode)[5:end]))) contradicts ssl_enforce=true"))
@@ -159,16 +205,27 @@ function resolve_ssl_mode(; ssl_mode=nothing, ssl_enforce=nothing, ssl_verify_se
     return P.SSL_PREFERRED
 end
 
-function resolve_ssl_sources(file_mode; ssl_mode=nothing, ssl_enforce=nothing, ssl_verify_server_cert=nothing, has_ca::Bool=false)
-    ssl_mode === nothing || return resolve_ssl_mode(; ssl_mode=ssl_mode, ssl_enforce=ssl_enforce, ssl_verify_server_cert=ssl_verify_server_cert, has_ca=has_ca)
-    ssl_verify_server_cert === true && return P.SSL_VERIFY_IDENTITY
-    if ssl_enforce === true
-        mode = file_mode === nothing ? P.SSL_REQUIRED : P.ssl_mode(file_mode)
-        return mode in (P.SSL_VERIFY_CA, P.SSL_VERIFY_IDENTITY) ? mode : P.SSL_REQUIRED
+# The tri-states travel as (present, value) pairs and the file mode as a ""-sentinel
+# String, so every argument is concrete and the call is statically resolvable; the logic is
+# `resolve_ssl_mode`'s (which stays as the kwarg-friendly public face).
+function resolve_ssl_sources(file_mode::String, has_mode::Bool, mode::P.SSLMode, has_enforce::Bool, enforce::Bool, has_verify::Bool, verify::Bool, has_ca::Bool)
+    if has_mode
+        (has_enforce && enforce) && (mode == P.SSL_DISABLED || mode == P.SSL_PREFERRED) && ssl_mode_contradiction(mode, "ssl_enforce=true")
+        (has_verify && verify) && mode != P.SSL_VERIFY_IDENTITY && ssl_verify_contradiction(mode)
+        return mode
     end
-    file_mode === nothing || return P.ssl_mode(file_mode)
-    return resolve_ssl_mode(; has_ca=has_ca)
+    (has_verify && verify) && return P.SSL_VERIFY_IDENTITY
+    if has_enforce && enforce
+        fm = file_mode == "" ? P.SSL_REQUIRED : P.ssl_mode(file_mode)
+        return (fm == P.SSL_VERIFY_CA || fm == P.SSL_VERIFY_IDENTITY) ? fm : P.SSL_REQUIRED
+    end
+    file_mode == "" || return P.ssl_mode(file_mode)
+    has_ca && return P.SSL_VERIFY_CA
+    return P.SSL_PREFERRED
 end
+
+@noinline ssl_mode_contradiction(mode::P.SSLMode, what::String) = return throw(ArgumentError("ssl_mode=$(Symbol(lowercase(string(mode)[5:end]))) contradicts $what"))
+@noinline ssl_verify_contradiction(mode::P.SSLMode) = return throw(ArgumentError("ssl_verify_server_cert=true contradicts ssl_mode=$(Symbol(lowercase(string(mode)[5:end])))"))
 
 # ---- option files ----
 
@@ -303,11 +360,12 @@ function read_option_file(io::IO, path::AbstractString; group::AbstractString="c
     return client_opts
 end
 
-function load_option_files(; option_file=nothing, read_default_file=nothing, option_group=nothing, read_default_group=nothing)
-    group = option_group === nothing ? "client" : String(option_group)
+# Sentinel-concrete arguments ("" = not given) so the call is statically resolvable.
+function load_option_files(option_file::String, read_default_file::Bool, option_group::String, read_default_group::Bool)
+    group = option_group == "" ? "client" : option_group
     paths = String[]
-    (read_default_file === true || read_default_group === true || (option_group !== nothing && option_file === nothing)) && append!(paths, default_option_files())
-    option_file === nothing || push!(paths, String(option_file))
+    (read_default_file || read_default_group || (option_group != "" && option_file == "")) && append!(paths, default_option_files())
+    option_file == "" || push!(paths, option_file)
     merged = Dict{Symbol, String}()
     for path in paths
         if basename(path) == ".mylogin.cnf"
@@ -336,26 +394,39 @@ function client_flags(; found_rows::Bool=false, no_schema::Bool=false, ignore_sp
     return flags
 end
 
+# Baked at (pre)compile time: interpolating a VersionNumber at run time drags the generic
+# `join`/`print` machinery into the trimmed image.
+const CLIENT_VERSION_STRING = string(Base.pkgversion(@__MODULE__))
+const OS_STRING = string(Sys.KERNEL)
+const ARCH_STRING = string(Sys.ARCH)
+
 function default_attrs()
-    return ["_client_name" => "MySQL.jl", "_client_version" => string(pkgversion(MySQL), "-native"), "_os" => string(Sys.KERNEL), "_platform" => string(Sys.ARCH), "_pid" => string(getpid())]
+    return ["_client_name" => "MySQL.jl", "_client_version" => CLIENT_VERSION_STRING, "_os" => OS_STRING, "_platform" => ARCH_STRING, "_pid" => string(getpid())]
 end
 
 const MAX_TIMEOUT_SECONDS = typemax(Int64) ÷ 1_000_000_000
 
-function option_integer(v, name::AbstractString)
-    if v isa Integer
-        typemin(Int) <= v <= typemax(Int) || throw(ArgumentError("$name must be representable as Int"))
-        return Int(v)
-    end
-    if v isa AbstractString
-        parsed = tryparse(Int, v)
-        parsed === nothing && throw(ArgumentError("$name must be an integer representable as Int"))
-        return parsed
-    end
-    throw(ArgumentError("$name must be an integer"))
+@inline function option_integer(v, name::String)::Int
+    v isa Int && return v
+    v isa Bool && return Int(v)
+    v isa Int8 && return Int(v)
+    v isa UInt8 && return Int(v)
+    v isa Int16 && return Int(v)
+    v isa UInt16 && return Int(v)
+    v isa Int32 && return Int(v)
+    v isa UInt32 && return option_int_checked(v, name)
+    v isa Int64 && return option_int_checked(v, name)
+    v isa UInt64 && return option_int_checked(v, name)
+    v isa Int128 && return option_int_checked(v, name)
+    v isa UInt128 && return option_int_checked(v, name)
+    v isa String && return option_int_parsed(v, name)
+    v isa SubString{String} && return option_int_parsed(v, name)
+    option_type_error(name, typeof(v))
 end
 
-function positive_or_nothing(v, name::AbstractString)
+@inline option_integer_or(v, name::String, default::Int)::Int = return v === nothing ? default : option_integer(v, name)
+
+@inline function positive_or_nothing(v, name::String)::Union{Nothing, Int}
     v === nothing && return nothing
     value = option_integer(v, name)
     value > 0 || throw(ArgumentError("$name must be positive"))
@@ -374,70 +445,136 @@ read), and resolves the ssl conflict table.
 function ConnectOptions(host::AbstractString, user::AbstractString, password::Union{Nothing, AbstractString}=nothing; kw...)
     kwd = Dict{Symbol, Any}(pairs(kw))
     check_keywords(kwd)
-    file = load_option_files(; option_file=get(kwd, :option_file, nothing), read_default_file=get(kwd, :read_default_file, nothing), option_group=get(kwd, :option_group, nothing), read_default_group=get(kwd, :read_default_group, nothing))
-    pick(k, default) = return haskey(kwd, k) && kwd[k] !== nothing ? kwd[k] : haskey(file, k) ? file[k] : default
+    file = load_option_files(
+        something(option_string_or_nothing(get(kwd, :option_file, nothing), "option_file"), ""),
+        option_bool_or(get(kwd, :read_default_file, nothing), "read_default_file", false),
+        something(option_string_or_nothing(get(kwd, :option_group, nothing), "option_group"), ""),
+        option_bool_or(get(kwd, :read_default_group, nothing), "read_default_group", false),
+    )
+    # a keyword wins over the option file; `nothing` falls through
+    pick(k) = return haskey(kwd, k) && kwd[k] !== nothing ? kwd[k] : get(file, k, nothing)
     host_s = String(host)
     host_s == "" && haskey(file, :host) && (host_s = file[:host])
-    protocol = pick(:protocol, nothing)
-    named_pipe_option = get(kwd, :named_pipe, nothing)
-    (named_pipe_option === nothing || named_pipe_option isa Bool) || throw(ArgumentError("named_pipe must be Bool or nothing"))
-    named_pipe = something(named_pipe_option, false)
+    protocol = protocol_kind(pick(:protocol))
+    named_pipe = option_bool_or(get(kwd, :named_pipe, nothing), "named_pipe", false)
     require_tcp_transport(host_s, protocol; named_pipe=named_pipe)
     isempty(host_s) && (host_s = "localhost")
     user_s = String(user)
     user_s == "" && haskey(file, :user) && (user_s = file[:user])
     pw = password === nothing ? (haskey(file, :password) ? file[:password] : nothing) : String(password)
-    port = pick(:port, nothing)
-    port === nothing && get(kwd, :read_env, false) === true && haskey(ENV, "MYSQL_TCP_PORT") && (port = ENV["MYSQL_TCP_PORT"])
-    port = port === nothing ? DEFAULT_PORT : option_integer(port, "port")
+    port_raw = pick(:port)
+    if port_raw === nothing && option_bool_or(get(kwd, :read_env, nothing), "read_env", false) && haskey(ENV, "MYSQL_TCP_PORT")
+        port_raw = ENV["MYSQL_TCP_PORT"]
+    end
+    port = port_raw === nothing ? DEFAULT_PORT : option_integer(port_raw, "port")
     (port == 0) && (port = DEFAULT_PORT)
     1 <= port <= 65535 || throw(ArgumentError("port must be in 1:65535"))
-    charset = pick(:charset_name, UTF8MB4)
-    lowercase(String(charset)) == UTF8MB4 || throw(ArgumentError("only charset_name=\"utf8mb4\" is supported by the native backend"))
-    ssl_ca = pick(:ssl_ca, nothing)
-    ssl_capath = pick(:ssl_capath, nothing)
+    charset_raw = pick(:charset_name)
+    charset = charset_raw === nothing ? UTF8MB4 : option_string(charset_raw, "charset_name")
+    lowercase(charset) == UTF8MB4 || throw(ArgumentError("only charset_name=\"utf8mb4\" is supported by the native backend"))
+    ssl_ca = option_string_or_nothing(pick(:ssl_ca), "ssl_ca")
+    ssl_capath = option_string_or_nothing(pick(:ssl_capath), "ssl_capath")
     (ssl_ca !== nothing && ssl_capath !== nothing) && throw(ArgumentError("ssl_ca and ssl_capath cannot be combined yet (Reseau takes a single trust root); pass one of them"))
-    ca_file = ssl_ca !== nothing ? String(ssl_ca) : ssl_capath !== nothing ? String(ssl_capath) : nothing
-    mode = resolve_ssl_sources(get(file, :ssl_mode, nothing); ssl_mode=get(kwd, :ssl_mode, nothing), ssl_enforce=get(kwd, :ssl_enforce, nothing), ssl_verify_server_cert=get(kwd, :ssl_verify_server_cert, nothing), has_ca=ca_file !== nothing)
-    min_version, max_version = parse_tls_version(pick(:tls_version, nothing))
-    tls = P.TLSOptions(; mode=mode, ca_file=ca_file, cert_file=pick(:ssl_cert, nothing), key_file=pick(:ssl_key, nothing), server_name=get(kwd, :ssl_server_name, nothing), min_version=min_version, max_version=max_version)
-    default_auth = get(kwd, :default_auth, nothing)
-    default_auth === nothing || P.is_supported_plugin(default_auth) || throw(P.UnsupportedAuthError(String(default_auth)))
-    pubkey = get(kwd, :server_public_key, nothing)
+    ca_file = ssl_ca !== nothing ? ssl_ca : ssl_capath
+    ssl_mode_kw = get(kwd, :ssl_mode, nothing)
+    enforce_raw = option_bool_or_nothing(get(kwd, :ssl_enforce, nothing), "ssl_enforce")
+    verify_raw = option_bool_or_nothing(get(kwd, :ssl_verify_server_cert, nothing), "ssl_verify_server_cert")
+    mode = resolve_ssl_sources(get(file, :ssl_mode, ""),
+        ssl_mode_kw !== nothing, ssl_mode_kw === nothing ? P.SSL_PREFERRED : P.ssl_mode(ssl_mode_kw),
+        enforce_raw !== nothing, enforce_raw === nothing ? false : enforce_raw,
+        verify_raw !== nothing, verify_raw === nothing ? false : verify_raw,
+        ca_file !== nothing)
+    min_version, max_version = parse_tls_version(option_string_or_nothing(pick(:tls_version), "tls_version"))
+    tls = P.TLSOptions(; mode=mode, ca_file=ca_file,
+        cert_file=option_string_or_nothing(pick(:ssl_cert), "ssl_cert"),
+        key_file=option_string_or_nothing(pick(:ssl_key), "ssl_key"),
+        server_name=option_string_or_nothing(get(kwd, :ssl_server_name, nothing), "ssl_server_name"),
+        min_version=min_version, max_version=max_version)
+    default_auth = option_string_or_nothing(get(kwd, :default_auth, nothing), "default_auth")
+    default_auth === nothing || P.is_supported_plugin(default_auth) || throw(P.UnsupportedAuthError(default_auth))
+    pubkey = option_string_or_nothing(get(kwd, :server_public_key, nothing), "server_public_key")
     if pubkey === nothing
         pem = nothing
     else
-        pubkey isa AbstractString || throw(ArgumentError("server_public_key must be a PEM file path"))
         isfile(pubkey) || throw(ArgumentError("server_public_key does not name a readable file: $(repr(pubkey))"))
         pem = read(pubkey)
     end
-    auth = P.AuthPolicy(; server_public_key=pem, get_server_public_key=get(kwd, :get_server_public_key, false), enable_cleartext_plugin=get(kwd, :enable_cleartext_plugin, false) || default_auth == P.PLUGIN_CLEAR_PASSWORD, insecure_cleartext_auth=get(kwd, :insecure_cleartext_auth, false))
-    local_files = get(kwd, :local_files, false)
-    handler = get(kwd, :local_infile_handler, nothing)
-    handler === nothing || applicable(handler, "") || throw(ArgumentError("local_infile_handler must be callable with a filename String"))
-    local_files && handler === nothing && throw(ArgumentError("local_files=true requires a local_infile_handler"))
-    db = String(pick(:db, ""))
-    flags = client_flags(; found_rows=get(kwd, :found_rows, false), no_schema=get(kwd, :no_schema, false), ignore_space=get(kwd, :ignore_space, false), multi_statements=get(kwd, :multi_statements, false), local_files=local_files)
+    auth = P.AuthPolicy(;
+        server_public_key=pem,
+        get_server_public_key=option_bool_or(get(kwd, :get_server_public_key, nothing), "get_server_public_key", false),
+        enable_cleartext_plugin=option_bool_or(get(kwd, :enable_cleartext_plugin, nothing), "enable_cleartext_plugin", false) || default_auth == P.PLUGIN_CLEAR_PASSWORD,
+        insecure_cleartext_auth=option_bool_or(get(kwd, :insecure_cleartext_auth, nothing), "insecure_cleartext_auth", false))
+    local_files = option_bool_or(get(kwd, :local_files, nothing), "local_files", false)
+    handler_raw = get(kwd, :local_infile_handler, nothing)
+    handler_raw === nothing || applicable(handler_raw, "") || throw(ArgumentError("local_infile_handler must be callable with a filename String"))
+    local_files && handler_raw === nothing && throw(ArgumentError("local_files=true requires a local_infile_handler"))
+    handler = handler_raw === nothing ? nothing : LocalInfileHandlerBox(handler_raw)
+    db_raw = pick(:db)
+    db = db_raw === nothing ? "" : option_string(db_raw, "db")
+    flags = client_flags(;
+        found_rows=option_bool_or(get(kwd, :found_rows, nothing), "found_rows", false),
+        no_schema=option_bool_or(get(kwd, :no_schema, nothing), "no_schema", false),
+        ignore_space=option_bool_or(get(kwd, :ignore_space, nothing), "ignore_space", false),
+        multi_statements=option_bool_or(get(kwd, :multi_statements, nothing), "multi_statements", false),
+        local_files=local_files)
     isempty(db) || (flags |= P.CLIENT_CONNECT_WITH_DB)
-    get(kwd, :can_handle_expired_passwords, false) && (flags |= P.CLIENT_CAN_HANDLE_EXPIRED_PASSWORDS)
-    max_packet = something(get(kwd, :max_allowed_packet, nothing), P.DEFAULT_MAX_PACKET)
+    can_expired = option_bool_or(get(kwd, :can_handle_expired_passwords, nothing), "can_handle_expired_passwords", false)
+    can_expired && (flags |= P.CLIENT_CAN_HANDLE_EXPIRED_PASSWORDS)
+    max_packet = option_integer_or(get(kwd, :max_allowed_packet, nothing), "max_allowed_packet", P.DEFAULT_MAX_PACKET)
+    mbb_raw = get(kwd, :max_buffered_bytes, P.DEFAULT_MAX_BUFFERED_BYTES)
+    mrb_raw = get(kwd, :max_response_bytes, nothing)
     limits = P.Limits(;
         max_packet=max_packet,
-        max_preauth_packet=something(get(kwd, :max_preauth_packet, nothing), min(P.DEFAULT_MAX_PREAUTH_PACKET, max_packet)),
-        max_auth_rounds=something(get(kwd, :max_auth_rounds, nothing), 8),
-        max_auth_bytes=something(get(kwd, :max_auth_bytes, nothing), 64 * 1024),
-        max_columns=something(get(kwd, :max_columns, nothing), 4096),
-        max_result_sets=something(get(kwd, :max_result_sets, nothing), 1024),
-        max_metadata_bytes=something(get(kwd, :max_metadata_bytes, nothing), 16 * 1024 * 1024),
-        max_buffered_bytes=get(kwd, :max_buffered_bytes, P.DEFAULT_MAX_BUFFERED_BYTES),
-        max_response_bytes=get(kwd, :max_response_bytes, nothing),
-        max_session_state_bytes=something(get(kwd, :max_session_state_bytes, nothing), 1024 * 1024),
+        max_preauth_packet=option_integer_or(get(kwd, :max_preauth_packet, nothing), "max_preauth_packet", min(P.DEFAULT_MAX_PREAUTH_PACKET, max_packet)),
+        max_auth_rounds=option_integer_or(get(kwd, :max_auth_rounds, nothing), "max_auth_rounds", 8),
+        max_auth_bytes=option_integer_or(get(kwd, :max_auth_bytes, nothing), "max_auth_bytes", 64 * 1024),
+        max_columns=option_integer_or(get(kwd, :max_columns, nothing), "max_columns", 4096),
+        max_result_sets=option_integer_or(get(kwd, :max_result_sets, nothing), "max_result_sets", 1024),
+        max_metadata_bytes=option_integer_or(get(kwd, :max_metadata_bytes, nothing), "max_metadata_bytes", 16 * 1024 * 1024),
+        max_buffered_bytes=mbb_raw === nothing ? nothing : option_integer(mbb_raw, "max_buffered_bytes"),
+        max_response_bytes=mrb_raw === nothing ? nothing : option_integer(mrb_raw, "max_response_bytes"),
+        max_session_state_bytes=option_integer_or(get(kwd, :max_session_state_bytes, nothing), "max_session_state_bytes", 1024 * 1024),
     )
     attrs_option = get(kwd, :attrs, nothing)
-    attrs = attrs_option === nothing ? default_attrs() : Vector{Pair{String, String}}(attrs_option)
-    ct = pick(:connect_timeout, nothing)
-    max_local_infile_bytes = option_integer(get(kwd, :max_local_infile_bytes, 1024 * 1024 * 1024), "max_local_infile_bytes")
+    attrs = attrs_option === nothing ? default_attrs() :
+        attrs_option isa Vector{Pair{String, String}} ? attrs_option :
+        option_type_error("attrs", typeof(attrs_option))
+    max_local_infile_bytes = option_integer_or(get(kwd, :max_local_infile_bytes, nothing), "max_local_infile_bytes", 1024 * 1024 * 1024)
     max_local_infile_bytes > 0 || throw(ArgumentError("max_local_infile_bytes must be positive"))
-    results = ResultOptions(; zero_dates=Symbol(something(get(kwd, :zero_dates, nothing), :sentinel)), time_type=something(get(kwd, :time_type, nothing), Dates.Time))
-    return ConnectOptions(host_s, port, user_s, pw, db, positive_or_nothing(ct, "connect_timeout"), positive_or_nothing(get(kwd, :read_timeout, nothing), "read_timeout"), positive_or_nothing(get(kwd, :write_timeout, nothing), "write_timeout"), pick(:bind, nothing) === nothing ? nothing : String(pick(:bind, nothing)), get(kwd, :init_command, nothing) === nothing ? nothing : String(kwd[:init_command]), something(get(kwd, :reconnect, nothing), false), flags, tls, auth, default_auth === nothing ? nothing : String(default_auth), get(kwd, :can_handle_expired_passwords, false), limits, attrs, handler, max_local_infile_bytes, get(kwd, :debug, false), results.zero_dates, results.time_type)
+    zd_raw = get(kwd, :zero_dates, nothing)
+    zero_dates = zd_raw === nothing ? :sentinel :
+        zd_raw isa Symbol ? zd_raw :
+        zd_raw isa String ? Symbol(zd_raw) :
+        option_type_error("zero_dates", typeof(zd_raw))
+    tt_raw = get(kwd, :time_type, nothing)
+    time_type = (tt_raw === nothing || tt_raw === Dates.Time) ? Dates.Time :
+        tt_raw === Dates.Microsecond ? Dates.Microsecond :
+        throw(ArgumentError("time_type must be Dates.Time or Dates.Microsecond"))
+    results = ResultOptions(; zero_dates=zero_dates, time_type=time_type)
+    ic_raw = get(kwd, :init_command, nothing)
+    return ConnectOptions(
+        host_s,
+        port,
+        user_s,
+        pw,
+        db,
+        positive_or_nothing(pick(:connect_timeout), "connect_timeout"),
+        positive_or_nothing(get(kwd, :read_timeout, nothing), "read_timeout"),
+        positive_or_nothing(get(kwd, :write_timeout, nothing), "write_timeout"),
+        option_string_or_nothing(pick(:bind), "bind"),
+        ic_raw === nothing ? nothing : option_string(ic_raw, "init_command"),
+        option_bool_or(get(kwd, :reconnect, nothing), "reconnect", false),
+        flags,
+        tls,
+        auth,
+        default_auth,
+        can_expired,
+        limits,
+        attrs,
+        handler,
+        max_local_infile_bytes,
+        option_bool_or(get(kwd, :debug, nothing), "debug", false),
+        results.zero_dates,
+        results.time_type,
+    )
 end

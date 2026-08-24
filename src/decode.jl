@@ -36,7 +36,7 @@ flags, then the M3 policies: `time_type`, and `zero_dates=:missing` widening eve
 column to `Union{Missing, T}` regardless of `NOT NULL`.
 """
 function juliatype(def::P.ColumnDef, opts::ResultOptions)
-    T = MySQL.juliatype(field_type_enum(def), P.is_not_null(def), P.is_unsigned(def), P.is_binary(def), opts.date_and_time)
+    T = juliatype(field_type_enum(def), P.is_not_null(def), P.is_unsigned(def), P.is_binary(def), opts.date_and_time)
     base = nonmissingtype(T)
     base === Dates.Time && opts.time_type !== Dates.Time && (T = T === base ? opts.time_type : Union{Missing, opts.time_type})
     is_date_type(base) && opts.zero_dates == :missing && (T = Union{Missing, base})
@@ -95,13 +95,13 @@ function decode_value(::Type{Dec64}, buf::Vector{UInt8}, pos::Int, len::Int, opt
 end
 
 # BIT(n): the text protocol sends the big-endian bytes of the value (1.x used only the first byte).
-function decode_value(::Type{API.Bit}, buf::Vector{UInt8}, pos::Int, len::Int, ::ResultOptions)
-    len <= 8 || conversion_error(API.Bit, "BIT values wider than 64 bits are not supported ($len bytes)")
+function decode_value(::Type{Bit}, buf::Vector{UInt8}, pos::Int, len::Int, ::ResultOptions)
+    len <= 8 || conversion_error(Bit, "BIT values wider than 64 bits are not supported ($len bytes)")
     v = UInt64(0)
     @inbounds for i in pos:(pos + len - 1)
         v = (v << 8) | buf[i]
     end
-    return API.Bit(v)
+    return Bit(v)
 end
 
 # ---- numbers (Parsers) ----
@@ -216,7 +216,7 @@ function decode_value(::Type{DateTime}, buf::Vector{UInt8}, pos::Int, len::Int, 
     kind == :partial && conversion_error(DateTime, "partial zero date \"$(String(buf[pos:(pos + len - 1)]))\" (use zero_dates=:missing)")
     y, mo, d, h, mi, s, micros = parts
     if micros % 1000 != 0
-        API.dateandtime_warning()
+        dateandtime_warning()
         conversion_error(DateTime, buf, pos, len)
     end
     Dates.validargs(DateTime, y, mo, d, h, mi, s, micros ÷ 1000) === nothing || conversion_error(DateTime, buf, pos, len)

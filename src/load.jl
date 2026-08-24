@@ -1,15 +1,18 @@
-function quoteid(str)
-    # avoid double quoting
-    if str[1] == '`' && str[end] == '`'
-        return str
-    else
-        return string('`', str, '`')
-    end
-end
+# `MySQL.load`: create a table from a Tables.jl source and insert its rows through one
+# prepared statement inside a transaction.
 
-function quoteid(::DBInterface.Connection, str)
-    return quoteid(str)
+const VALID_QUOTED_IDENTIFIER = r"^`(?:``|[^`])*`(?:\.`(?:``|[^`])*`)*$"
+
+# Already-quoted identifiers pass through only when they are well formed (embedded backticks
+# doubled); anything else is (re)quoted with `escape_identifier`.
+function quoteid(str)
+    name = String(str)
+    wrapped = ncodeunits(name) >= 2 && first(name) == '`' && last(name) == '`'
+    wrapped || return escape_identifier(name)
+    occursin(VALID_QUOTED_IDENTIFIER, name) && return name
+    return escape_identifier(chop(name; head=1, tail=1))
 end
+quoteid(::Connection, str) = quoteid(str)
 
 sqltype(::Type{Union{T, Missing}}) where {T} = sqltype(T)
 sqltype(T) = get(SQLTYPES, T, "VARCHAR(255)")
@@ -37,9 +40,9 @@ const SQLTYPES = Dict{Type, String}(
     DateAndTime => "DATETIME(6)",
 )
 
-checkdupnames(names) = length(unique(map(x->lowercase(String(x)), names))) == length(names) || error("duplicate case-insensitive column names detected; sqlite doesn't allow duplicate column names and treats them case insensitive")
+checkdupnames(names) = length(unique(map(x->lowercase(String(x)), names))) == length(names) || error("duplicate case-insensitive column names detected; mysql treats column names case insensitive")
 
-function createtable(conn::DBInterface.Connection, nm::AbstractString, sch::Tables.Schema; debug::Bool=false, quoteidentifiers::Bool=true, createtableclause::AbstractString="CREATE TABLE", coltypes=Dict(), columnsuffix=Dict(), auto_increment_primary_key_name::Union{Nothing,AbstractString}=nothing)
+function createtable(conn::Connection, nm::AbstractString, sch::Tables.Schema; debug::Bool=false, quoteidentifiers::Bool=true, createtableclause::AbstractString="CREATE TABLE", coltypes=Dict(), columnsuffix=Dict(), auto_increment_primary_key_name::Union{Nothing,AbstractString}=nothing)
     names = sch.names
     checkdupnames(names)
     types = [sqltype(T, coltypes, names[i]) for (i, T) in enumerate(sch.types)]
@@ -67,8 +70,8 @@ column name (given as a `Symbol`) to a string of the enhancement that will come 
 `[column name] [column type] enhancements`. This allows, for example, specifying the charset of a string column
 by doing something like `columnsuffix=Dict(:Name => "CHARACTER SET utf8mb4")`.
 
-On `MySQL.Native.Connection`, `debug=true` logs generated statements without row values;
-use `debug=:values` to include row values. Connector/C keeps its 1.x `debug::Bool` behavior.
+`debug=true` logs the generated statements without row values; `debug=:values` also logs
+each inserted row's values.
 
 Do note that databases vary wildly in requirements for `CREATE TABLE` and column definitions
 so it can be extremely difficult to load data generically. You may just need to tweak some of the provided
@@ -78,14 +81,13 @@ we can see if there's something we can do to make it easier to use this function
 """
 function load end
 
-load(conn::DBInterface.Connection, table::AbstractString="mysql_"*Random.randstring(5); kw...) = return x -> load(x, conn, table; kw...)
+load(conn::Connection, table::AbstractString="mysql_"*Random.randstring(5); kw...) = return x -> load(x, conn, table; kw...)
 
-function load(itr, conn::DBInterface.Connection, name::AbstractString="mysql_"*Random.randstring(5); append::Bool=true, quoteidentifiers::Bool=true, debug::Bool=false, limit::Integer=typemax(Int64), kw...)
-    return _load(itr, conn, name; append=append, quoteidentifiers=quoteidentifiers, debug_statements=debug, debug_values=debug, debug_all_statements=false, limit=limit, kw...)
-end
-
-function _load(itr, conn::DBInterface.Connection, name::AbstractString; append::Bool, quoteidentifiers::Bool, debug_statements::Bool, debug_values::Bool, debug_all_statements::Bool, limit::Integer, kw...)
+function load(itr, conn::Connection, name::AbstractString="mysql_" * Random.randstring(5); append::Bool=true, quoteidentifiers::Bool=true, debug::Union{Bool, Symbol}=false, limit::Integer=typemax(Int64), kw...)
+    debug in (false, true, :values) || throw(ArgumentError("debug must be false, true, or :values"))
     isopen(conn) || throw(ArgumentError("`MySQL.Connection` is closed"))
+    debug_statements = debug !== false
+    debug_values = debug === :values
     # get data
     rows = Tables.rows(itr)
     sch = Tables.schema(rows)
@@ -106,7 +108,7 @@ function _load(itr, conn::DBInterface.Connection, name::AbstractString; append::
         @warn "error creating table" (e, catch_backtrace())
     end
     if !append
-        debug_all_statements && @info "executing delete statement: `DELETE FROM $name`"
+        debug_statements && @info "executing delete statement: `DELETE FROM $name`"
         DBInterface.execute(conn, "DELETE FROM $name")
     end
     # start a transaction for inserting rows
@@ -114,7 +116,7 @@ function _load(itr, conn::DBInterface.Connection, name::AbstractString; append::
         params = chop(repeat("?,", length(sch.names)))
         columns = join((quoteid(conn, string(column)) for column in sch.names), ", ")
         insert = "INSERT INTO $name ($columns) VALUES ($params)"
-        debug_all_statements && @info "executing insert statement: `$insert`"
+        debug_statements && @info "executing insert statement: `$insert`"
         stmt = DBInterface.prepare(conn, insert)
         try
             for (i, row) in enumerate(rows)
@@ -128,16 +130,4 @@ function _load(itr, conn::DBInterface.Connection, name::AbstractString; append::
     end
 
     return name
-end
-
-function DBInterface.transaction(f::Function, conn::Connection)
-    DBInterface.execute(conn, "START TRANSACTION")
-    try
-        result = f()
-        API.commit(conn.mysql)
-        return result
-    catch
-        API.rollback(conn.mysql)
-        rethrow()
-    end
 end

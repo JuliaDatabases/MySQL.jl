@@ -52,8 +52,8 @@ jobs:
             version: nightly
     steps:
       - uses: actions/checkout@v5
-      # The native wire-protocol tests need no server; the Connector/C integration tests
-      # run only where Docker is available (Linux runners).
+      # The wire-protocol tests need no server; the server integration tests run only
+      # where Docker is available (Linux runners).
       - run: docker info
         if: runner.os == 'Linux'
       - uses: julia-actions/setup-julia@v2
@@ -63,18 +63,19 @@ jobs:
       - uses: julia-actions/cache@v2
       - uses: julia-actions/julia-buildpkg@v1
       # The cross-platform matrix runs the serverless protocol suite only (MYSQL_INTEGRATION=0):
-      # it is fast, needs no server, and the Docker integration (live lanes + leak soak + the
-      # Connector/C tests) runs in the dedicated `integration` job instead. Coverage is measured
-      # by the `coverage` job.
+      # it is fast, needs no server, and the Docker integration (live lanes + leak soak +
+      # the server integration tests) runs in the dedicated `integration` job instead.
+      # Coverage is measured by the `coverage` job.
       - uses: julia-actions/julia-runtest@v1
         with:
           coverage: false
         env:
           MYSQL_INTEGRATION: "0"
   integration:
-    # Native live lanes (mysql:8.4, mariadb:11.4), the leak/lifecycle soak, and the Connector/C
-    # integration tests, all against real servers via Harbor. Linux-only (Docker) and pinned to
-    # Julia 1.10, whose GC is stable under the soak's GC-thrash (1.12+ can hang on shared runners).
+    # Live lanes (mysql:8.4, mariadb:11.4), the golden behavior manifest, the leak/lifecycle
+    # soak, and the server integration tests, all against real servers via Harbor. Linux-only
+    # (Docker) and pinned to Julia 1.10, whose GC is stable under the soak's GC-thrash (1.12+
+    # can hang on shared runners).
     name: Integration (Docker)
     if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
@@ -91,9 +92,9 @@ jobs:
         with:
           coverage: false
   coverage:
-    # Native line-coverage gate (plan §8.15). The serverless fake-peer suite alone covers
-    # ~96% of src/Protocol + src/Native, so the gate needs neither Docker nor the leak soak
-    # and stays fast; it also feeds codecov.
+    # Line-coverage gate (plan §8.15). The serverless fake-peer suite alone covers ~96% of
+    # src/, so the gate needs neither Docker nor the leak soak and stays fast; it also
+    # feeds codecov.
     name: Native coverage
     if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
@@ -133,10 +134,10 @@ jobs:
           name: fuzz-failures
           path: fuzz_failures/
   perf:
-    # §8.9 native-vs-Connector/C gates (correctness/allocation + timing ratios). They are too
-    # heavy/tight for the shared PR test lanes, so they run here on the nightly schedule and on
-    # demand (MYSQL_PERF_GATES=1), with coverage off so the pure-Julia backend is not
-    # instrumented against C. Value parity is still checked in the PR live lanes (compat manifest).
+    # §8.9 gates (correctness/allocation) plus the wall-clock timing report. They are too
+    # heavy for the shared PR test lanes, so they run here on the nightly schedule and on
+    # demand (MYSQL_PERF_GATES=1), with coverage off. Cross-driver comparisons (MySQL.jl 1.x,
+    # other clients) live in bench/, outside CI.
     name: Performance gates (§8.9)
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest

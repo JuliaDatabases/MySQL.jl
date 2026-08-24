@@ -8,8 +8,8 @@ reassembly, the phase machine, handshake and capability negotiation, authenticat
 `mysql_clear_password`) with OpenSSL-backed RSA-OAEP, STARTTLS, generic responses, column
 definitions, text and binary row scanning, and the command/response framing of COM_QUERY,
 the COM_STMT_* family, LOCAL INFILE and the simple commands. It has no DBInterface/Tables
-dependency; `MySQL.Native` (value decoding, connections, cursors, statements) builds on it.
-See `docs/protocol-notes.md`.
+dependency; the `MySQL` driver layer (value decoding, connections, cursors, statements)
+builds on it. See `docs/protocol-notes.md`.
 """
 module Protocol
 

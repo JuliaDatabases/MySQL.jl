@@ -1,14 +1,15 @@
-# Executable compatibility manifest (plan §4.2): every row runs the same scenario on the
-# Connector/C backend (`MySQL.Connection`) and the native backend
-# (`MySQL.Native.Connection`) and asserts the row's disposition:
+# Executable behavior manifest (plan §4.2). Before 2.0 every row ran on both the
+# Connector/C and the native backend and asserted the row's disposition; the dual-backend
+# runs proved parity, and at 2.0 the manifest became a native-only golden regression suite:
 #
-#   :preserve  identical observable result on both backends
-#   :fix       deliberate, documented difference — the native value is asserted, the 1.x
-#              value is recorded (and asserted when `legacy` is given)
+#   :preserve  same observable result as MySQL.jl 1.x (proved by the pre-2.0 dual runs)
+#   :fix       deliberate, documented 1.x difference (see docs/src/migration.md); the
+#              `legacy` value records what 1.x produced
 #
+# Every row's `expected` value is asserted against mysql:8.4 (the primary live lane).
 # Value rows cover text and binary results. Surface rows cover the remaining connection,
 # option, security, lifecycle, and API contracts. A coverage assertion maps every plan row.
-module CompatManifest
+module BehaviorManifest
 
 using Test, MySQL, DBInterface, Tables, Dates, DecFP, Logging
 
@@ -16,20 +17,18 @@ struct Row
     name::String
     disposition::Symbol
     run::Function            # conn -> value
-    native::Any              # expected native value for :fix rows (ignored for :preserve)
-    legacy::Any              # expected C value for :fix rows (nothing = not asserted)
-    skip_legacy::String      # non-empty: why the scenario must not run on the C backend
+    expected::Any            # asserted when not `nothing` (goldens; see capture!)
+    legacy::Any              # documentation: what 1.x produced for a :fix row
+    legacy_note::String      # documentation: why the scenario never ran on Connector/C
 end
 
-Row(name, disposition, run; native=nothing, legacy=nothing, skip_legacy="") = Row(name, disposition, run, native, legacy, skip_legacy)
+Row(name, disposition, run; expected=nothing, legacy=nothing, skip_legacy="") = Row(name, disposition, run, expected, legacy, skip_legacy)
 
 struct SurfaceRow
     plan_line::Int
     name::String
-    legacy::Function
-    native::Function
-    legacy_expected::Any
-    native_expected::Any
+    run::Function
+    expected::Any
 end
 
 function capture_outcome(f::Function)
@@ -106,7 +105,7 @@ function prepared_parameter_roundtrip(conn)
             typemin(Int32), typemax(UInt32), typemin(Int64), typemax(UInt64),
             1.5f0, -2.5, d64"12.345678",
             Dec128("12345678901234567890123456789.123456"),
-            "héllo", UInt8[0x00, 0xff], MySQL.API.Bit(0x0102),
+            "héllo", UInt8[0x00, 0xff], MySQL.Bit(0x0102),
             Date(2024, 2, 29), DateTime(2024, 2, 29, 13, 14, 15, 250),
             MySQL.DateAndTime(Date(2024, 2, 29), Time(13, 14, 15, 250, 500)),
             Time(13, 14, 15, 250, 500), missing, nothing,
@@ -137,7 +136,7 @@ function prepared_bit_parameter(conn)
     DBInterface.execute(conn, "CREATE TEMPORARY TABLE manifest_bit (b BLOB NOT NULL)")
     stmt = DBInterface.prepare(conn, "INSERT INTO manifest_bit VALUES (?)")
     try
-        DBInterface.execute(stmt, (MySQL.API.Bit(0x0102),))
+        DBInterface.execute(stmt, (MySQL.Bit(0x0102),))
     finally
         DBInterface.close!(stmt)
     end
@@ -218,32 +217,29 @@ function with_option_file(f::Function, password::AbstractString; database::Abstr
     end
 end
 
-function password_surface(make::Function, password::AbstractString, native::Bool)
+function password_surface(make::Function, password::AbstractString)
     return with_option_file(password) do path
-        db = native ? nothing : ""
-        omitted = connection_outcome(make; passwd=nothing, db=db, option_file=path)
-        explicit_empty = connection_outcome(make; passwd="", db=db, option_file=path)
+        omitted = connection_outcome(make; passwd=nothing, db=nothing, option_file=path)
+        explicit_empty = connection_outcome(make; passwd="", db=nothing, option_file=path)
         return (omitted, explicit_empty)
     end
 end
 
-function option_database_surface(make::Function, password::AbstractString, native::Bool)
+function option_database_surface(make::Function, password::AbstractString)
     return with_option_file(password) do path
-        db = native ? nothing : ""
-        return query_value(make, "SELECT DATABASE() AS db"; passwd=nothing, db=db, option_file=path)
+        return query_value(make, "SELECT DATABASE() AS db"; passwd=nothing, db=nothing, option_file=path)
     end
 end
 
-function environment_surface(make::Function, port::Integer; native::Bool)
+function environment_surface(make::Function, port::Integer)
     return withenv("MYSQL_TCP_PORT" => string(port)) do
-        options = native ? (; port=nothing, read_env=true) : (; port=nothing)
-        return connection_outcome(make; options...)
+        return connection_outcome(make; port=nothing, read_env=true)
     end
 end
 
-function transport_surface(make::Function; native::Bool)
+function transport_surface(make::Function)
     default = connection_outcome(make; host="localhost")
-    tcp = connection_outcome(make; host="localhost", protocol=MySQL.API.MYSQL_PROTOCOL_TCP)
+    tcp = connection_outcome(make; host="localhost", protocol=:tcp)
     return (default, tcp)
 end
 
@@ -336,12 +332,9 @@ function one_shot_parameter_surface(make::Function)
     end
 end
 
-function api_surface(make::Function; native::Bool)
+function api_surface(make::Function)
     query = string(query_value(make, "SELECT 1 AS value"))
-    if native
-        return (query, isdefined(MySQL.Protocol, :Error), !isdefined(MySQL.Protocol, :MYSQL))
-    end
-    return (query, isdefined(MySQL.API, :Bit), isdefined(MySQL.API, :MYSQL))
+    return (query, isdefined(MySQL, :Bit) && MySQL.Error === MySQL.Protocol.Error, !isdefined(MySQL, :API))
 end
 
 # A tuple, not an array literal: `end` inside `[...]` is the last-index token, which breaks
@@ -355,8 +348,8 @@ const TEXT_ROW_TUPLE = (
         end),
     Row("BIT(12) decoding: big-endian value of all bytes (1.x read the first byte only)", :fix,
         conn -> Tables.columntable(DBInterface.execute(conn, "SELECT Flags FROM manifest_employee")).Flags;
-        native=Union{Missing, MySQL.API.Bit}[MySQL.API.Bit(0b101000000001), MySQL.API.Bit(1), missing],
-        legacy=Union{Missing, MySQL.API.Bit}[MySQL.API.Bit(0b00001010), MySQL.API.Bit(0), missing]),
+        expected=Union{Missing, MySQL.Bit}[MySQL.Bit(0b101000000001), MySQL.Bit(1), missing],
+        legacy=Union{Missing, MySQL.Bit}[MySQL.Bit(0b00001010), MySQL.Bit(0), missing]),
     Row("streaming (mysql_store_result=false) yields the same rows", :preserve,
         conn -> [(r.ID, r.Name) for r in DBInterface.execute(conn, "SELECT ID, Name FROM manifest_employee"; mysql_store_result=false)]),
     Row("row is valid only while current: ArgumentError text", :preserve,
@@ -377,7 +370,7 @@ const TEXT_ROW_TUPLE = (
             v = Int(DBInterface.lastrowid(DBInterface.execute(conn, "SELECT ID FROM manifest_employee")))
             DBInterface.execute(conn, "DELETE FROM manifest_employee WHERE Name = 'z'")
             v == 0 ? :zero : :sticky
-        end; native=:zero, legacy=:sticky),
+        end; expected=:zero, legacy=:sticky),
     Row("server error keeps the connection usable; errno and showerror format", :preserve,
         conn -> let err = try; DBInterface.execute(conn, "SELECT * FROM does_not_exist"); nothing; catch e; e; end
             (err.errno, sprint(showerror, err), Tables.columntable(DBInterface.execute(conn, "SELECT 1 AS one")).one)
@@ -389,10 +382,10 @@ const TEXT_ROW_TUPLE = (
         end),
     Row("executemultiple over CALL: every result as a cursor; DML/OK results are cursors too (1.x skipped them)", :fix,
         conn -> [Tables.columntable(c) for c in DBInterface.executemultiple(conn, "CALL manifest_proc()")];
-        native=[(ID = Int32[1, 2, 3],), (Name = Union{Missing, String}["John", "Tom", missing],), NamedTuple()],
+        expected=[(ID = Int32[1, 2, 3],), (Name = Union{Missing, String}["John", "Tom", missing],), NamedTuple()],
         skip_legacy="1.6.0 calls mysql_num_rows(NULL) on the CALL's final OK result and segfaults"),
     Row("escape honours the connection", :preserve,
-        conn -> (conn isa MySQL.Connection ? MySQL.escape(conn, "a'b\\c\n") : MySQL.Native.escape(conn, "a'b\\c\n"))),
+        conn -> MySQL.escape(conn, "a'b\\c\n")),
     Row("zero DATETIME under SQL_MODE='' decodes to the DateTime(0) sentinel", :preserve,
         conn -> begin
             DBInterface.execute(conn, "SET SESSION SQL_MODE=''")
@@ -402,7 +395,7 @@ const TEXT_ROW_TUPLE = (
         conn -> begin
             DBInterface.execute(conn, "SET SESSION SQL_MODE=''")
             try; Tables.columntable(DBInterface.execute(conn, "SELECT CAST('0000-00-00' AS DATE) AS d")).d; catch e; :error; end
-        end; native=Union{Missing, Date}[Date(0)], legacy=:error),
+        end; expected=Union{Missing, Date}[Date(0)], legacy=:error),
     Row("DATETIME with sub-millisecond precision warns and fails", :preserve,
         conn -> try; Tables.columntable(DBInterface.execute(conn, "SELECT CAST('2021-01-02 01:02:03.456789' AS DATETIME(6)) AS dt")).dt; catch; :error; end),
     Row("mysql_date_and_time=true maps DATETIME(6) to DateAndTime", :preserve,
@@ -426,7 +419,7 @@ const TEXT_ROW_TUPLE = (
             iterate(cur) === nothing
         end),
     Row("show format", :preserve,
-        conn -> occursin(r"^MySQL\.(Native\.)?Connection\(host=\"[^\"]+\", user=\"root\", port=\"\d+\", db=\"manifest\"\)$", sprint(show, conn))),
+        conn -> occursin(r"^MySQL\.Connection\(host=\"[^\"]+\", user=\"root\", port=\d+, db=\"manifest\"\)$", sprint(show, conn))),
 )
 const TEXT_ROWS = collect(Row, TEXT_ROW_TUPLE)
 
@@ -467,16 +460,16 @@ const BINARY_ROW_TUPLE = (
     Row("prepared parameters round-trip every supported non-Bool family", :preserve,
         prepared_parameter_roundtrip),
     Row("prepared Bit parameter: native writes the big-endian binary string (1.x bitvalue is little-endian and under-sized)", :fix,
-        prepared_bit_parameter; native="0102"),
+        prepared_bit_parameter; expected="0102"),
     Row("prepared Bool uses TINY instead of the 1.x empty-STRING fallback", :fix,
-        prepared_bool_parameter; native=:one, legacy=:zero),
+        prepared_bool_parameter; expected=:one, legacy=:zero),
     Row("prepared negative TIME honours the sign and applies the Dates.Time range policy", :fix,
         prepared_negative_time;
-        native=(:error, :ConversionError),
+        expected=(:error, :ConversionError),
         legacy=(:value, Time(1, 2, 3, 0, 4))),
     Row("prepared zero DATETIME follows the unified zero-date sentinel policy", :fix,
         prepared_zero_datetime;
-        native=DateTime(0),
+        expected=DateTime(0),
         legacy=DateTime(1970, 1, 1)),
     Row("executemany bulk-inserts each parameter row in a transaction", :preserve,
         conn -> begin
@@ -490,7 +483,7 @@ const BINARY_ROW_TUPLE = (
         end),
     Row("prepared executemultiple over CALL returns each result and the final OK", :fix,
         prepared_call_results;
-        native=[(ID = Int32[1, 2, 3],), (Name = Union{Missing, String}["John", "Tom", missing],), NamedTuple()],
+        expected=[(ID = Int32[1, 2, 3],), (Name = Union{Missing, String}["John", "Tom", missing],), NamedTuple()],
         skip_legacy="1.6.0 does not provide the prepared multi-result contract and can call mysql_num_rows(NULL) on CALL's final OK"),
     Row("prepared DATETIME(6) → DateTime warns and truncates to ms (1.x prepared quirk; the text path fails)", :preserve,
         conn -> let stmt = DBInterface.prepare(conn, "SELECT CAST('2021-01-02 01:02:03.456789' AS DATETIME(6)) AS dt")
@@ -515,117 +508,138 @@ const BINARY_ROW_TUPLE = (
             v = Tables.columntable(DBInterface.execute(stmt)).Flags
             DBInterface.close!(stmt)
             v
-        end; native=Union{Missing, MySQL.API.Bit}[MySQL.API.Bit(0b101000000001), MySQL.API.Bit(1), missing]),
+        end; expected=Union{Missing, MySQL.Bit}[MySQL.Bit(0b101000000001), MySQL.Bit(1), missing]),
 )
 const BINARY_ROWS = collect(Row, BINARY_ROW_TUPLE)
 const ALL_ROWS = vcat(TEXT_ROWS, BINARY_ROWS)
 
+# Golden values for the rows above that predate 2.0 as `:preserve` rows (their values were
+# proved equal to Connector/C by the pre-2.0 dual-backend manifest runs). Captured against
+# mysql:8.4 with `capture!`; `run!` asserts `row.expected`, falling back to this table.
+const GOLDENS = Dict{String, Any}(
+    "select *: Tables.schema (type mapping incl. BIGINT UNSIGNED, YEAR, BIT, TEXT, VARBINARY)" =>
+        Tuple{Symbol, Type}[(:ID, Int32), (:OfficeNo, Union{Missing, Int8}), (:DeptNo, Union{Missing, Int16}), (:EmpNo, Union{Missing, UInt64}), (:Wage, Union{Missing, Float32}), (:Salary, Union{Missing, Float64}), (:Rate, Union{Missing, DecFP.Dec64}), (:LunchTime, Union{Missing, Dates.Time}), (:JoinDate, Union{Missing, Dates.Date}), (:LastLogin, Union{Missing, Dates.DateTime}), (:LastLogin2, Dates.DateTime), (:Initial, Union{Missing, String}), (:Name, Union{Missing, String}), (:Photo, Union{Missing, Vector{UInt8}}), (:JobType, Union{Missing, String}), (:Senior, Union{Missing, MySQL.Bit}), (:Born, Union{Missing, UInt64}), (:Flags, Union{Missing, MySQL.Bit}), (:Note, Union{Missing, String}), (:Raw, Union{Missing, String})],
+    "select *: columntable values (NULLs, Dec64, Time, Date, DateTime, blob, enum, single-byte BIT, utf8mb4 text)" =>
+        (ID = Int32[1, 2, 3], OfficeNo = Union{Missing, Int8}[1, 1, missing], DeptNo = Union{Missing, Int16}[2, 2, missing], EmpNo = Union{Missing, UInt64}[0x0000000000000515, 0xffffffffffffffff, missing], Wage = Union{Missing, Float32}[3.14f0, 3.14f0, missing], Salary = Union{Missing, Float64}[10000.5, 20000.25, missing], Rate = Union{Missing, DecFP.Dec64}[d64"1.001", d64"2.002", missing], LunchTime = Union{Missing, Dates.Time}[Dates.Time(12), Dates.Time(13), missing], JoinDate = Union{Missing, Dates.Date}[Dates.Date("2015-08-03"), Dates.Date("2015-08-04"), missing], LastLogin = Union{Missing, Dates.DateTime}[Dates.DateTime("2015-09-05T12:31:30"), Dates.DateTime("2015-10-12T13:12:14"), missing], LastLogin2 = Dates.DateTime[Dates.DateTime("2015-09-05T12:31:30"), Dates.DateTime("2015-10-12T13:12:14"), Dates.DateTime("2015-09-05T10:05:10")], Initial = Union{Missing, String}["A", "B", missing], Name = Union{Missing, String}["John", "Tom", missing], Photo = Union{Missing, Vector{UInt8}}[UInt8[0x61, 0x62, 0x63], UInt8[0x64, 0x65, 0x66], missing], JobType = Union{Missing, String}["HR", "HR", missing], Senior = Union{Missing, MySQL.Bit}[MySQL.Bit(0x0000000000000001), MySQL.Bit(0x0000000000000001), missing], Born = Union{Missing, UInt64}[0x00000000000007cf, 0x00000000000007e8, missing], Note = Union{Missing, String}["héllo wörld 🐘", "", missing], Raw = Union{Missing, String}["\x01\x02", "", missing]),
+    "streaming (mysql_store_result=false) yields the same rows" =>
+        Tuple{Int32, Any}[(1, "John"), (2, "Tom"), (3, missing)],
+    "row is valid only while current: ArgumentError text" =>
+        (true, "row 1 is no longer valid; mysql results are forward-only iterators where each row is only valid when iterated"),
+    "DML cursor: rows_affected, lastrowid, length, and empty schema" =>
+        (2, true, -1, true, ()),
+    "server error keeps the connection usable; errno and showerror format" =>
+        (0x0000047a, "(1146): Table 'manifest.does_not_exist' doesn't exist", Int64[1]),
+    "CALL: first result via execute, remaining results drained by the next command" =>
+        ((ID = Int32[1, 2, 3],), (two = Int64[2],)),
+    "escape honours the connection" =>
+        "a\\'b\\\\c\\n",
+    "zero DATETIME under SQL_MODE='' decodes to the DateTime(0) sentinel" =>
+        Union{Missing, Dates.DateTime}[Dates.DateTime("0000-01-01T00:00:00")],
+    "DATETIME with sub-millisecond precision warns and fails" =>
+        :error,
+    "mysql_date_and_time=true maps DATETIME(6) to DateAndTime" =>
+        Union{Missing, DateAndTime}[DateAndTime(Dates.Date("2021-01-02"), Dates.Time(1, 2, 3, 456, 789))],
+    "DateAndTime preserves the 1.x unscaled DATETIME(1) fraction" =>
+        Union{Missing, DateAndTime}[DateAndTime(Dates.Date("2021-01-02"), Dates.Time(1, 2, 3, 0, 4))],
+    "transaction returns f()'s value and commits" =>
+        (7, 1),
+    "cursor close is idempotent and a closed cursor iterates empty" =>
+        true,
+    "show format" =>
+        true,
+    "prepared SELECT schema mirrors the text mapping" =>
+        Tuple{Symbol, Type}[(:ID, Int32), (:EmpNo, Union{Missing, UInt64}), (:Salary, Union{Missing, Float64}), (:Rate, Union{Missing, DecFP.Dec64}), (:Name, Union{Missing, String}), (:JoinDate, Union{Missing, Dates.Date}), (:LastLogin, Union{Missing, Dates.DateTime}), (:LunchTime, Union{Missing, Dates.Time}), (:Photo, Union{Missing, Vector{UInt8}}), (:JobType, Union{Missing, String}), (:Senior, Union{Missing, MySQL.Bit}), (:Born, Union{Missing, UInt64})],
+    "prepared SELECT decodes values (ints, DOUBLE, Dec64, Date, DateTime, Time, blob, enum, single-byte BIT, YEAR)" =>
+        (OfficeNo = Union{Missing, Int8}[1, 1, missing], EmpNo = Union{Missing, UInt64}[0x0000000000000515, 0xffffffffffffffff, missing], Salary = Union{Missing, Float64}[10000.5, 20000.25, missing], Rate = Union{Missing, DecFP.Dec64}[d64"1.001", d64"2.002", missing], JoinDate = Union{Missing, Dates.Date}[Dates.Date("2015-08-03"), Dates.Date("2015-08-04"), missing], LastLogin = Union{Missing, Dates.DateTime}[Dates.DateTime("2015-09-05T12:31:30"), Dates.DateTime("2015-10-12T13:12:14"), missing], LunchTime = Union{Missing, Dates.Time}[Dates.Time(12), Dates.Time(13), missing], Photo = Union{Missing, Vector{UInt8}}[UInt8[0x61, 0x62, 0x63], UInt8[0x64, 0x65, 0x66], missing], JobType = Union{Missing, String}["HR", "HR", missing], Senior = Union{Missing, MySQL.Bit}[MySQL.Bit(0x0000000000000001), MySQL.Bit(0x0000000000000001), missing], Born = Union{Missing, UInt64}[0x00000000000007cf, 0x00000000000007e8, missing]),
+    "prepared WHERE with a bound parameter filters rows" =>
+        Int32[1],
+    "prepared row is valid only while current: ArgumentError text" =>
+        (true, "ArgumentError: row 1 is no longer valid; mysql results are forward-only iterators where each row is only valid when iterated"),
+    "prepared INSERT/SELECT round-trips bound parameters (int, float, string, date, time, blob)" =>
+        (OfficeNo = Union{Missing, Int8}[7], Wage = Union{Missing, Float32}[1.5f0], Name = Union{Missing, String}["prep"], JoinDate = Union{Missing, Dates.Date}[Dates.Date("2020-01-02")], LunchTime = Union{Missing, Dates.Time}[Dates.Time(9, 30)], Photo = Union{Missing, Vector{UInt8}}[UInt8[0x01, 0x02]]),
+    "prepared parameters round-trip every supported non-Bool family" =>
+        (i8 = Int8[-128], u8 = UInt8[0xff], i16 = Int16[-32768], u16 = UInt16[0xffff], i32 = Int32[-2147483648], u32 = UInt32[0xffffffff], i64 = Int64[-9223372036854775808], u64 = UInt64[0xffffffffffffffff], f32 = Float32[1.5f0], f64 = Float64[-2.5], d64 = Union{Missing, String}["12.345678"], d128 = Union{Missing, String}["12345678901234567890123456789.123460"], s = String["héllo"], bytes = Union{Missing, String}["00FF"], d = Union{Missing, String}["2024-02-29"], dt = Union{Missing, String}["2024-02-29 13:14:15.250000"], dat = Union{Missing, String}["2024-02-29 13:14:15.250500"], tm = Union{Missing, String}["13:14:15.250500"], m_null = Int64[1], n_null = Int64[1]),
+    "executemany bulk-inserts each parameter row in a transaction" =>
+        (a = Union{Missing, Int32}[1, 2, 3], b = Union{Missing, String}["x", "y", "z"]),
+    "prepared DATETIME(6) → DateTime warns and truncates to ms (1.x prepared quirk; the text path fails)" =>
+        Union{Missing, Dates.DateTime}[Dates.DateTime("2021-01-02T01:02:03.456")],
+    "prepared mysql_date_and_time=true maps DATETIME(6) to DateAndTime" =>
+        Union{Missing, DateAndTime}[DateAndTime(Dates.Date("2021-01-02"), Dates.Time(1, 2, 3, 456, 789))],
+    "prepared execute-time mysql_date_and_time cannot override static prepare metadata" =>
+        Union{Missing, Dates.DateTime},
+)
+
 const SURFACE_ROWS = SurfaceRow[
     SurfaceRow(163, "connect shape and mysql:// host stripping",
-        (make, _, _) -> string(query_value(make, "SELECT 1 AS value"; host="mysql://127.0.0.1")),
-        (make, _, _) -> string(query_value(make, "SELECT 1 AS value"; host="mysql://127.0.0.1")), "1", "1"),
+        (make, _, _) -> string(query_value(make, "SELECT 1 AS value"; host="mysql://127.0.0.1")), "1"),
     SurfaceRow(164, "nothing and empty passwords stay distinct with option files",
-        (make, password, _) -> password_surface(make, password, false),
-        (make, password, _) -> password_surface(make, password, true), (:ok, :Error), (:ok, :Error)),
-    SurfaceRow(165, "MYSQL_TCP_PORT is native opt-in and MYSQL_PWD is never used",
-        (make, _, port) -> environment_surface(make, port; native=false),
-        (make, _, port) -> environment_surface(make, port; native=true), :Error, :ok),
+        (make, password, _) -> password_surface(make, password), (:ok, :Error)),
+    SurfaceRow(165, "MYSQL_TCP_PORT is opt-in via read_env and MYSQL_PWD is never used",
+        (make, _, port) -> environment_surface(make, port), :ok),
     SurfaceRow(166, "option-file database fallback",
-        (make, password, _) -> option_database_surface(make, password, false),
-        (make, password, _) -> option_database_surface(make, password, true), "manifest", "manifest"),
+        (make, password, _) -> option_database_surface(make, password), "manifest"),
     SurfaceRow(167, "default local transport does not fall back to TCP",
-        (make, _, _) -> transport_surface(make; native=false),
-        (make, _, _) -> transport_surface(make; native=true), (:Error, :ok), (:ArgumentError, :ok)),
+        (make, _, _) -> transport_surface(make), (:ArgumentError, :ok)),
     SurfaceRow(168, "strict TLS on a deferred local transport fails clearly",
-        (make, _, _) -> connection_outcome(make; host="localhost", ssl_mode=MySQL.API.SSL_MODE_REQUIRED),
-        (make, _, _) -> connection_outcome(make; host="localhost", ssl_mode=:required), :Error, :ArgumentError),
-    SurfaceRow(169, "multi-statements default changes from enabled to disabled",
-        (make, _, _) -> multi_statement_surface(make),
-        (make, _, _) -> multi_statement_surface(make), :ok, :Error),
+        (make, _, _) -> connection_outcome(make; host="localhost", ssl_mode=:required), :ArgumentError),
+    SurfaceRow(169, "multi-statements are disabled by default",
+        (make, _, _) -> multi_statement_surface(make), :Error),
     SurfaceRow(170, "unknown connection keywords",
-        (make, _, _) -> connection_outcome(make; manifest_unknown=true),
-        (make, _, _) -> connection_outcome(make; manifest_unknown=true), :ok, :ArgumentError),
+        (make, _, _) -> connection_outcome(make; manifest_unknown=true), :ArgumentError),
     SurfaceRow(171, "init_command runs before the connection is returned",
-        (make, _, _) -> init_command_surface(make),
-        (make, _, _) -> init_command_surface(make), "17", "17"),
+        (make, _, _) -> init_command_surface(make), "17"),
     SurfaceRow(172, "connect read and write timeouts",
-        (make, _, _) -> connection_outcome(make; connect_timeout=10, read_timeout=10, write_timeout=10),
-        (make, _, _) -> connection_outcome(make; connect_timeout=10, read_timeout=10, write_timeout=10), :ok, :ok),
-    SurfaceRow(173, "reconnect option is accepted on both backends",
-        (make, _, _) -> connection_outcome(make; reconnect=true),
-        (make, _, _) -> connection_outcome(make; reconnect=true), :ok, :ok),
-    SurfaceRow(174, "data_truncation compatibility option",
-        (make, _, _) -> connection_outcome(make; data_truncation=true),
-        (make, _, _) -> connection_outcome(make; data_truncation=true), :ok, :ok),
+        (make, _, _) -> connection_outcome(make; connect_timeout=10, read_timeout=10, write_timeout=10), :ok),
+    SurfaceRow(173, "reconnect option is accepted",
+        (make, _, _) -> connection_outcome(make; reconnect=true), :ok),
+    SurfaceRow(174, "data_truncation compatibility option warns but connects",
+        (make, _, _) -> connection_outcome(make; data_truncation=true), :ok),
     SurfaceRow(175, "charset directory removal and utf8mb4 restriction",
-        (make, _, _) -> (connection_outcome(make; charset_dir="/tmp"), connection_outcome(make; charset_name="utf8mb4")),
-        (make, _, _) -> (connection_outcome(make; charset_dir="/tmp"), connection_outcome(make; charset_name="utf8mb4")), (:ok, :ok), (:ArgumentError, :ok)),
+        (make, _, _) -> (connection_outcome(make; charset_dir="/tmp"), connection_outcome(make; charset_name="utf8mb4")), (:ArgumentError, :ok)),
     SurfaceRow(176, "client bind address",
-        (make, _, _) -> connection_outcome(make; bind="127.0.0.1"),
-        (make, _, _) -> connection_outcome(make; bind="127.0.0.1"), :ok, :ok),
+        (make, _, _) -> connection_outcome(make; bind="127.0.0.1"), :ok),
     SurfaceRow(177, "packet and buffer limit options",
-        (make, _, _) -> (connection_outcome(make; max_allowed_packet=16 * 1024 * 1024), connection_outcome(make; net_buffer_length=16 * 1024)),
-        (make, _, _) -> (connection_outcome(make; max_allowed_packet=16 * 1024 * 1024), connection_outcome(make; net_buffer_length=16 * 1024)), (:ok, :ok), (:ok, :ok)),
-    SurfaceRow(178, "protocol enum including rejected shared memory",
-        (make, _, _) -> (connection_outcome(make; protocol=MySQL.API.MYSQL_PROTOCOL_TCP), connection_outcome(make; protocol=MySQL.API.MYSQL_PROTOCOL_MEMORY)),
-        (make, _, _) -> (connection_outcome(make; protocol=MySQL.API.MYSQL_PROTOCOL_TCP), connection_outcome(make; protocol=MySQL.API.MYSQL_PROTOCOL_MEMORY)), (:ok, :Error), (:ok, :ArgumentError)),
+        (make, _, _) -> (connection_outcome(make; max_allowed_packet=16 * 1024 * 1024), connection_outcome(make; net_buffer_length=16 * 1024)), (:ok, :ok)),
+    SurfaceRow(178, "protocol selection including rejected shared memory",
+        (make, _, _) -> (connection_outcome(make; protocol=:tcp), connection_outcome(make; protocol=:memory)), (:ok, :ArgumentError)),
     SurfaceRow(179, "client certificate keyword surface",
-        (make, _, _) -> connection_outcome(make; ssl_key=nothing, ssl_cert=nothing),
-        (make, _, _) -> connection_outcome(make; ssl_key=nothing, ssl_cert=nothing), :ok, :ok),
+        (make, _, _) -> connection_outcome(make; ssl_key=nothing, ssl_cert=nothing), :ok),
     SurfaceRow(180, "combined CA file and directory conflict",
-        (make, _, _) -> connection_outcome(make; ssl_ca=nothing, ssl_capath=nothing),
-        (make, _, _) -> connection_outcome(make; ssl_ca="unused", ssl_capath="unused"), :ok, :ArgumentError),
+        (make, _, _) -> connection_outcome(make; ssl_ca="unused", ssl_capath="unused"), :ArgumentError),
     SurfaceRow(181, "removed TLS options",
-        (make, _, _) -> connection_outcome(make; ssl_cipher="DEFAULT"),
-        (make, _, _) -> connection_outcome(make; ssl_cipher="DEFAULT"), :ok, :ArgumentError),
+        (make, _, _) -> connection_outcome(make; ssl_cipher="DEFAULT"), :ArgumentError),
     SurfaceRow(182, "SSL mode and contradiction table",
-        (make, _, _) -> (connection_outcome(make; ssl_mode=MySQL.API.SSL_MODE_REQUIRED), connection_outcome(make; ssl_mode=MySQL.API.SSL_MODE_DISABLED, ssl_enforce=true)),
-        (make, _, _) -> (connection_outcome(make; ssl_mode=MySQL.API.SSL_MODE_REQUIRED), connection_outcome(make; ssl_mode=MySQL.API.SSL_MODE_DISABLED, ssl_enforce=true)), (:ok, :ok), (:ok, :ArgumentError)),
+        (make, _, _) -> (connection_outcome(make; ssl_mode=:required), connection_outcome(make; ssl_mode=:disabled, ssl_enforce=true)), (:ok, :ArgumentError)),
     SurfaceRow(183, "default authentication plugin",
-        (make, _, _) -> connection_outcome(make; default_auth="mysql_native_password"),
-        (make, _, _) -> connection_outcome(make; default_auth="mysql_native_password"), :ok, :ok),
-    SurfaceRow(184, "secure_auth compatibility option",
-        (make, _, _) -> connection_outcome(make; secure_auth=true),
-        (make, _, _) -> connection_outcome(make; secure_auth=true), :MethodError, :ok),
+        (make, _, _) -> connection_outcome(make; default_auth="mysql_native_password"), :ok),
+    SurfaceRow(184, "secure_auth compatibility option warns but connects",
+        (make, _, _) -> connection_outcome(make; secure_auth=true), :ok),
     SurfaceRow(185, "server public-key and native security options",
-        (make, _, _) -> connection_outcome(make; get_server_public_key=false),
-        (make, _, _) -> connection_outcome(make; get_server_public_key=false), :ok, :ok),
+        (make, _, _) -> connection_outcome(make; get_server_public_key=false), :ok),
     SurfaceRow(186, "dynamic plugin options are removed",
-        (make, _, _) -> connection_outcome(make; plugin_dir=""),
-        (make, _, _) -> connection_outcome(make; plugin_dir=""), :ok, :ArgumentError),
+        (make, _, _) -> connection_outcome(make; plugin_dir=""), :ArgumentError),
     SurfaceRow(188, "one-shot prepared execution",
-        (make, _, _) -> one_shot_parameter_surface(make),
-        (make, _, _) -> one_shot_parameter_surface(make), "17", "17"),
+        (make, _, _) -> one_shot_parameter_surface(make), "17"),
     SurfaceRow(189, "execute rejects SQL parameters as keywords",
-        (make, _, _) -> execute_keyword_surface(make),
-        (make, _, _) -> execute_keyword_surface(make), :MethodError, :MethodError),
+        (make, _, _) -> execute_keyword_surface(make), :MethodError),
     SurfaceRow(200, "isopen local-state contract",
-        (make, _, _) -> isopen_surface(make),
-        (make, _, _) -> isopen_surface(make), (true, false), (true, false)),
+        (make, _, _) -> isopen_surface(make), (true, false)),
     SurfaceRow(202, "load identifier quoting",
-        (make, _, _) -> load_identifier_surface(make),
-        (make, _, _) -> load_identifier_surface(make), :StmtError, :ok),
+        (make, _, _) -> load_identifier_surface(make), :ok),
     SurfaceRow(203, "load debug value logging policy",
-        (make, _, _) -> load_debug_surface(make),
-        (make, _, _) -> load_debug_surface(make), true, false),
+        (make, _, _) -> load_debug_surface(make), false),
     SurfaceRow(205, "error hierarchy shape and compatibility fields",
-        (make, _, _) -> error_surface(make),
-        (make, _, _) -> error_surface(make), (:Error, (:errno, :msg), true, true), (:Error, (:errno, :msg, :sqlstate), true, true)),
-    SurfaceRow(206, "public API value namespace and native handle removal",
-        (make, _, _) -> api_surface(make; native=false),
-        (make, _, _) -> api_surface(make; native=true), ("1", true, true), ("1", true, true)),
+        (make, _, _) -> error_surface(make), (:Error, (:errno, :msg, :sqlstate), true, true)),
+    SurfaceRow(206, "public API value namespace and C handle removal",
+        (make, _, _) -> api_surface(make), ("1", true, true)),
     SurfaceRow(207, "idempotent cleanup",
-        (make, _, _) -> cleanup_surface(make),
-        (make, _, _) -> cleanup_surface(make), true, true),
-    SurfaceRow(208, "native connection serialization",
-        (make, _, _) -> string(query_value(make, "SELECT 1 AS value")),
-        (make, _, _) -> native_thread_surface(make), "1", [1, 2]),
+        (make, _, _) -> cleanup_surface(make), true),
+    SurfaceRow(208, "connection serialization across tasks",
+        (make, _, _) -> native_thread_surface(make), [1, 2]),
     SurfaceRow(209, "deferred transport fails explicitly",
-        (make, _, _) -> connection_outcome(make; protocol=MySQL.API.MYSQL_PROTOCOL_SOCKET),
-        (make, _, _) -> connection_outcome(make; protocol=MySQL.API.MYSQL_PROTOCOL_SOCKET), :ok, :ArgumentError),
+        (make, _, _) -> connection_outcome(make; protocol=:socket), :ArgumentError),
     SurfaceRow(210, "Julia 1.10 compatibility floor",
-        (make, _, _) -> (VERSION >= v"1.10", string(query_value(make, "SELECT 1 AS value"))),
-        (make, _, _) -> (VERSION >= v"1.10", string(query_value(make, "SELECT 1 AS value"))), (true, "1"), (true, "1")),
+        (make, _, _) -> (VERSION >= v"1.10", string(query_value(make, "SELECT 1 AS value"))), (true, "1")),
 ]
 
 const VALUE_SURFACE_EVIDENCE = Dict(
@@ -645,56 +659,85 @@ const VALUE_SURFACE_EVIDENCE = Dict(
 )
 
 """
-    run!(make_c, make_native; password, port)
+    run!(make; password, port)
 
-`make_c(; kw...)`/`make_native(; kw...)` open fresh connections. Runs every §4.2 surface
-row, including the text and prepared-statement value rows, on both backends.
+`make(; kw...)` opens a fresh connection. Runs every §4.2 row and asserts its golden
+`expected` value; rows with `expected === nothing` only assert that the scenario runs.
+Use `capture!(make)` to print `repr` values for baking new goldens.
 """
-function run!(make_c::Function, make_native::Function; password::AbstractString, port::Integer)
+function run!(make::Function; password::AbstractString, port::Integer)
     row_names = Set(row.name for row in ALL_ROWS)
-    @testset "compat manifest coverage" begin
+    @testset "behavior manifest coverage" begin
         @test all(name -> name in row_names, values(VALUE_SURFACE_EVIDENCE))
         surface_lines = Int[row.plan_line for row in SURFACE_ROWS]
         @test length(unique(surface_lines)) == length(surface_lines)
         @test union(Set(surface_lines), Set(keys(VALUE_SURFACE_EVIDENCE))) == Set(163:210)
+        # every value row asserts a golden (either inline `expected` or the GOLDENS table)
+        @test all(row -> row.expected !== nothing || haskey(GOLDENS, row.name), ALL_ROWS)
+        @test all(name -> any(row -> row.name == name, ALL_ROWS), keys(GOLDENS))
     end
-    c = make_c(; db="")
+    c = make(; db="")
     prepare!(c)
     DBInterface.close!(c)
-    @testset "compat manifest: $(row.name)" for row in ALL_ROWS
-        cconn = make_c(; db="manifest")
-        nconn = make_native(; db="manifest")
+    @testset "behavior manifest: $(row.name)" for row in ALL_ROWS
+        conn = make(; db="manifest")
         try
-            legacy = isempty(row.skip_legacy) ? (try; row.run(cconn); catch e; (:threw, sprint(showerror, e)); end) : (:skipped, row.skip_legacy)
-            native = try; row.run(nconn); catch e; (:threw, sprint(showerror, e)); end
-            if row.disposition == :preserve
-                @test isequal(native, legacy)
-                isequal(native, legacy) || @error "manifest divergence" row=row.name native legacy
+            value = try; row.run(conn); catch e; (:threw, sprint(showerror, e)); end
+            expected = row.expected === nothing ? get(GOLDENS, row.name, nothing) : row.expected
+            if expected === nothing
+                threw = value isa Tuple && length(value) == 2 && value[1] === :threw
+                @test !threw
+                threw && @error "manifest row threw" row=row.name value
             else
-                @test isequal(native, row.native)
-                isequal(native, row.native) || @error "manifest fix row mismatch" row=row.name native expected=row.native
-                (row.legacy === nothing || !isempty(row.skip_legacy)) || (@test isequal(legacy, row.legacy))
+                @test isequal(value, expected)
+                isequal(value, expected) || @error "manifest golden mismatch" row=row.name value expected
             end
         finally
-            DBInterface.close!(cconn)
-            DBInterface.close!(nconn)
+            DBInterface.close!(conn)
         end
     end
-    @testset "compat manifest §4.2 line $(row.plan_line): $(row.name)" for row in SURFACE_ROWS
-        legacy = try
-            row.legacy(make_c, password, port)
+    @testset "behavior manifest §4.2 line $(row.plan_line): $(row.name)" for row in SURFACE_ROWS
+        value = try
+            row.run(make, password, port)
         catch err
             (:unexpected, nameof(typeof(err)), sprint(showerror, err))
         end
-        native = try
-            row.native(make_native, password, port)
-        catch err
-            (:unexpected, nameof(typeof(err)), sprint(showerror, err))
+        @test isequal(value, row.expected)
+        isequal(value, row.expected) || @error "manifest surface mismatch" plan_line=row.plan_line row=row.name actual=value expected=row.expected
+    end
+    return nothing
+end
+
+# `repr` that survives an eval round trip for every value the rows produce (`MySQL.Bit`
+# and `Dec64` print forms that do not).
+golden_repr(x) = repr(x)
+golden_repr(x::MySQL.Bit) = "MySQL.Bit(" * repr(x.bits) * ")"
+golden_repr(x::Dec64) = "d64\"" * string(x) * "\""
+golden_repr(x::Missing) = "missing"
+golden_repr(v::AbstractVector{UInt8}) = repr(v)
+golden_repr(v::AbstractVector) = string(eltype(v)) * "[" * join(map(golden_repr, v), ", ") * "]"
+golden_repr(t::Tuple) = "(" * join(map(golden_repr, t), ", ") * (length(t) == 1 ? ",)" : ")")
+golden_repr(nt::NamedTuple) = isempty(nt) ? "NamedTuple()" : "(" * join(["$k = $(golden_repr(v))" for (k, v) in pairs(nt)], ", ") * (length(nt) == 1 ? ",)" : ")")
+
+"""
+    capture!(make)
+
+Prints `name => golden` for every value row whose golden `expected` is not recorded yet,
+ready to paste into the row definitions.
+"""
+function capture!(make::Function)
+    c = make(; db="")
+    prepare!(c)
+    DBInterface.close!(c)
+    for row in ALL_ROWS
+        (row.expected === nothing && !haskey(GOLDENS, row.name)) || continue
+        conn = make(; db="manifest")
+        try
+            value = try; row.run(conn); catch e; (:threw, sprint(showerror, e)); end
+            println(repr(row.name), " =>\n    ", golden_repr(value), ",")
+        finally
+            DBInterface.close!(conn)
         end
-        @test isequal(legacy, row.legacy_expected)
-        @test isequal(native, row.native_expected)
-        isequal(legacy, row.legacy_expected) || @error "legacy manifest surface mismatch" plan_line=row.plan_line row=row.name actual=legacy expected=row.legacy_expected
-        isequal(native, row.native_expected) || @error "native manifest surface mismatch" plan_line=row.plan_line row=row.name actual=native expected=row.native_expected
     end
     return nothing
 end

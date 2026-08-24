@@ -10,7 +10,7 @@ struct LongDataChunk
 end
 
 """
-    MySQL.Native.Statement
+    MySQL.Statement
 
 A prepared statement on the native backend, from `DBInterface.prepare(conn, sql)`. Execute it
 with `DBInterface.execute(stmt, params)`; close it with `DBInterface.close!(stmt)` (the
@@ -37,7 +37,7 @@ mutable struct Statement <: DBInterface.Statement
 end
 
 DBInterface.getconnection(stmt::Statement) = return stmt.conn
-Base.show(io::IO, stmt::Statement) = return print(io, "MySQL.Native.Statement(", repr(stmt.sql), ")")
+Base.show(io::IO, stmt::Statement) = return print(io, "MySQL.Statement(", repr(stmt.sql), ")")
 
 function statement_schema(conn::Connection, columns::Vector{P.ColumnDef}, date_and_time::Bool)
     opts = ResultOptions(; date_and_time=date_and_time, zero_dates=conn.results.zero_dates, time_type=conn.results.time_type)
@@ -67,7 +67,7 @@ function same_column_definitions(a::Vector{P.ColumnDef}, b::Vector{P.ColumnDef})
 end
 
 """
-    DBInterface.prepare(conn::MySQL.Native.Connection, sql; mysql_date_and_time=false) -> Statement
+    DBInterface.prepare(conn::MySQL.Connection, sql; mysql_date_and_time=false) -> Statement
 
 Prepares `sql` on the server and returns a `Statement`. `mysql_date_and_time=true` maps
 DATETIME/TIMESTAMP result columns to `DateAndTime` (microsecond precision).
@@ -98,7 +98,7 @@ function DBInterface.prepare(conn::Connection, sql::AbstractString; mysql_date_a
             false,
             StatementReapEntry(ok.statement_id, generation, nothing, false),
         )
-        finalizer(finalize_statement, stmt)
+        trim_finalizer!(finalize_statement, stmt)
         return stmt
     end
 end
@@ -197,7 +197,7 @@ long_data_bytes(data::AbstractString) = return Vector{UInt8}(codeunits(String(da
 long_data_bytes(data::AbstractVector{UInt8}) = return Vector{UInt8}(data)
 
 """
-    MySQL.Native.send_long_data!(stmt, parameter_number, data)
+    MySQL.send_long_data!(stmt, parameter_number, data)
 
 Sends one copied string or byte chunk for the zero-based prepared-statement parameter number.
 Repeated calls append chunks. The next execute omits that parameter's inline value and retains
@@ -232,7 +232,7 @@ function send_long_data!(stmt::Statement, parameter_number::Integer, data::Union
 end
 
 """
-    MySQL.Native.reset_statement!(stmt)
+    MySQL.reset_statement!(stmt)
 
 Resets a prepared statement's accumulated long data and open server cursor. The statement id
 and cached parameter signature remain valid when the session generation did not change.
@@ -266,8 +266,13 @@ end
 
 @noinline closed_statement() = return error("prepared mysql statement has been closed")
 
+# 1.x accepted a bare scalar as the params of a single-parameter statement
+# (`DBInterface.execute(stmt, 17)`); wrap the scalar leaf types a parameter can be.
+normalize_params(params) = return params
+normalize_params(p::Union{Number, AbstractString, Missing, Nothing, Dates.TimeType, Dates.Period, Bit}) = return (p,)
+
 """
-    DBInterface.execute(stmt::MySQL.Native.Statement, params=(); mysql_store_result=true, mysql_date_and_time=false) -> BinaryCursor
+    DBInterface.execute(stmt::MySQL.Statement, params=(); mysql_store_result=true, mysql_date_and_time=false) -> BinaryCursor
 
 Executes the prepared statement with `params` bound as the `?` markers and returns a
 binary-protocol cursor. `mysql_store_result=false` streams rows (the connection is busy until
@@ -276,6 +281,7 @@ column metadata is determined at execute time (the prepare-time keyword wins oth
 """
 function DBInterface.execute(stmt::Statement, params=(); mysql_store_result::Bool=true, mysql_date_and_time::Bool=false)
     conn = stmt.conn
+    params = normalize_params(params)
     lock(conn.lock) do
         stmt.closed && closed_statement()
         check_paramcount(stmt, params)
@@ -304,7 +310,9 @@ function DBInterface.execute(stmt::Statement, params=(); mysql_store_result::Boo
             zero_dates=conn.results.zero_dates,
             time_type=conn.results.time_type,
         )
-        cursor = make_cursor(conn, stmt.sql, token, resp, true, mysql_store_result, opts, 1)
+        cursor = mysql_store_result ?
+            make_cursor(conn, stmt.sql, token, resp, Val(true), Val(true), opts, 1) :
+            make_cursor(conn, stmt.sql, token, resp, Val(true), Val(false), opts, 1)
         if resp isa P.ResultHeader &&
                 (!same_column_definitions(stmt.columns, resp.columns) ||
                  stmt.metadata_date_and_time != date_and_time)
@@ -321,7 +329,7 @@ function DBInterface.execute(stmt::Statement, params=(); mysql_store_result::Boo
 end
 
 """
-    DBInterface.executemultiple(stmt::MySQL.Native.Statement, params=(); kw...) -> Cursors
+    DBInterface.executemultiple(stmt::MySQL.Statement, params=(); kw...) -> Cursors
 
 Iterates every result set of a prepared CALL (or multi-result statement) as a distinct
 binary cursor, like the connection-level `executemultiple`.
@@ -332,7 +340,7 @@ function DBInterface.executemultiple(stmt::Statement, params=(); mysql_store_res
 end
 
 """
-    DBInterface.close!(stmt::MySQL.Native.Statement)
+    DBInterface.close!(stmt::MySQL.Statement)
 
 Closes the prepared statement. The COM_STMT_CLOSE is parked and sent before the next command
 (never from a finalizer). Idempotent.
@@ -354,7 +362,7 @@ function finalize_statement(stmt::Statement)
     stmt.closed && return nothing
     conn = stmt.conn
     (@atomic conn.statement_reaping_open) || return nothing
-    try_park_statement!(conn, stmt.reap) || finalizer(finalize_statement, stmt)
+    try_park_statement!(conn, stmt.reap) || trim_finalizer!(finalize_statement, stmt)
     return nothing
 end
 

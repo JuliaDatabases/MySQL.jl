@@ -86,7 +86,7 @@ Marks the session `BROKEN`, closes the transport, and returns the exception the 
 should throw: deadlines become `TimeoutError`, a peer EOF becomes `ProtocolError`, and
 everything else (including `InterruptException` and `ProtocolError`) is returned as is.
 """
-function fault!(s::Session, err)
+@inline function fault!(s::Session, err)
     phase = s.phase
     is_terminal(s.phase) || transition!(s, :fault, BROKEN)
     transport_close(s.transport)
@@ -101,6 +101,8 @@ function fault!(s::Session, err)
 end
 
 # Runs a classification/parse step; any exception (malformed packet, limit) faults the session.
+# `fault!` is `@inline` so this catch block has no dynamic `::Any`-argument call under
+# `--trim=safe`.
 function guarded(f::F, s::Session) where {F}
     try
         return f()
@@ -236,14 +238,27 @@ function send_handshake_response!(s::Session, user::AbstractString, auth_respons
 end
 
 """
-    read_auth_packet!(s) -> (kind, value)
+    AuthPacket
 
-Reads and classifies one authentication-phase packet:
-`(:ok, OKPacket)` (session becomes READY), `(:auth_switch, AuthSwitchRequest)`,
-`(:auth_more, AuthMoreData)` (MySQL envelope), `(:plugin_data, Vector{UInt8})` (MariaDB;
-the optional leading `0x01` already stripped). Server ERR is thrown as `AuthError`-free
-`Error` after closing; old-style switch and multi-factor requests raise
-`UnsupportedAuthError`. Each call counts one authentication round against `Limits`.
+One classified authentication-phase packet: `kind` is `:ok` (with the `ok` payload;
+session became READY), `:auth_switch` (`switch_plugin` and `data`), `:auth_more` (MySQL
+envelope, `data`), or `:plugin_data` (MariaDB, `data`; the optional leading `0x01` already
+stripped). A concrete struct instead of a `(kind, value)` tuple so the authentication loop
+has no `::Any` payload.
+"""
+struct AuthPacket
+    kind::Symbol
+    ok::Union{Nothing, OKPacket}
+    switch_plugin::String
+    data::Vector{UInt8}
+end
+
+"""
+    read_auth_packet!(s, round_number, auth_bytes) -> AuthPacket
+
+Reads and classifies one authentication-phase packet. Server ERR is thrown as `Error`
+after closing; old-style switch and multi-factor requests raise `UnsupportedAuthError`.
+Each call counts one authentication round against `Limits`.
 """
 function read_auth_packet!(s::Session, round_number::Int, auth_bytes::Int)
     require_phase(s, AUTH)
@@ -257,7 +272,7 @@ function read_auth_packet!(s::Session, round_number::Int, auth_bytes::Int)
         s.status = ok.status
         s.authenticated = true
         transition!(s, :auth_ok, READY)
-        return (:ok, ok)
+        return AuthPacket(:ok, ok, "", UInt8[])
     elseif kind == :err
         e = guarded(() -> parse_err(p, s.capabilities), s)
         transition!(s, :auth_err, CLOSED)
@@ -266,16 +281,16 @@ function read_auth_packet!(s::Session, round_number::Int, auth_bytes::Int)
     elseif kind == :auth_switch
         req = guarded(() -> parse_auth_switch(p), s)
         transition!(s, :auth_continue, AUTH)
-        return (:auth_switch, req)
+        return AuthPacket(:auth_switch, nothing, req.plugin, req.data)
     elseif kind == :auth_more
         more = guarded(() -> parse_auth_more_data(p), s)
         transition!(s, :auth_continue, AUTH)
-        return (:auth_more, more)
+        return AuthPacket(:auth_more, nothing, "", more.data)
     elseif kind == :plugin_data
         transition!(s, :auth_continue, AUTH)
         bytes = payload(p)
         (!isempty(bytes) && bytes[1] == AUTH_MORE_DATA_HEADER) && popfirst!(bytes)
-        return (:plugin_data, bytes)
+        return AuthPacket(:plugin_data, nothing, "", bytes)
     elseif kind == :old_auth_switch
         close!(s)
         throw(UnsupportedAuthError(PLUGIN_OLD_PASSWORD))

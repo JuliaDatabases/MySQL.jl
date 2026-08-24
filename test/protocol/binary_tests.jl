@@ -260,9 +260,9 @@ end
     @test_throws P.ConversionError N.decode_binary(String, UInt8[0x61], typemax(Int), 0, o)
     @test N.decode_binary(Vector{UInt8}, UInt8[0x00, 0xff], 1, 2, o) == UInt8[0x00, 0xff]
     @test N.decode_binary(Dec64, Vector{UInt8}(codeunits("12.345")), 1, 6, o) == d64"12.345"
-    @test N.decode_binary(MySQL.API.Bit, UInt8[0x01, 0x02], 1, 2, o) == MySQL.API.Bit(0x0102)
-    @test N.decode_binary(MySQL.API.Bit, fill(0xff, 8), 1, 8, o) == MySQL.API.Bit(typemax(UInt64))
-    @test_throws P.ConversionError N.decode_binary(MySQL.API.Bit, fill(0xff, 9), 1, 9, o)
+    @test N.decode_binary(MySQL.Bit, UInt8[0x01, 0x02], 1, 2, o) == MySQL.Bit(0x0102)
+    @test N.decode_binary(MySQL.Bit, fill(0xff, 8), 1, 8, o) == MySQL.Bit(typemax(UInt64))
+    @test_throws P.ConversionError N.decode_binary(MySQL.Bit, fill(0xff, 9), 1, 9, o)
     # DATE (len 4), DATETIME (len 7 and 11), TIMESTAMP is the same as DATETIME
     date4 = UInt8[0xe8, 0x07, 0x02, 0x1d]                                   # 2024-02-29
     @test N.decode_binary(Date, date4, 1, 4, o) == Date(2024, 2, 29)
@@ -325,7 +325,7 @@ end
     @test N.param_signature(Any[Int32(1), missing, "s", UInt64(2)]) == UInt16[0x0003, 0x0006, 0x00fe, UInt16(P.MYSQL_TYPE_LONGLONG) | 0x8000]
     # Preserve the effective 1.x bind types after `val`: Bit becomes bytes, and DecFP
     # becomes a String. Bool is the one deliberate M4 deviation and uses TINY.
-    @test N.param_signature(Any[MySQL.API.Bit(0x101), d64"12.3", Dec128("4.5"), true]) == UInt16[
+    @test N.param_signature(Any[MySQL.Bit(0x101), d64"12.3", Dec128("4.5"), true]) == UInt16[
         P.MYSQL_TYPE_BLOB,
         P.MYSQL_TYPE_STRING,
         P.MYSQL_TYPE_STRING,
@@ -359,23 +359,23 @@ end
 
     # A native BIT parameter is the big-endian binary string of its value (no leading zero
     # bytes, at least one byte), matching the native big-endian BIT decode.
-    @test N.bit_param_bytes(MySQL.API.Bit(0)) == UInt8[0x00]
-    @test N.bit_param_bytes(MySQL.API.Bit(0x7f)) == UInt8[0x7f]
-    @test N.bit_param_bytes(MySQL.API.Bit(0x0100)) == UInt8[0x01, 0x00]
-    @test N.bit_param_bytes(MySQL.API.Bit(0x01ff)) == UInt8[0x01, 0xff]
-    @test N.bit_param_bytes(MySQL.API.Bit(0x0102)) == UInt8[0x01, 0x02]
-    @test N.bit_param_bytes(MySQL.API.Bit(0xffff)) == UInt8[0xff, 0xff]
-    @test N.bit_param_bytes(MySQL.API.Bit(0x0001_0000_0000)) == UInt8[0x01, 0x00, 0x00, 0x00, 0x00]
-    @test N.bit_param_bytes(MySQL.API.Bit(typemax(UInt64))) == fill(0xff, 8)
-    @test N.bit_param_bytes(MySQL.API.Bit(0x8000_0000_0000_0000)) == UInt8[0x80, 0, 0, 0, 0, 0, 0, 0]
-    bit = MySQL.API.Bit(0x0102)
+    @test N.bit_param_bytes(MySQL.Bit(0)) == UInt8[0x00]
+    @test N.bit_param_bytes(MySQL.Bit(0x7f)) == UInt8[0x7f]
+    @test N.bit_param_bytes(MySQL.Bit(0x0100)) == UInt8[0x01, 0x00]
+    @test N.bit_param_bytes(MySQL.Bit(0x01ff)) == UInt8[0x01, 0xff]
+    @test N.bit_param_bytes(MySQL.Bit(0x0102)) == UInt8[0x01, 0x02]
+    @test N.bit_param_bytes(MySQL.Bit(0xffff)) == UInt8[0xff, 0xff]
+    @test N.bit_param_bytes(MySQL.Bit(0x0001_0000_0000)) == UInt8[0x01, 0x00, 0x00, 0x00, 0x00]
+    @test N.bit_param_bytes(MySQL.Bit(typemax(UInt64))) == fill(0xff, 8)
+    @test N.bit_param_bytes(MySQL.Bit(0x8000_0000_0000_0000)) == UInt8[0x80, 0, 0, 0, 0, 0, 0, 0]
+    bit = MySQL.Bit(0x0102)
     bitbuf = UInt8[]
     N.encode_param_value!(bitbuf, bit)
     c = P.PacketCursor(bitbuf)
     off, len = P.read_lenenc_window_len!(c, "Bit parameter")
     @test bitbuf[off:(off + len - 1)] == UInt8[0x01, 0x02]
     # and the text/binary decoders read the same bytes back (BIT round trip)
-    @test N.decode(MySQL.API.Bit, bitbuf, off, len, N.ResultOptions()) == bit
+    @test N.decode(MySQL.Bit, bitbuf, off, len, N.ResultOptions()) == bit
 end
 
 @testset "prepare then execute: binary result set round trip" begin
@@ -832,7 +832,7 @@ end
         if x isa Union{Date, DateTime, MySQL.DateAndTime, Dates.Time}
             len = Int(buf[1])
             return N.decode_binary(T, buf, 2, len, o)
-        elseif x isa Union{AbstractString, Vector{UInt8}, MySQL.API.Bit, DecFP.DecimalFloatingPoint}
+        elseif x isa Union{AbstractString, Vector{UInt8}, MySQL.Bit, DecFP.DecimalFloatingPoint}
             c = P.PacketCursor(buf); off, len = P.read_lenenc_window_len!(c, "v")
             return N.decode_binary(T, buf, off, len, o)
         else
@@ -851,9 +851,9 @@ end
     @test roundtrip(Float64, -2.5) === -2.5
     @test roundtrip(String, "héllo") == "héllo"
     @test roundtrip(Vector{UInt8}, UInt8[1, 2, 3]) == UInt8[1, 2, 3]
-    @test roundtrip(MySQL.API.Bit, MySQL.API.Bit(0x7f)) == MySQL.API.Bit(0x7f)
-    @test roundtrip(MySQL.API.Bit, MySQL.API.Bit(0x0102)) == MySQL.API.Bit(0x0102)
-    @test roundtrip(MySQL.API.Bit, MySQL.API.Bit(typemax(UInt64))) == MySQL.API.Bit(typemax(UInt64))
+    @test roundtrip(MySQL.Bit, MySQL.Bit(0x7f)) == MySQL.Bit(0x7f)
+    @test roundtrip(MySQL.Bit, MySQL.Bit(0x0102)) == MySQL.Bit(0x0102)
+    @test roundtrip(MySQL.Bit, MySQL.Bit(typemax(UInt64))) == MySQL.Bit(typemax(UInt64))
     @test roundtrip(Dec64, d64"12.345") == d64"12.345"
     @test roundtrip(Date, Date(2024, 2, 29)) == Date(2024, 2, 29)
     @test roundtrip(DateTime, DateTime(2024, 2, 29, 13, 14, 15, 250)) == DateTime(2024, 2, 29, 13, 14, 15, 250)

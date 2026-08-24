@@ -1,8 +1,8 @@
 # Live lanes: the native backend against real servers in Harbor containers. Runs only when
 # Docker is available; images are configurable via MYSQL_NATIVE_IMAGES (comma separated).
 using Harbor
-include(joinpath(@__DIR__, "..", "compat_manifest.jl"))
-using .CompatManifest
+include(joinpath(@__DIR__, "..", "behavior_manifest.jl"))
+using .BehaviorManifest
 include(joinpath(@__DIR__, "leak_soak.jl"))
 
 const LIVE_IMAGES = split(get(ENV, "MYSQL_NATIVE_IMAGES", "mysql:8.4,mariadb:11.4"), ',')
@@ -51,7 +51,7 @@ function select_strings(h, sql)
     return rows
 end
 
-function run_live_lane(ref::String; soak::Bool=false)
+function run_live_lane(ref::String; soak::Bool=false, manifest::Bool=false)
     image, tag = image_ref(ref)
     mysql = startswith(image, "mysql")
     port = pick_port()
@@ -127,13 +127,12 @@ function run_live_lane(ref::String; soak::Bool=false)
             @test P.read_command_response!(root.session) isa Union{P.OKPacket, P.EOFPacket}
             N.close!(root)
             @test !isopen(root)
-            # the executable compatibility manifest: Connector/C backend vs native, same server
-            server_port = port
-            CompatManifest.run!(
-                live_factory(MySQL.Connection, server_port),
-                live_factory(N.Connection, server_port);
+            # the executable behavior manifest: golden values on the primary lane only
+            # (goldens are captured against mysql:8.4; server wording differs on MariaDB)
+            manifest && BehaviorManifest.run!(
+                live_factory(MySQL.Connection, port);
                 password=ROOT_PW,
-                port=server_port)
+                port=port)
             soak && run_leak_soak(port)
         end
     end
@@ -152,8 +151,8 @@ end
 if docker_available()
     @testset "live lanes" begin
         for (i, ref) in enumerate(LIVE_IMAGES)
-            # the §8.10 leak/lifecycle soak runs on the first (primary) lane only
-            run_live_lane(String(strip(ref)); soak=i == 1)
+            # the §8.10 leak/lifecycle soak and the golden manifest run on the first (primary) lane only
+            run_live_lane(String(strip(ref)); soak=i == 1, manifest=i == 1)
         end
     end
 else

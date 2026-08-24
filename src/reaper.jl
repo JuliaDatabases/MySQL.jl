@@ -8,6 +8,11 @@
 # CAS: explicit `retire!` performs the same transition, so a finalizer can never re-enqueue a
 # handle that was closed explicitly, and an entry never holds a closed transport.
 
+# `Base.finalizer` registers under `@nospecialize`, which `--trim=safe` reports as an
+# unresolved finalizer; this registers through the same runtime entry Base uses, with
+# concrete argument types at every call site.
+trim_finalizer!(f::F, o::T) where {F, T} = return (ccall(:jl_gc_add_finalizer_th, Cvoid, (Ptr{Cvoid}, Any, Any), Core.getptls(), o, f); nothing)
+
 mutable struct ReapEntry
     @atomic state::Symbol          # :live → :pending → :closing → :closed
     transport::Union{Nothing, P.Transport}
@@ -81,11 +86,11 @@ function reap_now!()
         if swapped
             t = entry.transport
             entry.transport = nothing
-            # invokelatest: the timer task's world is fixed at its creation, so a `close`
-            # method for a transport type defined later (test doubles) would otherwise be a
-            # MethodError that `transport_close` swallows — leaving the transport unclosed
-            # while the entry still reads :closed
-            t === nothing || Base.invokelatest(P.transport_close, t)
+            # The timer task's world age is fixed at its creation, but `P.Transport` is a
+            # closed union of concrete types whose `close` methods all predate any timer,
+            # so a plain call can never be a world-age MethodError (which `transport_close`
+            # would swallow, leaving the transport unclosed while the entry reads :closed).
+            t === nothing || P.transport_close(t)
             @atomic entry.state = :closed
             n += 1
         end
@@ -99,20 +104,28 @@ pending_reaps() = return lock(() -> REAPER_QUEUE_LENGTH[], REAPER_LOCK)
 
 const REAPER_SETUP_LOCK = ReentrantLock()
 
+# Named functions (not closures) so a `juliac --trim` build can compile them: runtime
+# callbacks (timer ticks, atexit hooks) are invoked dynamically, and their specializations
+# are registered as entrypoints in MySQL.jl.
+function reaper_tick(::Timer)
+    try
+        reap_now!()
+    catch err
+        @warn "MySQL reaper failed" exception=(err, catch_backtrace()) maxlog=10
+    end
+    return nothing
+end
+
+reaper_atexit() = return (try; reap_now!(); catch; end; nothing)
+
 # Starts the timer once. A ReentrantLock (not the finalizer-safe spinlock) because creating a
 # Timer and registering the atexit hook may yield.
 function ensure_reaper!()
     lock(REAPER_SETUP_LOCK)
     try
         REAPER_TIMER[] === nothing || return nothing
-        REAPER_TIMER[] = Timer(REAPER_INTERVAL_S; interval=REAPER_INTERVAL_S) do _
-            try
-                reap_now!()
-            catch err
-                @warn "MySQL.Native reaper failed" exception=(err, catch_backtrace()) maxlog=10
-            end
-        end
-        atexit(() -> (try; reap_now!(); catch; end; nothing))
+        REAPER_TIMER[] = Timer(reaper_tick, REAPER_INTERVAL_S; interval=REAPER_INTERVAL_S)
+        atexit(reaper_atexit)
     finally
         unlock(REAPER_SETUP_LOCK)
     end

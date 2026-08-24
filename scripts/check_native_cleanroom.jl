@@ -1,5 +1,5 @@
 const ROOT = normpath(joinpath(@__DIR__, ".."))
-const NATIVE_DIRS = (joinpath(ROOT, "src", "Protocol"), joinpath(ROOT, "src", "Native"))
+const NATIVE_DIRS = (joinpath(ROOT, "src"),)
 const FORBIDDEN = (
     r"MariaDB_Connector_C_jll",
     r"\blibmariadb\b",

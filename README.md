@@ -9,29 +9,32 @@
 [![version](https://juliahub.com/docs/MySQL/version.svg)](https://juliahub.com/ui/Packages/MySQL/xeTdU)
 [![pkgeval](https://juliahub.com/docs/MySQL/pkgeval.svg)](https://juliahub.com/ui/Packages/MySQL/xeTdU)
 
-Package for interfacing with MySQL databases from Julia via the MariaDB C connector library, version 3.1.6.
+Package for interfacing with MySQL databases from Julia.
+
+Since 2.0, MySQL.jl implements the MySQL client/server wire protocol natively in Julia
+(built on [Reseau.jl](https://github.com/JuliaServices/Reseau.jl) for TCP/TLS) — no C
+client library. 1.x used the MariaDB Connector/C library; see the
+[migration guide](https://mysql.juliadatabases.org/dev/migration/) for the differences.
 
 ## Documentation
 
 [![Stable](https://img.shields.io/badge/docs-stable-blue.svg)](https://mysql.juliadatabases.org/stable)
 [![Dev](https://img.shields.io/badge/docs-dev-blue.svg)](https://mysql.juliadatabases.org/dev)
 
-## Native wire-protocol backend (preview)
-
-MySQL.jl 1.7 ships an opt-in implementation of the MySQL client/server protocol in Julia
-(`MySQL.Native`, built on [Reseau.jl](https://github.com/JuliaServices/Reseau.jl) for
-TCP/TLS) next to the existing MariaDB Connector/C backend. `MySQL.Connection` is unchanged;
-to try the native backend, connect with `MySQL.Native.Connection` instead:
+## Usage
 
 ```julia
-conn = DBInterface.connect(MySQL.Native.Connection, host, user, passwd; db="mydb", port=3306)
+conn = DBInterface.connect(MySQL.Connection, host, user, passwd; db="mydb", port=3306)
+cursor = DBInterface.execute(conn, "SELECT * FROM mytable")   # a Tables.jl-compatible cursor
+stmt = DBInterface.prepare(conn, "INSERT INTO mytable (a, b) VALUES (?, ?)")
+DBInterface.execute(stmt, (1, "two"))
+DBInterface.close!(conn)
 ```
 
-`DBInterface.execute`/`prepare`/`executemany`, Tables.jl cursors, `MySQL.load` and
-transactions all work the same way. The native backend is planned to become the default
-`MySQL.Connection` in 2.0; the [migration guide](https://mysql.juliadatabases.org/dev/migration/)
-lists the option and behavior differences (TCP/TLS only in the preview: no Unix sockets,
-named pipes, or compression yet).
+`DBInterface.execute`/`prepare`/`executemany`/`executemultiple`, Tables.jl cursors,
+`MySQL.load`, and transactions are all supported; see the
+[documentation](https://mysql.juliadatabases.org/dev/). The transport is TCP or TLS
+(no Unix sockets, named pipes, or compression yet — these raise clear errors).
 
 ## Contributing
 

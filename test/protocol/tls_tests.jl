@@ -1,7 +1,7 @@
 # STARTTLS and the ssl_mode matrix against a TLS-capable fake peer, plus the
 # connection-establishment deadline and the Native.connect orchestration.
 const TLS = Reseau.TLS
-const N = MySQL.Native
+const N = MySQL
 
 server_config(; cert="server.crt", key="server.key", kw...) = TLS.Config(; cert_file=certfile(cert), key_file=certfile(key), kw...)
 

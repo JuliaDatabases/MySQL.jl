@@ -19,13 +19,13 @@ end
 Base.isopen(h::Handle) = return isopen(h.session)
 
 function finalize_handle(h::Handle)
-    enqueue_from_finalizer!(h.entry) || finalizer(finalize_handle, h)
+    enqueue_from_finalizer!(h.entry) || trim_finalizer!(finalize_handle, h)
     return nothing
 end
 
 function register!(h::Handle)
     ensure_reaper!()
-    finalizer(finalize_handle, h)
+    trim_finalizer!(finalize_handle, h)
     return h
 end
 
@@ -63,6 +63,23 @@ function apply_deadline!(t::P.Transport, deadline::Int64)
     return nothing
 end
 
+# A named functor (not a closure) runs the resolver on its own task, so a `juliac --trim`
+# build can compile the task body (registered as an entrypoint in MySQL.jl).
+struct BindResolve{F}
+    resolver::F
+    address::String
+    result::Channel{Tuple{Bool, Any}}
+end
+
+function (t::BindResolve)()
+    try
+        put!(t.result, (true, t.resolver("tcp", t.address)))
+    catch err
+        put!(t.result, (false, err))
+    end
+    return nothing
+end
+
 function resolve_bind(
         bind::Union{Nothing, String},
         deadline::Int64,
@@ -70,17 +87,13 @@ function resolve_bind(
     ) where {F}
     bind === nothing && return nothing
     address = hostport(bind, 0)
-    deadline == 0 && return resolver("tcp", address)
+    deadline == 0 && return resolver("tcp", address)::Reseau.HostResolvers.ResolvedConnectAddrs
     timeout_message = "connect_timeout expired while resolving bind address $bind"
     result = Channel{Tuple{Bool, Any}}(1)
-    task = errormonitor(Threads.@spawn begin
-        try
-            put!(result, (true, resolver("tcp", address)))
-        catch err
-            put!(result, (false, err))
-        end
-        return nothing
-    end)
+    task = Task(BindResolve(resolver, address, result))
+    task.sticky = false
+    errormonitor(task)
+    schedule(task)
     left = deadline - Int64(time_ns())
     left > 0 || throw(P.TimeoutError(timeout_message))
     seconds = left / 1_000_000_000
@@ -91,7 +104,7 @@ function resolve_bind(
     ok, value = take!(result)
     wait(task)
     ok || throw(value)
-    return value
+    return value::Reseau.HostResolvers.ResolvedConnectAddrs
 end
 
 function dial_one(address::String, deadline::Int64, local_addr)
@@ -99,22 +112,32 @@ function dial_one(address::String, deadline::Int64, local_addr)
     return Reseau.TCP.connect(address; timeout_ns=remaining_ns(deadline), local_addr=local_addr)
 end
 
+# A function barrier per resolved-address vector type (`ResolvedConnectAddrs` is a union of
+# three concrete vector types) keeps the loop and each `dial_one` concretely typed.
+function dial_with_bind(address::String, deadline::Int64, bind::String, local_addrs::Vector{T}) where {T}
+    first_err = nothing
+    for local_addr in local_addrs
+        try
+            return dial_one(address, deadline, local_addr)
+        catch err
+            (err isa P.TimeoutError || P.is_deadline_error(err)) && rethrow()
+            first_err === nothing && (first_err = err)
+        end
+    end
+    first_err === nothing && error("bind resolver returned no addresses for $bind")
+    throw(first_err::Exception)
+end
+
 function dial(opts::ConnectOptions, deadline::Int64)
     address = hostport(opts.host, opts.port)
     try
         local_addrs = resolve_bind(opts.bind, deadline)
         local_addrs === nothing && return dial_one(address, deadline, nothing)
-        first_err = nothing
-        for local_addr in local_addrs
-            try
-                return dial_one(address, deadline, local_addr)
-            catch err
-                (err isa P.TimeoutError || P.is_deadline_error(err)) && rethrow()
-                first_err === nothing && (first_err = err)
-            end
-        end
-        first_err === nothing && error("bind resolver returned no addresses for $(opts.bind)")
-        throw(first_err::Exception)
+        bind = something(opts.bind, "")
+        # explicit split: the resolved-addrs union stays concrete into the parametric barrier
+        local_addrs isa Vector{Reseau.TCP.SocketAddrV4} && return dial_with_bind(address, deadline, bind, local_addrs)
+        local_addrs isa Vector{Reseau.TCP.SocketAddrV6} && return dial_with_bind(address, deadline, bind, local_addrs)
+        return dial_with_bind(address, deadline, bind, local_addrs::Vector{Reseau.TCP.SocketEndpoint})
     catch err
         P.is_deadline_error(err) && throw(P.TimeoutError("connect_timeout expired while connecting to $address"))
         rethrow()
@@ -155,18 +178,38 @@ function resync_local_infile!(s::P.Session)
         return server_err
     end
 end
-@noinline function throw_with_server_cause(err, cause::P.ServerError)
+# ServerError is abstract (Error / StmtError); split before `sprint` so the call is
+# statically resolvable.
+@inline server_error_text(e::P.ServerError) = return e isa P.StmtError ? sprint(showerror, e) : sprint(showerror, e::P.Error)
+
+@inline function throw_with_server_cause(err, cause::P.ServerError)
     try
         throw(cause)
     catch
         throw(err)
     end
 end
-function handle_local_infile!(handler, max_bytes::Int, s::P.Session, req::P.LocalInfileRequest)
+# The user-supplied handler is a deliberately dynamic call, routed through the C runtime's
+# generic dispatch entry so `--trim=safe` sees a resolvable ccall. In a trimmed executable a
+# custom handler works only if its methods were compiled into the binary (call it from your
+# entrypoint, or connect without a handler).
+@inline function call_infile_handler(handler, filename::String)
+    args = Any[filename]
+    return GC.@preserve args ccall(:jl_apply_generic, Any, (Any, Ptr{Any}, UInt32), handler, pointer(args), UInt32(1))
+end
+
+# The handler's returned `IO` is a user type too: the upload send is routed through the
+# same dynamic-dispatch entry (same trimmed-binary caveat as `call_infile_handler`).
+@inline function call_send_local_infile(s::P.Session, source, max_bytes::Int)
+    args = Any[(max_bytes=max_bytes,), P.send_local_infile!, s, source]
+    return GC.@preserve args ccall(:jl_apply_generic, Any, (Any, Ptr{Any}, UInt32), Core.kwcall, pointer(args), UInt32(4))
+end
+
+function handle_local_infile!(handler::Union{Nothing, LocalInfileHandlerBox}, max_bytes::Int, s::P.Session, req::P.LocalInfileRequest)
     handler === nothing && throw(P.fault!(s, P.ProtocolError("the server requested a LOCAL INFILE upload but no local_infile_handler is configured")))
     filename = req.filename isa AbstractString ? String(req.filename) : String(copy(req.filename))
     source = try
-        handler(filename)
+        call_infile_handler(handler.f, filename)
     catch handler_err
         reply = resync_local_infile!(s)
         reply isa P.ServerError && throw_with_server_cause(handler_err, reply)
@@ -175,7 +218,7 @@ function handle_local_infile!(handler, max_bytes::Int, s::P.Session, req::P.Loca
     if source === nothing
         reply = resync_local_infile!(s)
         detail = if reply isa P.ServerError
-            "the server replied: $(sprint(showerror, reply))"
+            "the server replied: $(server_error_text(reply))"
         else
             "the server accepted the empty upload"
         end
@@ -189,7 +232,7 @@ function handle_local_infile!(handler, max_bytes::Int, s::P.Session, req::P.Loca
         throw(err)
     end
     try
-        P.send_local_infile!(s, source; max_bytes=max_bytes)
+        call_send_local_infile(s, source, max_bytes)
     catch err
         if !P.is_terminal(s.phase)
             reply = resync_local_infile!(s)

@@ -31,7 +31,8 @@ end
 function client_handshake!(s; user="root", plugin="caching_sha2_password")
     P.read_greeting!(s)
     P.send_handshake_response!(s, user, zeros(UInt8, 32), plugin)
-    kind, ok = P.read_auth_packet!(s, 1, 0)
+    pkt = P.read_auth_packet!(s, 1, 0)
+    kind, ok = pkt.kind, pkt.ok
     return ok
 end
 
@@ -116,7 +117,8 @@ end
             P.send_handshake_response!(s, "root", zeros(UInt8, 32), "caching_sha2_password"; db="test", attrs=["_client_name" => "MySQL.jl"])
             @test s.phase == P.AUTH
             @test P.has_capability(s, P.CLIENT_CONNECT_WITH_DB)
-            kind, ok = P.read_auth_packet!(s, 1, 0)
+            pkt = P.read_auth_packet!(s, 1, 0)
+    kind, ok = pkt.kind, pkt.ok
             @test kind == :ok && ok isa P.OKPacket
             @test s.phase == P.READY && s.authenticated && isopen(s)
             @test s.transition_log == [(P.CONNECTING, :greeting, P.HANDSHAKE), (P.HANDSHAKE, :handshake_response, P.AUTH), (P.AUTH, :auth_ok, P.READY)]
@@ -168,12 +170,15 @@ end
             s = P.Session(client)
             P.read_greeting!(s)
             P.send_handshake_response!(s, "root", zeros(UInt8, 20), "mysql_native_password")
-            kind, req = P.read_auth_packet!(s, 1, 0)
-            @test kind == :auth_switch && req.plugin == "caching_sha2_password" && req.data == collect(UInt8, 21:40)
+            pkt = P.read_auth_packet!(s, 1, 0)
+            kind, req = pkt.kind, pkt
+            @test kind == :auth_switch && req.switch_plugin == "caching_sha2_password" && req.data == collect(UInt8, 21:40)
             P.send_auth_data!(s, fill(0xAA, 32))
-            kind, more = P.read_auth_packet!(s, 2, length(req.data))
+            pkt = P.read_auth_packet!(s, 2, length(req.data))
+            kind, more = pkt.kind, pkt
             @test kind == :auth_more && more.data == [P.CACHING_SHA2_FAST_AUTH_SUCCESS]
-            kind, ok = P.read_auth_packet!(s, 3, 0)
+            pkt = P.read_auth_packet!(s, 3, 0)
+            kind, ok = pkt.kind, pkt.ok
             @test kind == :ok && s.phase == P.READY
         end
         @test replies == [fill(0xAA, 32)]
@@ -192,10 +197,10 @@ end
             info = P.read_greeting!(s)
             @test info.kind == :mariadb && !P.has_capability(s, P.CLIENT_MYSQL)
             P.send_handshake_response!(s, "root", zeros(UInt8, 20), "mysql_native_password")
-            @test P.read_auth_packet!(s, 1, 0) == (:plugin_data, UInt8[0x41, 0x42])
-            @test P.read_auth_packet!(s, 2, 2) == (:plugin_data, UInt8[0x43])
-            @test P.read_auth_packet!(s, 3, 4) == (:plugin_data, UInt8[0x02, 0x44])   # 0x02 is plugin data for MariaDB; only a leading 0x01 is stripped
-            @test P.read_auth_packet!(s, 4, 6)[1] == :ok
+            pkt = P.read_auth_packet!(s, 1, 0); @test (pkt.kind, pkt.data) == (:plugin_data, UInt8[0x41, 0x42])
+            pkt = P.read_auth_packet!(s, 2, 2); @test (pkt.kind, pkt.data) == (:plugin_data, UInt8[0x43])
+            pkt = P.read_auth_packet!(s, 3, 4); @test (pkt.kind, pkt.data) == (:plugin_data, UInt8[0x02, 0x44])   # 0x02 is plugin data for MariaDB; only a leading 0x01 is stripped
+            @test P.read_auth_packet!(s, 4, 6).kind == :ok
         end
     end
 
@@ -269,8 +274,8 @@ end
             s = P.Session(client; limits=P.Limits(; max_auth_rounds=2))
             P.read_greeting!(s)
             P.send_handshake_response!(s, "root", UInt8[], "caching_sha2_password")
-            @test P.read_auth_packet!(s, 1, 0)[1] == :auth_more
-            @test P.read_auth_packet!(s, 2, 2)[1] == :auth_more
+            @test P.read_auth_packet!(s, 1, 0).kind == :auth_more
+            @test P.read_auth_packet!(s, 2, 2).kind == :auth_more
             @test_throws P.ProtocolError P.read_auth_packet!(s, 3, 4)
             @test s.phase == P.BROKEN && !isopen(s)
         end
@@ -325,7 +330,7 @@ end
             P.replace_transport!(s, client)   # stands in for the TLS.Conn (M2)
             @test s.phase == P.HANDSHAKE
             P.send_handshake_response!(s, "root", zeros(UInt8, 32), "caching_sha2_password")
-            @test P.read_auth_packet!(s, 1, 0)[1] == :ok
+            @test P.read_auth_packet!(s, 1, 0).kind == :ok
         end
         @test length(seen[1]) == 32 && P.read_u32!(P.PacketCursor(seen[1])) & P.CLIENT_SSL != 0
         @test P.read_u32!(P.PacketCursor(seen[2])) & P.CLIENT_SSL != 0

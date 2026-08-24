@@ -44,7 +44,11 @@ plugin_name(::CachingSha2Password) = return PLUGIN_CACHING_SHA2_PASSWORD
 plugin_name(::Sha256Password) = return PLUGIN_SHA256_PASSWORD
 plugin_name(::ClearPassword) = return PLUGIN_CLEAR_PASSWORD
 
-const SUPPORTED_PLUGINS = Dict{String, AuthPlugin}(
+# The closed set of implemented plugins as a concrete union: plugin dispatch stays an `isa`
+# split, which `--trim=safe` resolves statically.
+const PluginKind = Union{NativePassword, CachingSha2Password, Sha256Password, ClearPassword}
+
+const SUPPORTED_PLUGINS = Dict{String, PluginKind}(
     PLUGIN_NATIVE_PASSWORD => NativePassword(),
     PLUGIN_CACHING_SHA2_PASSWORD => CachingSha2Password(),
     PLUGIN_SHA256_PASSWORD => Sha256Password(),
@@ -53,7 +57,7 @@ const SUPPORTED_PLUGINS = Dict{String, AuthPlugin}(
 
 is_supported_plugin(name::AbstractString) = return haskey(SUPPORTED_PLUGINS, name)
 
-function plugin_for(name::AbstractString)
+function plugin_for(name::AbstractString)::PluginKind
     return get(SUPPORTED_PLUGINS, name) do
         throw(UnsupportedAuthError(String(name)))
     end
@@ -184,13 +188,13 @@ end
 # ---- plugin state machine ----
 
 mutable struct AuthState
-    plugin::AuthPlugin
+    plugin::PluginKind
     nonce::Vector{UInt8}
     awaiting_public_key::Bool
     full_auth::Bool
 end
 
-AuthState(plugin::AuthPlugin, nonce::AbstractVector{UInt8}) = return AuthState(plugin, Vector{UInt8}(nonce), false, false)
+AuthState(plugin::PluginKind, nonce::AbstractVector{UInt8}) = return AuthState(plugin, Vector{UInt8}(nonce), false, false)
 
 # Servers append a NUL to the 20-byte scramble in AuthSwitchRequest data.
 function strip_nonce(data::AbstractVector{UInt8})
@@ -295,7 +299,7 @@ end
 # with an AuthSwitchRequest naming the account's plugin — which is then either served or
 # reported as `UnsupportedAuthError`. Failing here would lock out accounts on supported
 # plugins behind such servers.
-function select_plugin(server::ServerInfo, default_auth::Union{Nothing, AbstractString})
+function select_plugin(server::ServerInfo, default_auth::Union{Nothing, AbstractString})::PluginKind
     default_auth === nothing || return plugin_for(default_auth)
     is_supported_plugin(server.auth_plugin) && return plugin_for(server.auth_plugin)
     return CachingSha2Password()
@@ -333,7 +337,7 @@ function authenticate!(s::Session, user::AbstractString, password::Union{Nothing
     try
         plugin = select_plugin(s.server, default_auth)
         state = AuthState(plugin, s.server.auth_plugin_data)
-        note(Symbol("initial_", plugin_name(plugin)))
+        note(Symbol("initial_" * plugin_name(plugin)))
         response = initial_response(plugin, pw, state.nonce, policy)
         record_initial_auth_state!(state, response)
         try
@@ -346,21 +350,23 @@ function authenticate!(s::Session, user::AbstractString, password::Union{Nothing
         auth_bytes = 0
         while true
             response_bytes = s.io.response_bytes
-            kind, value = read_auth_packet!(s, round_number, auth_bytes)
+            pkt = read_auth_packet!(s, round_number, auth_bytes)
             auth_bytes += Int(s.io.response_bytes - response_bytes)
             round_number += 1
-            if kind == :ok
+            if pkt.kind == :ok
                 note(:ok)
-                return value
-            elseif kind == :auth_switch
+                ok = pkt.ok
+                ok === nothing && protocol_error("authentication OK packet carried no payload")
+                return ok
+            elseif pkt.kind == :auth_switch
                 (state.full_auth || state.awaiting_public_key) && protocol_error("authentication plugin switch received after $(plugin_name(state.plugin)) entered its final exchange")
-                state = AuthState(plugin_for(value.plugin), strip_nonce(value.data))
-                note(Symbol("switch_", value.plugin))
+                state = AuthState(plugin_for(pkt.switch_plugin), strip_nonce(pkt.data))
+                note(Symbol("switch_" * pkt.switch_plugin))
                 reply = initial_response(state.plugin, pw, state.nonce, policy)
                 record_initial_auth_state!(state, reply)
                 send_wiped!(s, reply)
             else
-                data = kind == :auth_more ? value.data : value
+                data = pkt.data
                 reply = step!(state, data, pw, policy)
                 note(trace_event(state, data, policy))
                 reply === nothing || send_wiped!(s, reply)

@@ -5,7 +5,7 @@ makedocs(;
     format=Documenter.HTML(),
     pages=[
         "Home" => "index.md",
-        "Migrating to the native backend" => "migration.md",
+        "Migrating from 1.x" => "migration.md",
     ],
     repo="https://github.com/JuliaDatabases/MySQL.jl/blob/{commit}{path}#L{line}",
     sitename="MySQL.jl",

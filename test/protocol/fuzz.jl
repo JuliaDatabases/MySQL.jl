@@ -16,7 +16,7 @@ module Fuzz
 using MySQL, Dates, Logging
 
 const P = MySQL.Protocol
-const N = MySQL.Native
+const N = MySQL
 
 # Reuse the vendor golden vectors already loaded by the protocol suite. The standalone
 # worker includes their small fixture modules itself.
@@ -27,32 +27,6 @@ else
     include("vectors.jl")
     Vectors
 end
-
-# ---- in-memory transport ----
-
-# Reads come from the (mutated) server stream; writes are counted and discarded. Wrapped in
-# a fault-free `FaultTransport` so it fits the `Protocol.Transport` union.
-mutable struct StreamIO <: IO
-    input::IOBuffer
-    written::Int
-    closed::Bool
-end
-
-StreamIO(data::Vector{UInt8}) = StreamIO(IOBuffer(copy(data)), 0, false)
-
-Base.unsafe_read(io::StreamIO, p::Ptr{UInt8}, n::UInt) = unsafe_read(io.input, p, n)
-
-Base.unsafe_write(io::StreamIO, ::Ptr{UInt8}, n::UInt) = (io.written += Int(n); Int(n))
-
-Base.write(io::StreamIO, bytes::Vector{UInt8}) = (io.written += length(bytes); length(bytes))
-
-Base.eof(io::StreamIO) = eof(io.input)
-
-Base.isopen(io::StreamIO) = !io.closed
-
-Base.close(io::StreamIO) = (io.closed = true; nothing)
-
-Base.flush(::StreamIO) = nothing
 
 # ---- deterministic generator (SplitMix64; independent of Julia's RNG stream) ----
 
@@ -489,7 +463,8 @@ function fake_server_info(caps::UInt64)
 end
 
 function session_for(entry::CorpusEntry, data::Vector{UInt8})
-    s = P.Session(P.FaultTransport(StreamIO(data)); capabilities=entry.caps, limits=fuzz_limits())
+    # reads come from the (mutated) server stream; writes are counted and discarded
+    s = P.Session(P.FaultTransport(IOBuffer(copy(data)); discard_writes=true); capabilities=entry.caps, limits=fuzz_limits())
     if entry.flow != :connect
         s.server = fake_server_info(entry.caps)
         s.phase = P.READY
@@ -503,9 +478,10 @@ function drive_connect!(s::P.Session)
     P.send_handshake_response!(s, "root", zeros(UInt8, 20), P.PLUGIN_NATIVE_PASSWORD)
     auth_bytes = 0
     for round in 1:(s.limits.max_auth_rounds + 1)
-        kind, value = P.read_auth_packet!(s, round, auth_bytes)
+        pkt = P.read_auth_packet!(s, round, auth_bytes)
+        kind = pkt.kind
         kind == :ok && return nothing
-        payload = kind == :auth_switch ? value.data : kind == :auth_more ? value.data : value
+        payload = pkt.data
         auth_bytes += length(payload)
         P.send_auth_data!(s, zeros(UInt8, 20))
     end
