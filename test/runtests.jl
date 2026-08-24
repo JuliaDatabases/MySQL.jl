@@ -127,11 +127,21 @@ end
     @test performance_gate_plan(Dict{String, String}(); docker=false) == (correctness=false, timing=false)
 end
 
+# The Docker integration (native live lanes, the GC-thrash leak soak, and the Connector/C
+# integration tests) is heavy and, on shared CI runners, the soak can hang the Julia 1.12+
+# runtime. The cross-platform test matrix therefore runs serverless-only (MYSQL_INTEGRATION=0)
+# and a dedicated Linux job on Julia 1.10 runs the integration. Locally it is on by default.
+run_integration = docker_available() && get(ENV, "MYSQL_INTEGRATION", "1") != "0"
+
 # Native wire-protocol tests (no database server needed)
 include("protocol/runtests.jl")
 
-# Native backend against real servers (Harbor containers; skipped without Docker)
-include("protocol/live_tests.jl")
+# Native backend against real servers (Harbor containers; skipped without Docker/integration)
+if run_integration
+    include("protocol/live_tests.jl")
+else
+    @info "skipping native live lanes (serverless-only run: MYSQL_INTEGRATION=0 or no Docker)"
+end
 
 # §8.9 performance/allocation gates: native vs Connector/C on a dedicated server. The
 # timing *ratios* are off by default on CI: shared runners cannot hold a 0.75×/1.0× ratio
@@ -185,8 +195,8 @@ let mysql = MySQL.API.init()
     @test_logs (:warn, r"SSL_MODE_DISABLED cannot be honored") MySQL.setoptions!(mysql; ssl_mode=MySQL.API.SSL_MODE_DISABLED)
 end
 
-if !docker_available()
-    @info "Docker not available; skipping MySQL integration tests."
+if !run_integration
+    @info "skipping MySQL Connector/C integration tests (serverless-only run or no Docker)."
     @test true
 else
     with_mysql() do cfg

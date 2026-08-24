@@ -23,7 +23,7 @@ jobs:
     name: Julia ${{ matrix.version }} - ${{ matrix.os }} - ${{ matrix.arch }} - ${{ github.event_name }}
     if: github.event_name != 'schedule'
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 60
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -62,9 +62,31 @@ jobs:
           arch: ${{ matrix.arch }}
       - uses: julia-actions/cache@v2
       - uses: julia-actions/julia-buildpkg@v1
-      # Coverage instrumentation is measured by the dedicated `coverage` job; leaving it off
-      # here keeps the Docker live lanes and the leak soak from running under instrumentation
-      # (which otherwise slows a shared runner past the time budget).
+      # The cross-platform matrix runs the serverless protocol suite only (MYSQL_INTEGRATION=0):
+      # it is fast, needs no server, and the Docker integration (live lanes + leak soak + the
+      # Connector/C tests) runs in the dedicated `integration` job instead. Coverage is measured
+      # by the `coverage` job.
+      - uses: julia-actions/julia-runtest@v1
+        with:
+          coverage: false
+        env:
+          MYSQL_INTEGRATION: "0"
+  integration:
+    # Native live lanes (mysql:8.4, mariadb:11.4), the leak/lifecycle soak, and the Connector/C
+    # integration tests, all against real servers via Harbor. Linux-only (Docker) and pinned to
+    # Julia 1.10, whose GC is stable under the soak's GC-thrash (1.12+ can hang on shared runners).
+    name: Integration (Docker)
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v5
+      - run: docker info
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: "1.10"
+      - uses: julia-actions/cache@v2
+      - uses: julia-actions/julia-buildpkg@v1
       - uses: julia-actions/julia-runtest@v1
         with:
           coverage: false
