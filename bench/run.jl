@@ -26,9 +26,10 @@ end
 native_env = build_env("native", nothing)
 legacy_env = build_env("mysql1", "1")
 
-# the fixture manager runs in the checkout's own test environment
-Pkg.activate(ROOT)
-Pkg.instantiate()
+# the fixture manager (test/perf/perf_gates.jl) runs in the native env plus its test-only deps
+Pkg.activate(native_env)
+Pkg.add(["Harbor", "Test"])
+Pkg.precompile()
 
 include(joinpath(ROOT, "test", "perf", "perf_gates.jl"))
 

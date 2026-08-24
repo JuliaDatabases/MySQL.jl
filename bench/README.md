@@ -16,19 +16,20 @@ Connector/C) from the registry — starts the same Docker fixture servers the §
 environment, and prints per-benchmark seconds plus the mysql@1/native ratio (>1x means the
 native client is faster).
 
-Reference numbers (macOS ARM, Docker, Julia 1.12, against the pre-2.0 dual-backend branch;
-ratio is Connector/C time / native time):
+Reference numbers (macOS ARM, Docker, Julia 1.12, this harness after the 2.0 round-trip
+perf round; ratio is mysql@1 time / native time, >1x = native faster):
 
-| benchmark | native | Connector/C | native/C speed |
+| benchmark | native | mysql@1 (Connector/C) | speed |
 |---|---|---|---|
-| 1M-row text scan | 0.5697s | 0.5527s | 0.97x |
-| 1M-row binary (prepared) scan | 0.2347s | 0.2565s | 1.09x |
-| 1M tiny/NULL rows | 0.1580s | 0.1676s | 1.06x |
-| 64 MiB blob fetch | 0.0781s | 0.0800s | 1.02x |
-| 100k executemany | 24.53s | 18.67s | 0.76x |
-| 10k round trips (plain) | 2.571s | 1.483s | 0.58x |
-| COM_PING floor | 151µs/ping | 116µs/ping | — |
+| 100k executemany | 16.97s | 23.46s | 1.38x |
+| 1M-row text scan | 0.4512s | 0.5098s | 1.13x |
+| 1M tiny/NULL rows | 0.1780s | 0.2018s | 1.13x |
+| 1M-row binary (prepared) scan | 0.2866s | 0.2978s | 1.04x |
+| 64 MiB blob fetch | 0.0591s | 0.0551s | 0.93x |
+| 10k round trips (plain) | 2.701s | 2.292s | 0.85x |
 
-The scan paths are at or above Connector/C. The round-trip-bound paths (one server round
-trip per unit of work) trail on macOS because the per-command latency floor is ~35µs higher
-than the C client's; on Linux CI they hold the 0.75x gate.
+Per-command costs after the round: COM_PING 3 allocs, buffered `SELECT 1` 35 allocs,
+repeated prepared execute 22 allocs (framed directly into the output buffer, cached
+statement schema, lazy name lookup). The remaining round-trip gap vs the C client is
+task-wakeup latency in the transport layer (a blocking `recv` wakes the C client directly;
+the native client parks on the poller), not per-command CPU work.

@@ -202,8 +202,25 @@ param_type(::AbstractString) = return (P.MYSQL_TYPE_STRING, false)
 @noinline unbindable_param(x) = return throw(MySQLInterfaceError("cannot bind a value of type $(typeof(x)) as a MySQL parameter"))
 param_type(x) = return unbindable_param(x)
 
+# The `(type, unsigned)` signature code of one bound parameter (bit 15 = unsigned).
+@inline function param_code(x)::UInt16
+    t, uns = param_type(x)
+    return uns ? UInt16(t) | 0x8000 : UInt16(t)
+end
+
 # The `(type, unsigned)` signature the server caches: a change forces `new_params_bind_flag`.
-param_signature(values) = return UInt16[(let (t, uns) = param_type(x); uns ? UInt16(t) | 0x8000 : UInt16(t) end) for x in values]
+param_signature(values) = return UInt16[param_code(x) for x in values]
+
+# Whether `sig` is exactly the signature of `values` (also validates every parameter is
+# bindable, like `param_signature`), without materializing a vector.
+function signature_matches(sig::Vector{UInt16}, values)::Bool
+    matches = length(sig) == length(values)
+    for (i, x) in enumerate(values)
+        code = param_code(x)
+        matches = matches && sig[i] == code
+    end
+    return matches
+end
 
 encode_param_value!(buf::Vector{UInt8}, x::Union{Bool, Int8, UInt8}) = return (P.write_u8!(buf, Core.bitcast(UInt8, x isa Bool ? UInt8(x) : x)); nothing)
 encode_param_value!(buf::Vector{UInt8}, x::Union{Int16, UInt16}) = return (P.write_u16!(buf, Core.bitcast(UInt16, x)); nothing)
@@ -283,15 +300,24 @@ then the value bytes of every non-NULL parameter. Parameters whose 1-based index
 Returns an empty block when there are no parameters.
 """
 function encode_param_block(values, signature::Vector{UInt16}, send_types::Bool; skip=())
-    n = length(values)
-    n == 0 && return UInt8[]
     buf = UInt8[]
+    encode_params_into!(buf, values, signature, send_types, skip)
+    return buf
+end
+
+# In-place variant appending straight to `buf` (the framed command buffer on the hot path).
+function encode_params_into!(buf::Vector{UInt8}, values, signature::Vector{UInt16}, send_types::Bool, skip=())
+    n = length(values)
+    n == 0 && return nothing
+    nullbase = length(buf)
     nullbytes = (n + 7) >> 3
-    null = zeros(UInt8, nullbytes)
-    for (i, x) in enumerate(values)
-        (x === missing || x === nothing) && (null[((i - 1) >> 3) + 1] |= UInt8(1) << ((i - 1) & 7))
+    resize!(buf, nullbase + nullbytes)
+    for i in (nullbase + 1):(nullbase + nullbytes)
+        @inbounds buf[i] = 0x00
     end
-    append!(buf, null)
+    for (i, x) in enumerate(values)
+        (x === missing || x === nothing) && (buf[nullbase + ((i - 1) >> 3) + 1] |= UInt8(1) << ((i - 1) & 7))
+    end
     P.write_u8!(buf, send_types ? 0x01 : 0x00)
     if send_types
         for t in signature
@@ -302,5 +328,5 @@ function encode_param_block(values, signature::Vector{UInt16}, send_types::Bool;
         (x === missing || x === nothing || i in skip) && continue
         encode_param_value!(buf, x)
     end
-    return buf
+    return nothing
 end

@@ -41,6 +41,65 @@ function check_command_size!(s::Session, payload::AbstractVector{UInt8})
     return nothing
 end
 
+# ---- direct command framing ----
+# Almost every command is one wire chunk, so it is framed directly in `io.outbuf` — header
+# placeholder, sequence byte, command byte — the caller appends the payload bytes to the
+# returned buffer, and `finish_command!` patches the length and writes. That is one buffer
+# fill and one write per command instead of building the payload in one or two intermediate
+# vectors first (§8.9 round-trip work). A payload that outgrows one chunk (≥ 16 MiB) falls
+# back to the chunked `sendpacket!` path in `finish_command!`.
+
+function start_command!(s::Session, command::UInt8)
+    require_phase(s, READY)
+    newcommand!(s.io)
+    s.result_sets = 0
+    s.metadata_bytes = 0
+    out = s.io.outbuf
+    empty!(out)
+    write_u24!(out, 0)                     # length, patched in finish_command!
+    push!(out, s.io.seq)
+    s.io.seq += 0x01
+    push!(out, command)
+    return out
+end
+
+function flush_command!(s::Session)
+    out = s.io.outbuf
+    n = length(out) - PACKET_HEADER_LEN    # command byte + payload
+    n <= max_payload(s) || throw(fault!(s, ProtocolError("command packet length $n exceeds limit $(max_payload(s))")))
+    s.debug && @debug "MySQL.Protocol write" phase=s.phase length=n seq=(s.io.seq - 0x01)
+    try
+        if n < MAX_CHUNK
+            out[1] = n % UInt8
+            out[2] = (n >> 8) % UInt8
+            out[3] = (n >> 16) % UInt8
+            arm_write_deadline!(s.io, s.transport)
+            transport_write(s.transport, out)
+        else
+            # rare: the command needs wire chunking; extract the payload and re-frame
+            payload = out[(PACKET_HEADER_LEN + 1):end]
+            s.io.seq = 0x00
+            sendpacket!(s.io, s.transport, payload)
+        end
+    catch err
+        throw(fault!(s, err))
+    end
+    return nothing
+end
+
+function finish_command!(s::Session, kind::CommandKind)
+    flush_command!(s)
+    s.command_kind = kind
+    transition!(s, :send_command, CMD_SENT)
+    return nothing
+end
+
+function finish_noresponse!(s::Session)
+    flush_command!(s)
+    transition!(s, :send_noresponse, READY)
+    return nothing
+end
+
 """
     send_command!(s, command, payload=UInt8[]; kind=CMD_QUERY)
 
@@ -74,21 +133,38 @@ function send_noresponse!(s::Session, command::UInt8, payload::AbstractVector{UI
     return nothing
 end
 
-query!(s::Session, sql::AbstractString) = return send_command!(s, COM_QUERY, codeunits(sql); kind=CMD_QUERY)
-ping!(s::Session) = return send_command!(s, COM_PING; kind=CMD_SIMPLE)
-init_db!(s::Session, db::AbstractString) = return send_command!(s, COM_INIT_DB, codeunits(db); kind=CMD_SIMPLE)
-reset_connection!(s::Session) = return send_command!(s, COM_RESET_CONNECTION; kind=CMD_SIMPLE)
+function query!(s::Session, sql::AbstractString)
+    out = start_command!(s, COM_QUERY)
+    append!(out, codeunits(sql))
+    return finish_command!(s, CMD_QUERY)
+end
+
+function ping!(s::Session)
+    start_command!(s, COM_PING)
+    return finish_command!(s, CMD_SIMPLE)
+end
+
+function init_db!(s::Session, db::AbstractString)
+    out = start_command!(s, COM_INIT_DB)
+    append!(out, codeunits(db))
+    return finish_command!(s, CMD_SIMPLE)
+end
+
+function reset_connection!(s::Session)
+    start_command!(s, COM_RESET_CONNECTION)
+    return finish_command!(s, CMD_SIMPLE)
+end
 
 function set_option!(s::Session, option::Integer)
-    buf = UInt8[]
-    write_u16!(buf, option)
-    return send_command!(s, COM_SET_OPTION, buf; kind=CMD_SET_OPTION)
+    out = start_command!(s, COM_SET_OPTION)
+    write_u16!(out, option)
+    return finish_command!(s, CMD_SET_OPTION)
 end
 
 function stmt_close!(s::Session, statement_id::Integer)
-    buf = UInt8[]
-    write_u32!(buf, statement_id)
-    return send_noresponse!(s, COM_STMT_CLOSE, buf)
+    out = start_command!(s, COM_STMT_CLOSE)
+    write_u32!(out, statement_id)
+    return finish_noresponse!(s)
 end
 
 """

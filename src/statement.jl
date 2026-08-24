@@ -27,7 +27,9 @@ mutable struct Statement <: DBInterface.Statement
     names::Vector{Symbol}
     types::Vector{Type}
     lookup::Dict{Symbol, Int}
+    coltypes::Vector{UInt8}
     last_signature::Vector{UInt16}
+    sig_scratch::Vector{UInt16}
     long_data::Vector{LongDataChunk}
     date_and_time::Bool
     dynamic_metadata::Bool
@@ -44,7 +46,8 @@ function statement_schema(conn::Connection, columns::Vector{P.ColumnDef}, date_a
     names = [Symbol(col.name) for col in columns]
     types = Type[juliatype(col, opts) for col in columns]
     lookup = Dict{Symbol, Int}(nm => i for (i, nm) in enumerate(names))
-    return names, types, lookup
+    coltypes = UInt8[col.type for col in columns]
+    return names, types, lookup, coltypes
 end
 
 function statement_schema(conn::Connection, ok::P.PrepareOK, date_and_time::Bool)
@@ -77,7 +80,7 @@ function DBInterface.prepare(conn::Connection, sql::AbstractString; mysql_date_a
         s = begin_command!(conn)
         P.stmt_prepare!(s, sql)
         ok = P.read_prepare_response!(s)
-        names, types, lookup = statement_schema(conn, ok, mysql_date_and_time)
+        names, types, lookup, coltypes = statement_schema(conn, ok, mysql_date_and_time)
         generation = @atomic conn.generation
         stmt = Statement(
             conn,
@@ -90,6 +93,8 @@ function DBInterface.prepare(conn::Connection, sql::AbstractString; mysql_date_a
             names,
             types,
             lookup,
+            coltypes,
+            UInt16[],
             UInt16[],
             LongDataChunk[],
             mysql_date_and_time,
@@ -122,7 +127,7 @@ function reprepare!(conn::Connection, s::P.Session, stmt::Statement; close_previ
     stmt.nparams = P.num_params(ok)
     stmt.params = ok.params
     stmt.columns = ok.columns
-    stmt.names, stmt.types, stmt.lookup = statement_schema(conn, ok, stmt.date_and_time)
+    stmt.names, stmt.types, stmt.lookup, stmt.coltypes = statement_schema(conn, ok, stmt.date_and_time)
     stmt.dynamic_metadata = isempty(ok.columns)
     stmt.metadata_date_and_time = stmt.date_and_time
     empty!(stmt.last_signature)
@@ -135,17 +140,29 @@ end
 
 function send_execute!(s::P.Session, stmt::Statement, params)
     validate_long_data_params(stmt, params)
-    signature = param_signature(params)
-    send_types = signature != stmt.last_signature
-    block = if isempty(stmt.long_data)
-        encode_param_block(params, signature, send_types)
+    # No allocation on the repeated-execute path: compare the cached signature in place and
+    # rebuild into the statement-owned scratch only on a change; the parameter block is
+    # framed straight into the command buffer.
+    send_types = !signature_matches(stmt.last_signature, params)
+    sig = stmt.last_signature
+    if send_types
+        sig = stmt.sig_scratch
+        resize!(sig, length(params))
+        for (i, x) in enumerate(params)
+            sig[i] = param_code(x)
+        end
+    end
+    out = P.start_stmt_execute!(s, stmt.statement_id)
+    if isempty(stmt.long_data)
+        encode_params_into!(out, params, sig, send_types)
     else
         slots = Int[Int(chunk.parameter_number) + 1 for chunk in stmt.long_data]
         unique!(slots)
-        encode_param_block(params, signature, send_types; skip=slots)
+        encode_params_into!(out, params, sig, send_types, slots)
     end
-    P.stmt_execute!(s, stmt.statement_id, block)
-    stmt.last_signature = signature
+    P.finish_command!(s, P.CMD_STMT_EXECUTE)
+    # the server caches the new signature only once the execute was actually sent
+    send_types && ((stmt.last_signature, stmt.sig_scratch) = (stmt.sig_scratch, stmt.last_signature))
     return nothing
 end
 
@@ -305,26 +322,33 @@ function DBInterface.execute(stmt::Statement, params=(); mysql_store_result::Boo
             read_execute_response!(s, stmt; retain_need_reprepare=false)
         end
         date_and_time = stmt.dynamic_metadata ? mysql_date_and_time : stmt.date_and_time
-        opts = ResultOptions(;
-            date_and_time=date_and_time,
-            zero_dates=conn.results.zero_dates,
-            time_type=conn.results.time_type,
-        )
-        cursor = mysql_store_result ?
-            make_cursor(conn, stmt.sql, token, resp, Val(true), Val(true), opts, 1) :
-            make_cursor(conn, stmt.sql, token, resp, Val(true), Val(false), opts, 1)
-        if resp isa P.ResultHeader &&
-                (!same_column_definitions(stmt.columns, resp.columns) ||
-                 stmt.metadata_date_and_time != date_and_time)
-            # Execute-time definitions are authoritative. Keep the Statement's mutable
-            # containers independent from the returned cursor so neither can alter the
-            # other's schema. `dynamic_metadata` retains the keyword-dispatch contract.
+        opts = date_and_time ?
+            ResultOptions(; date_and_time=true, zero_dates=conn.results.zero_dates, time_type=conn.results.time_type) :
+            conn.results
+        if resp isa P.ResultHeader
+            if same_column_definitions(stmt.columns, resp.columns) && stmt.metadata_date_and_time == date_and_time
+                # Repeated execute with unchanged metadata (the overwhelmingly common case):
+                # reuse the statement's cached schema containers. They are aliased, never
+                # mutated in place — a re-prepare or execute-time schema change *replaces*
+                # the statement's vectors — so neither side can alter the other's schema.
+                return mysql_store_result ?
+                    finish_result_cursor!(conn, stmt.sql, token, resp, Val(true), Val(true), opts, 1, stmt.names, stmt.types, stmt.lookup, stmt.coltypes) :
+                    finish_result_cursor!(conn, stmt.sql, token, resp, Val(true), Val(false), opts, 1, stmt.names, stmt.types, stmt.lookup, stmt.coltypes)
+            end
+            cursor = mysql_store_result ?
+                make_cursor(conn, stmt.sql, token, resp, Val(true), Val(true), opts, 1) :
+                make_cursor(conn, stmt.sql, token, resp, Val(true), Val(false), opts, 1)
+            # Execute-time definitions are authoritative; the changed schema replaces the
+            # statement's cache. `dynamic_metadata` retains the keyword-dispatch contract.
             stmt.columns = resp.columns
-            stmt.names, stmt.types, stmt.lookup =
+            stmt.names, stmt.types, stmt.lookup, stmt.coltypes =
                 statement_schema(conn, resp.columns, date_and_time)
             stmt.metadata_date_and_time = date_and_time
+            return cursor
         end
-        return cursor
+        return mysql_store_result ?
+            make_cursor(conn, stmt.sql, token, resp, Val(true), Val(true), opts, 1) :
+            make_cursor(conn, stmt.sql, token, resp, Val(true), Val(false), opts, 1)
     end
 end
 

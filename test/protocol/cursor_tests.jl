@@ -483,7 +483,7 @@ end
         r1, _ = iterate(c1)
         @test r1.x == 1
         c2, st = iterate(tc, st)
-        @test c2 !== c1 && c2.names == [:a, :a] && c2.lookup[:a] == 2 && c1.names == [:x]
+        @test c2 !== c1 && c2.names == [:a, :a] && MySQL.col_index(c2, :a) == 2 && c1.names == [:x]
         @test_throws ArgumentError r1.x                                        # drained: stale row
         r2, _ = iterate(c2)
         @test r2.a == 9 && r2[1] == "s"

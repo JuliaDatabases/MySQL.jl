@@ -25,7 +25,7 @@ mutable struct Cursor{binary, buffered} <: DBInterface.Cursor
     owner::Union{Nothing, Task}
     names::Vector{Symbol}
     types::Vector{Type}
-    lookup::Dict{Symbol, Int}
+    lookup::Union{Nothing, Dict{Symbol, Int}}   # built on first name-based access
     coltypes::Vector{UInt8}
     nfields::Int
     nrows::Int
@@ -108,7 +108,7 @@ function Tables.getcolumn(r::Row, ::Type{T}, i::Int, nm::Symbol) where {T}
 end
 
 Tables.getcolumn(r::Row, i::Int) = return Tables.getcolumn(r, getcursor(r).types[i], i, getcursor(r).names[i])
-Tables.getcolumn(r::Row, nm::Symbol) = return Tables.getcolumn(r, getcursor(r).lookup[nm])
+Tables.getcolumn(r::Row, nm::Symbol) = return Tables.getcolumn(r, col_index(getcursor(r), nm))
 
 Tables.isrowtable(::Type{<:Cursor}) = return true
 Tables.schema(c::Cursor) = return Tables.Schema(c.names, c.types)
@@ -121,24 +121,49 @@ Base.length(c::Cursor) = return c.nrows
 
 # ---- construction from a command response ----
 
+# Shared by every result-less cursor (per §8.9 an `executemany` makes one per row) and as
+# the never-scanned initial scratch of result cursors. Never mutated.
+const EMPTY_NAMES = Symbol[]
+const EMPTY_TYPES = Type[]
+const EMPTY_COLTYPES = UInt8[]
+const EMPTY_BYTES = UInt8[]
+const EMPTY_INTS = Int[]
+
+# The name → index Dict is built on first name-based access; positional and schema-typed
+# access (the hot paths) never pay for it.
+function col_index(c::Cursor, nm::Symbol)
+    lk = c.lookup
+    if lk === nothing
+        lk = Dict{Symbol, Int}(n => i for (i, n) in enumerate(c.names))
+        c.lookup = lk
+    end
+    return lk[nm]
+end
+
 function empty_cursor(conn::Connection, sql::String, token::Int, ok::P.OKPacket, ::Val{binary}, ::Val{buffered}, opts::ResultOptions, number::Int) where {binary, buffered}
-    c = Cursor{binary, buffered}(conn, sql, token, @atomic(conn.generation), nothing, Symbol[], Type[], Dict{Symbol, Int}(), UInt8[], 0, -1, Core.bitcast(Int64, ok.affected_rows), ok, ok.status, ok.warnings, UInt8[], UInt8[], Int[], Int[], Int[], P.PacketCursor(UInt8[]), 0, 0, number, true, false, opts)
+    c = Cursor{binary, buffered}(conn, sql, token, @atomic(conn.generation), nothing, EMPTY_NAMES, EMPTY_TYPES, nothing, EMPTY_COLTYPES, 0, -1, Core.bitcast(Int64, ok.affected_rows), ok, ok.status, ok.warnings, EMPTY_BYTES, EMPTY_BYTES, EMPTY_INTS, EMPTY_INTS, EMPTY_INTS, P.PacketCursor(EMPTY_BYTES), 0, 0, number, true, false, opts)
     P.more_results(ok) || release_token!(c)
     return c
 end
 
 function result_cursor(conn::Connection, sql::String, token::Int, header::P.ResultHeader, ::Val{binary}, ::Val{buffered}, opts::ResultOptions, number::Int) where {binary, buffered}
+    names = [Symbol(col.name) for col in header.columns]
+    types = Type[juliatype(col, opts) for col in header.columns]
+    coltypes = binary ? UInt8[col.type for col in header.columns] : EMPTY_COLTYPES
+    return finish_result_cursor!(conn, sql, token, header, Val(binary), Val(buffered), opts, number, names, types, nothing, coltypes)
+end
+
+# Construction tail shared with the statement fast path, which passes the statement's
+# cached schema containers. Shared containers are never mutated in place (a re-prepare or
+# execute-time schema change *replaces* the statement's vectors), so aliasing is safe.
+function finish_result_cursor!(conn::Connection, sql::String, token::Int, header::P.ResultHeader, ::Val{binary}, ::Val{buffered}, opts::ResultOptions, number::Int, names::Vector{Symbol}, types::Vector{Type}, lookup::Union{Nothing, Dict{Symbol, Int}}, coltypes::Vector{UInt8}) where {binary, buffered}
     n = length(header.columns)
     s = session(conn)
     if buffered
         charge_buffered!(conn, s, header.metadata_bytes + (2 * n + 1) * sizeof(Int))
         binary && charge_buffered!(conn, s, n * sizeof(UInt8))
     end
-    names = [Symbol(col.name) for col in header.columns]
-    types = Type[juliatype(col, opts) for col in header.columns]
-    lookup = Dict{Symbol, Int}(nm => i for (i, nm) in enumerate(names))
-    coltypes = binary ? UInt8[col.type for col in header.columns] : UInt8[]
-    c = Cursor{binary, buffered}(conn, sql, token, @atomic(conn.generation), nothing, names, types, lookup, coltypes, n, buffered ? 0 : -1, Int64(0), nothing, UInt16(0), UInt16(0), UInt8[], UInt8[], Int[], Vector{Int}(undef, n), Vector{Int}(undef, n), P.PacketCursor(UInt8[]), 0, 0, number, false, false, opts)
+    c = Cursor{binary, buffered}(conn, sql, token, @atomic(conn.generation), nothing, names, types, lookup, coltypes, n, buffered ? 0 : -1, Int64(0), nothing, UInt16(0), UInt16(0), UInt8[], UInt8[], Int[], Vector{Int}(undef, n), Vector{Int}(undef, n), P.PacketCursor(EMPTY_BYTES), 0, 0, number, false, false, opts)
     buffered && buffer_rows!(c, s)
     return c
 end
@@ -193,8 +218,10 @@ function buffer_rows!(c::Cursor{binary, true}, s::P.Session) where {binary}
             scan_row_guarded!(c, r, s)
             n = P.payload_length(r)
             charge_buffered!(conn, s, n + sizeof(Int))
-            push!(c.rowstarts, length(c.buf) + 1)
-            append!(c.buf, view(r.buf, r.lo:r.hi))
+            old = length(c.buf)
+            push!(c.rowstarts, old + 1)
+            resize!(c.buf, old + n)
+            copyto!(c.buf, old + 1, r.buf, r.lo, n)
             c.nrows += 1
         end
     catch
@@ -347,7 +374,7 @@ prepares, executes and returns a binary-protocol cursor bound to a one-shot stat
 """
 function DBInterface.execute(conn::Connection, sql::AbstractString, params=(); mysql_store_result::Bool=true, mysql_date_and_time::Bool=false)
     params == () || return execute_params(conn, sql, params; mysql_store_result=mysql_store_result, mysql_date_and_time=mysql_date_and_time)
-    opts = ResultOptions(; date_and_time=mysql_date_and_time, zero_dates=conn.results.zero_dates, time_type=conn.results.time_type)
+    opts = mysql_date_and_time ? ResultOptions(; date_and_time=true, zero_dates=conn.results.zero_dates, time_type=conn.results.time_type) : conn.results
     lock(conn.lock) do
         s = begin_command!(conn)
         token = new_token!(conn)

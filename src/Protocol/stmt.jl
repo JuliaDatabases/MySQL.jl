@@ -26,7 +26,11 @@ num_columns(ok::PrepareOK) = return length(ok.columns)
 
 Sends `COM_STMT_PREPARE`; read the answer with `read_prepare_response!`.
 """
-stmt_prepare!(s::Session, sql::AbstractString) = return send_command!(s, COM_STMT_PREPARE, codeunits(sql); kind=CMD_STMT_PREPARE)
+function stmt_prepare!(s::Session, sql::AbstractString)
+    out = start_command!(s, COM_STMT_PREPARE)
+    append!(out, codeunits(sql))
+    return finish_command!(s, CMD_STMT_PREPARE)
+end
 
 # Reads one metadata block (`n` column definitions, then the EOF that closes it unless
 # DEPRECATE_EOF), bounded by `max_metadata_bytes` before every allocation.
@@ -112,7 +116,20 @@ function build_stmt_execute(statement_id::Integer, param_block::AbstractVector{U
 end
 
 function stmt_execute!(s::Session, statement_id::Integer, param_block::AbstractVector{UInt8})
-    return send_command!(s, COM_STMT_EXECUTE, build_stmt_execute(statement_id, param_block); kind=CMD_STMT_EXECUTE)
+    out = start_stmt_execute!(s, statement_id)
+    append!(out, param_block)
+    return finish_command!(s, CMD_STMT_EXECUTE)
+end
+
+# Direct-framing variant: begins COM_STMT_EXECUTE in `io.outbuf` (statement id,
+# `CURSOR_TYPE_NO_CURSOR`, `iteration_count=1`) and returns the buffer so the driver layer
+# can append the parameter block in place; finish with `finish_command!(s, CMD_STMT_EXECUTE)`.
+function start_stmt_execute!(s::Session, statement_id::Integer)
+    out = start_command!(s, COM_STMT_EXECUTE)
+    write_u32!(out, statement_id)
+    write_u8!(out, CURSOR_TYPE_NO_CURSOR)
+    write_u32!(out, 1)
+    return out
 end
 
 """
@@ -122,9 +139,9 @@ end
 single OK/ERR; an ERR is classified as `StmtError`.
 """
 function stmt_reset!(s::Session, statement_id::Integer)
-    buf = UInt8[]
-    write_u32!(buf, statement_id)
-    return send_command!(s, COM_STMT_RESET, buf; kind=CMD_STMT_RESET)
+    out = start_command!(s, COM_STMT_RESET)
+    write_u32!(out, statement_id)
+    return finish_command!(s, CMD_STMT_RESET)
 end
 
 """
@@ -134,9 +151,9 @@ end
 before it is executed. The server never answers, so the session stays `READY`.
 """
 function stmt_send_long_data!(s::Session, statement_id::Integer, param_id::Integer, data::AbstractVector{UInt8})
-    buf = UInt8[]
-    write_u32!(buf, statement_id)
-    write_u16!(buf, param_id)
-    append!(buf, data)
-    return send_noresponse!(s, COM_STMT_SEND_LONG_DATA, buf)
+    out = start_command!(s, COM_STMT_SEND_LONG_DATA)
+    write_u32!(out, statement_id)
+    write_u16!(out, param_id)
+    append!(out, data)
+    return finish_noresponse!(s)
 end
