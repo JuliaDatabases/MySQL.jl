@@ -23,7 +23,7 @@ jobs:
     name: Julia ${{ matrix.version }} - ${{ matrix.os }} - ${{ matrix.arch }} - ${{ github.event_name }}
     if: github.event_name != 'schedule'
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 90
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -62,10 +62,30 @@ jobs:
           arch: ${{ matrix.arch }}
       - uses: julia-actions/cache@v2
       - uses: julia-actions/julia-buildpkg@v1
+      # Coverage instrumentation is measured by the dedicated `coverage` job; leaving it off
+      # here keeps the Docker live lanes and the leak soak from running under instrumentation
+      # (which otherwise slows a shared runner past the time budget).
       - uses: julia-actions/julia-runtest@v1
+        with:
+          coverage: false
+  coverage:
+    # Native line-coverage gate (plan §8.15). The serverless fake-peer suite alone covers
+    # ~96% of src/Protocol + src/Native, so the gate needs neither Docker nor the leak soak
+    # and stays fast; it also feeds codecov.
+    name: Native coverage
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: "1"
+      - uses: julia-actions/cache@v2
+      - uses: julia-actions/julia-buildpkg@v1
+      - run: julia --project=. --code-coverage=@src --startup-file=no -e 'include("test/protocol/runtests.jl")'
       - uses: julia-actions/julia-processcoverage@v1
       - run: julia --startup-file=no scripts/check_native_coverage.jl lcov.info 0.85
-        if: runner.os == 'Linux' && matrix.version == 1
       - uses: codecov/codecov-action@v5
         with:
           files: lcov.info
@@ -91,9 +111,10 @@ jobs:
           name: fuzz-failures
           path: fuzz_failures/
   perf:
-    # §8.9 timing ratios: correctness/limit/allocation gates stay in Docker-capable test jobs.
-    # Ratios are too tight for shared PR runners, so opt in on the nightly schedule and on
-    # demand, with coverage off so the pure-Julia backend is not instrumented against C.
+    # §8.9 native-vs-Connector/C gates (correctness/allocation + timing ratios). They are too
+    # heavy/tight for the shared PR test lanes, so they run here on the nightly schedule and on
+    # demand (MYSQL_PERF_GATES=1), with coverage off so the pure-Julia backend is not
+    # instrumented against C. Value parity is still checked in the PR live lanes (compat manifest).
     name: Performance gates (§8.9)
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
