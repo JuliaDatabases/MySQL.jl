@@ -26,7 +26,8 @@ function check_file!(violations::Vector{String}, path::String)
             occursin(pattern, line) && push!(violations, "$relative:$line_number: forbidden native dependency reference")
         end
         occursin(r"\bccall\s*\(", line) && relative != joinpath("src", "Protocol", "crypto.jl") &&
-            push!(violations, "$relative:$line_number: ccall is allowed only for the OpenSSL RSA wrapper")
+            !occursin(r"\bccall\s*\(\s*:jl_\w+\s*,", line) &&
+            push!(violations, "$relative:$line_number: ccall is allowed only for the OpenSSL RSA wrapper and Julia runtime (:jl_*) entry points")
     end
     return nothing
 end

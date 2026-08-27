@@ -155,6 +155,9 @@ jobs:
           coverage: false
         env:
           MYSQL_PERF_GATES: "1"
+          # Only the §8.9 gates here: the live lanes/soak run in the Integration job on
+          # Julia 1.10 (the soak can hang 1.12+ on shared runners — see test/runtests.jl).
+          MYSQL_INTEGRATION: "0"
   docs:
     name: Documentation
     if: github.event_name != 'schedule'
