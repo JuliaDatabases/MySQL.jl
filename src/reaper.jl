@@ -156,6 +156,8 @@ function ensure_reaper!()
             reaper_atexit()
         end
         task = Task(reaper_loop)
+        task.sticky = false
+        errormonitor(task)
         schedule(task)
         atexit(reaper_atexit)
     finally

@@ -373,7 +373,7 @@ the next operation; use `DBInterface.executemultiple` to consume them. Passing `
 prepares, executes and returns a binary-protocol cursor bound to a one-shot statement.
 """
 function DBInterface.execute(conn::Connection, sql::AbstractString, params=(); mysql_store_result::Bool=true, mysql_date_and_time::Bool=false)
-    params == () || return execute_params(conn, sql, params; mysql_store_result=mysql_store_result, mysql_date_and_time=mysql_date_and_time)
+    params === () || return execute_params(conn, sql, params; mysql_store_result=mysql_store_result, mysql_date_and_time=mysql_date_and_time)
     opts = mysql_date_and_time ? ResultOptions(; date_and_time=true, zero_dates=conn.results.zero_dates, time_type=conn.results.time_type) : conn.results
     lock(conn.lock) do
         s = begin_command!(conn)
