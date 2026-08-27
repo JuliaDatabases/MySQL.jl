@@ -1,4 +1,5 @@
-# Executable behavior manifest (plan §4.2). Before 2.0 every row ran on both the
+# Executable behavior manifest (the 1.x behavior table; docs/src/migration.md is the
+# user-facing rendering). Before 2.0 every row ran on both the
 # Connector/C and the native backend and asserted the row's disposition; the dual-backend
 # runs proved parity, and at 2.0 the manifest became a native-only golden regression suite:
 #
@@ -8,7 +9,7 @@
 #
 # Every row's `expected` value is asserted against mysql:8.4 (the primary live lane).
 # Value rows cover text and binary results. Surface rows cover the remaining connection,
-# option, security, lifecycle, and API contracts. A coverage assertion maps every plan row.
+# option, security, lifecycle, and API contracts. A coverage assertion maps every manifest row.
 module BehaviorManifest
 
 using Test, MySQL, DBInterface, Tables, Dates, DecFP, Logging

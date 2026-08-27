@@ -1,5 +1,5 @@
 # Command phase at the framing level: sending commands and walking their responses through
-# the phase machine. Value decoding of rows belongs to the cursor layer (M3/M4); here rows
+# the phase machine. Value decoding of rows belongs to the cursor layer; here rows
 # are raw `PacketView`s.
 
 """

@@ -8,6 +8,7 @@ Root of the native backend's exception hierarchy.
 - `AuthError` / `UnsupportedAuthError`: authentication policy or plugin problems
 - `TimeoutError`: a deadline expired
 - `ConversionError`: a wire value cannot be represented by the requested Julia type
+- `TLSNegotiationError`: the TLS handshake failed while establishing the connection
 - `LocalInfileRefused`: the LOCAL INFILE handler declined a server request
 """
 abstract type MySQLError <: Exception end
@@ -32,7 +33,8 @@ Error(errno::Integer, msg::AbstractString, sqlstate::AbstractString="") = return
     StmtError(errno, msg, sqlstate="")
 
 Server ERR packet raised by prepared-statement operations (distinct type on purpose so
-`@test_throws MySQL.API.StmtError` style dispatch keeps working).
+1.x-style `@test_throws MySQL.StmtError` dispatch keeps working; the 1.x name was
+`MySQL.API.StmtError`).
 """
 struct StmtError <: ServerError
     errno::Cuint

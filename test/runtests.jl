@@ -44,7 +44,7 @@ function performance_gate_plan(env=ENV; docker::Bool=docker_available())
     # heavy; under CI's coverage instrumentation they blow the test-job time budget, and the
     # behavior manifest already asserts values in the PR live lanes. So under
     # CI they are opt-in via MYSQL_PERF_GATES=1 (the dedicated `perf` job sets it); local runs
-    # run them by default. MYSQL_PERF_GATES enables the correctness gates and the timing ratios
+    # run them by default. MYSQL_PERF_GATES enables the correctness gates and the timing report
     # together, so a single flag controls the whole §8.9 block.
     gates_default = haskey(env, "CI") ? "0" : "1"
     enabled = get(env, "MYSQL_PERF_GATES", gates_default) != "0"
@@ -147,10 +147,10 @@ else
     @info "skipping native live lanes (serverless-only run: MYSQL_INTEGRATION=0 or no Docker)"
 end
 
-# §8.9 performance/allocation gates on a dedicated server. The
-# timing *ratios* are off by default on CI: shared runners cannot hold a 0.75×/1.0× ratio
-# reliably. The `perf` CI job (and any local run) opts back in with MYSQL_PERF_GATES=1; the
-# correctness/limit/allocation gates always run when Docker is available.
+# §8.9 performance/allocation gates on a dedicated server. The timing report is off by
+# default on CI (shared-runner wall clock is noisy and slow). The `perf` CI job (and any
+# local run) opts back in with MYSQL_PERF_GATES=1; the correctness/limit/allocation gates
+# always run when Docker is available.
 perf_plan = performance_gate_plan()
 if perf_plan.correctness
     include("perf/perf_gates.jl")
@@ -165,19 +165,19 @@ if perf_plan.correctness
                     script = joinpath(@__DIR__, "perf", "run_perf_gates.jl")
                     project = Base.active_project()
                     cmd = `$(Base.julia_cmd()) --startup-file=no --check-bounds=auto --code-coverage=none --threads=$(Threads.nthreads()) --project=$project $script $plain_port $tls_port`
-                    @testset "timing ratios (production-bounds child)" begin
+                    @testset "timing report (production-bounds child)" begin
                         @test success(pipeline(cmd; stdout=stdout, stderr=stderr))
                     end
                 else
                     PerfGates.run_timing_gates(plain_port, tls_port)
                 end
             else
-                @info "skipping §8.9 timing ratios (MYSQL_PERF_GATES=0); correctness/limit/allocation gates passed"
+                @info "skipping §8.9 timing report (MYSQL_PERF_GATES=0); correctness/limit/allocation gates passed"
             end
         end
     end
 else
-    @info "skipping §8.9 Docker gates (Docker unavailable)"
+    @info "skipping §8.9 Docker gates (Docker unavailable or MYSQL_PERF_GATES=0)"
 end
 
 if !run_integration

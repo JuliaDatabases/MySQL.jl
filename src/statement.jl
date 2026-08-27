@@ -103,6 +103,7 @@ function DBInterface.prepare(conn::Connection, sql::AbstractString; mysql_date_a
             false,
             StatementReapEntry(ok.statement_id, generation, nothing, false),
         )
+        # never true at run time; static call edge for --trim (see TRIM_CALL_EDGE in reaper.jl)
         TRIM_CALL_EDGE[] && finalize_statement(stmt)
         trim_finalizer!(finalize_statement, stmt)
         return stmt
@@ -252,7 +253,7 @@ end
 """
     MySQL.reset_statement!(stmt)
 
-Resets a prepared statement's accumulated long data and open server cursor. The statement id
+Resets a prepared statement's accumulated long data. The statement id
 and cached parameter signature remain valid when the session generation did not change.
 """
 function reset_statement!(stmt::Statement)

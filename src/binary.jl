@@ -1,8 +1,8 @@
 # Binary-protocol value codecs. Decoding maps a prepared-statement result value (a content
 # window produced by `Protocol.scan_binary_row!`) to the same Julia type the text path
 # produces (`MySQL.juliatype`), preserving the 1.x prepared-statement observable behaviour
-# except where §4.2 marks a Fix (BIT big-endian, TIME range/days/sign, unified zero-date
-# policy). Encoding serialises a bound parameter to its wire `(type, unsigned)` and value
+# except for the documented Fixes (behavior table in docs/src/migration.md: BIT big-endian,
+# TIME range/days/sign, unified zero-date policy). Encoding serialises a bound parameter to its wire `(type, unsigned)` and value
 # bytes for `COM_STMT_EXECUTE`, mirroring the 1.x `mysqltype`/`bind!` mapping.
 
 @noinline function invalid_binary_span(pos, len, n)

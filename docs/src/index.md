@@ -17,7 +17,7 @@ Once installed, you start using the package by making a connection to the mysql 
 conn = DBInterface.connect(MySQL.Connection, host, user, passwd)
 ```
 
-This utilizes the DBInterface.jl package method `connect` and passes in `MySQL.Connection` as the first argument to signal the type of database we're connecting to. Since 2.0 the connection speaks the MySQL wire protocol natively in Julia — no C library is involved; if you are upgrading from 1.x, see [Migrating from 1.x](migration.md). `DBInterface.connect` also supports a host of options like the port to connect to, whether to use a socket, where an options file is located etc. To see the full list of supported keyword arguments, see the help for [`DBInterface.connect`](@ref).
+The first argument selects the database driver. Since 2.0 the connection speaks the MySQL wire protocol natively in Julia — no C library is involved. If you are upgrading from 1.x, see [Migrating from 1.x](migration.md). `DBInterface.connect` accepts many connection options, such as `port`, `db`, `ssl_mode`, and `option_file`; the [migration guide](migration.md) lists the 2.0 additions and changes.
 
 Once connected, there are two ways to submit queries to the server:
 
@@ -26,7 +26,7 @@ Once connected, there are two ways to submit queries to the server:
 
 Both execution methods return a `Cursor` object that supports the [Tables.jl](https://juliadata.github.io/Tables.jl/stable/) interface, which allows materializing a query resultset in a number of ways, like `DataFrame(x)`, `CSV.write("results.csv", x)`, etc.
 
-MySQL.jl attempts to provide a convenient `MySQL.load(table, conn, table_name)` function for generically loading Tables.jl-compatible sources into database tables. While the mysql API has some utilities for even making this possible, just note that it can be tricky to do generically in practice due to specific modifications needed in `CREATE TABLE` and column type statements.
+`MySQL.load(table, conn, table_name)` loads a Tables.jl-compatible source into a database table. It generates the `CREATE TABLE` statement from the table schema. Column types often need manual control; use the `coltypes` and `columnsuffix` options (see the `MySQL.load` docstring).
 
 ## API reference
 ```@docs

@@ -159,7 +159,7 @@ function close!(s::Session)
     return nothing
 end
 
-# ---- connection phase (framing level; authentication plugins arrive in M2) ----
+# ---- connection phase (framing level; authentication plugins live in auth.jl) ----
 
 """
     read_greeting!(s) -> ServerInfo
@@ -221,7 +221,7 @@ end
     send_handshake_response!(s, user, auth_response, plugin; db="", attrs=[], charset=CHARSET_UTF8MB4_GENERAL_CI)
 
 Writes HandshakeResponse41 (HANDSHAKE → AUTH). The auth response bytes come from the
-selected plugin (M2); M1 only frames the packet.
+selected plugin (see auth.jl); this function only frames the packet.
 """
 function send_handshake_response!(s::Session, user::AbstractString, auth_response::AbstractVector{UInt8}, plugin::AbstractString; db::AbstractString="", attrs::Vector{Pair{String, String}}=Pair{String, String}[], charset::UInt8=CHARSET_UTF8MB4_GENERAL_CI)
     require_phase(s, HANDSHAKE)

@@ -1,8 +1,8 @@
 # Serverless subset of the §8.9 performance/allocation gates: the per-row allocation
 # contract of the scan/decode hot path — allocations per row ≤ (String/Vector columns + 1)
 # — asserted against the fake peer on every CI lane (no Docker needed). The full
-# native-vs-Connector/C throughput gates live in `test/perf/perf_gates.jl` and run inside
-# `Pkg.test` when Docker is available.
+# server-backed correctness/limit/allocation gates and the timing report live in
+# `test/perf/perf_gates.jl` and run inside `Pkg.test` when Docker is available.
 
 const PERF_NROWS = 20_000
 

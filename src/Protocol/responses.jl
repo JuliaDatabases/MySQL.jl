@@ -279,7 +279,7 @@ function classify_auth(p::PacketView, mariadb::Bool)
 end
 
 """
-    classify_command_response(kind, p) -> :ok | :err | :local_infile | :column_count | :prepare_ok
+    classify_command_response(kind, p) -> :ok | :err | :eof | :local_infile | :column_count | :prepare_ok
 """
 function classify_command_response(kind::CommandKind, p::PacketView)
     b = first_byte(p)
@@ -326,7 +326,7 @@ function classify_row(p::PacketView, binary::Bool)
 end
 
 """
-    scan_text_row!(p, offsets, lengths)
+    scan_text_row!(p, ncols, offsets, lengths)
 
 Splits a text row into per-column windows of the packet buffer: `offsets[i]`/`lengths[i]`
 describe column `i`; NULL columns get `lengths[i] == -1`. Both vectors are resized to the

@@ -2,15 +2,19 @@
 
 This file accompanies `src/Protocol/`. It records where every byte-level fact came from,
 the places where the vendor documents disagree, and every consultation of a third-party
-implementation (none so far). The plan that drives this work is
-`~/.julia/dev/MySQL-native-protocol-plan.md` (not part of the repository).
+implementation (none so far). Section numbers of the form §N.M refer to the internal
+design plan that drove the rewrite; the ones that gate CI are: §8.4 = fuzzing, §8.9 =
+per-row performance/allocation gates (allocations per row ≤ String/Vector columns + 1),
+§8.10 = leak/lifecycle soak, §4.2 = the 1.x behavior table now in
+`docs/src/migration.md` and `test/behavior_manifest.jl`.
 
 ## Sources of truth (in priority order)
 
 1. Live lanes: `test/protocol/live_tests.jl` exercises the native backend against Harbor
    containers (`MYSQL_NATIVE_IMAGES`, default `mysql:8.4,mariadb:11.4`) — authentication
    plugin exchanges, TLS, charset bootstrap, ping/init_db/quit — and runs the executable
-   compatibility manifest (`test/compat_manifest.jl`) on both backends side by side.
+   behavior manifest (`test/behavior_manifest.jl`) as a native-only golden suite (goldens
+   captured from the pre-2.0 dual-backend runs).
 2. Server public headers, **numeric values only**: `include/my_command.h`,
    `include/mysql_com.h`, `include/field_types.h` from the `mysql-server` trunk.
    `scripts/gen_constants.jl` regenerates `src/Protocol/constants_generated.jl` and stamps
@@ -49,7 +53,7 @@ source are never read.
 | `0xFE` | — | AuthSwitchRequest (len > 1) / old switch (len 1, unsupported) | invalid | terminator iff first chunk < 0xFFFFFF, else row | same |
 | `0xFF` | pre-capability ERR | ERR (session closed) | ERR (session stays usable) | ERR (result ends, session usable) | same |
 
-## M1 decisions worth remembering
+## Framing and phase machine (M1): decisions worth remembering
 
 - One shared sequence counter per session (`PacketIO.seq`); the client continues the
   server's counter during the connection phase and across STARTTLS, and resets it to 0 for
@@ -68,7 +72,7 @@ source are never read.
   milestones; M1 only frames them (`read_auth_packet!`, `send_ssl_request!`,
   `replace_transport!`, raw `PacketView` rows).
 
-## M2 decisions worth remembering
+## TLS and authentication (M2): decisions worth remembering
 
 - **Transport security is a per-plugin, per-step rule** (`auth.jl` header table): the
   caching_sha2/sha256 full-auth cleartext step needs TLS (any mode); over plain TCP the RSA
@@ -94,7 +98,7 @@ source are never read.
   session tracking reports `character_set_client/connection/results = utf8mb4`; otherwise it
   is sent and must return OK. MariaDB 11 and MySQL 8.4 report the variables only when they
   change, so the statement is usually sent once.
-- **Finalizers never do I/O**: a dropped `Native.Handle` enqueues its `ReapEntry` (CAS
+- **Finalizers never do I/O**: a dropped `MySQL.Handle` enqueues its `ReapEntry` (CAS
   `:live → :pending`); the reaper (0.5 s timer, `reap_now!`, `atexit`) removes entries under
   `REAPER_LOCK`, then closes each transport after releasing the lock. `close!` retires the
   entry first so a later finalizer is a no-op. Reseau's own poll-FD finalizer is the
@@ -122,9 +126,9 @@ source are never read.
   (obfuscated format; out of scope); `read_env=true` reads `MYSQL_TCP_PORT` only
   (`MYSQL_PWD` is deliberately ignored). Keywords beat files; a named group beats `[client]`.
 
-## M3 decisions worth remembering
+## Text protocol and cursors (M3): decisions worth remembering
 
-- **Type mapping is the 1.x mapping by construction**: `Native.juliatype` calls
+- **Type mapping is the 1.x mapping by construction**: the column-decode layer (`src/decode.jl`) calls
   `MySQL.juliatype` with the wire type and flags. One wire fact feeds it: the server never
   sends `NUM_FLAG` (libmysqlclient synthesizes it client-side for `IS_NUM` types), so
   `Protocol.is_unsigned` derives numeric-ness from the wire type — otherwise
@@ -169,7 +173,7 @@ source are never read.
 - Handle-level facts from the 8.4 lane: the terminator OK of a SELECT carries
   `last_insert_id = 0`; mariadb:11.4 and mysql:8.4 both serve the fixture identically.
 
-## M4 decisions worth remembering
+## Prepared statements (M4): decisions worth remembering
 
 - **Prepared statements are the binary protocol**: `COM_STMT_PREPARE` → `PrepareOK` (the
   reserved byte is followed by `warning_count` only when the packet is ≥ 12 bytes; the
@@ -194,11 +198,11 @@ source are never read.
   values are converted to strings and sent as `STRING`. `Bool` maps to `TINY` (1.x left it
   at the `MYSQL_TYPE_STRING` fallback, an untested latent bug, so this is the sole deliberate
   deviation).
-- **Long data**: `Native.send_long_data!` copies and sends each string/blob chunk, and the
+- **Long data**: `MySQL.send_long_data!` copies and sends each string/blob chunk, and the
   next execute omits that parameter's inline value. Copies remain on the statement until the
   first execute response so both reconnect and the single 1615 re-prepare can replay them for
-  the new statement id. `Native.reset_statement!` sends `COM_STMT_RESET` and discards them;
-  neither helper is exported.
+  the new statement id. `MySQL.reset_statement!` sends `COM_STMT_RESET` and discards them;
+  both helpers are public API (see the migration guide) but not exported.
 - **Cursor is shared across protocols**: `Cursor{binary, buffered}` — `TextCursor =
   Cursor{false}`, `BinaryCursor = Cursor{true}` — so the ownership tokens, row epochs,
   multi-result draining, buffered budget and LOCAL INFILE state table have a single
@@ -226,7 +230,7 @@ source are never read.
   result is drained first). One-shot `execute(conn, sql, params)` prepares, executes and
   parks the statement the same way.
 
-## M5 decisions worth remembering
+## Hardening and performance (M5): decisions worth remembering
 
 - **Fuzzing found three real parser escapes** (all fixed with regression tests): `lowercase`
   on the untrusted server version string threw `InvalidCharError` on invalid UTF-8
@@ -265,7 +269,10 @@ source are never read.
   (`row_transition!`): it is statically legal (`read_row!` already required phase ROWS)
   and the membership hash cost ~15% of a 1M-row scan. Coverage recording and the
   transition log are preserved.
-- **§8.9 measurements** (Chairmarks; mysql:8.4 in Docker, Apple Silicon host, quiet run):
+- **§8.9 measurements** (historical record of the pre-2.0 dual-backend gate run — the
+  ratio gates against Connector/C retired with the C backend at 2.0; `bench/` keeps the
+  cross-driver comparison repeatable) (Chairmarks; mysql:8.4 in Docker, Apple Silicon
+  host, quiet run):
   text scan 1.18×, binary (prepared) scan 1.05×, tiny/NULL scan 1.17×, 10k round trips
   plain 0.96× / TLS 0.92×, 100k `executemany` 0.85×, 64 MiB blob 0.98× of Connector/C;
   allocations per native row are 2/2/1 at gates 2/2/1. All raw gates met. Plain gates run

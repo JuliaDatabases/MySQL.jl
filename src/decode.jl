@@ -32,7 +32,7 @@ field_type_enum(def::P.ColumnDef) = return UInt32(def.type)
     juliatype(def::Protocol.ColumnDef, opts::ResultOptions) -> Type
 
 The column's Julia type: the 1.x mapping (`MySQL.juliatype`) applied to the wire type and
-flags, then the M3 policies: `time_type`, and `zero_dates=:missing` widening every date
+flags, then the 2.0 decoding policies: `time_type`, and `zero_dates=:missing` widening every date
 column to `Union{Missing, T}` regardless of `NOT NULL`.
 """
 function juliatype(def::P.ColumnDef, opts::ResultOptions)

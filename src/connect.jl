@@ -25,6 +25,7 @@ end
 
 function register!(h::Handle)
     ensure_reaper!()
+    # never true at run time; static call edge for --trim (see TRIM_CALL_EDGE in reaper.jl)
     TRIM_CALL_EDGE[] && finalize_handle(h)
     trim_finalizer!(finalize_handle, h)
     return h

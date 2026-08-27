@@ -45,6 +45,7 @@ Connector/C (the `release-1.x` branch).
 | `MySQL.API.SSL_MODE_*`, `MySQL.API.MYSQL_PROTOCOL_*` enums | Symbols: `ssl_mode=:disabled/:preferred/:required/:verify_ca/:verify_identity`, `protocol=:default/:tcp/:socket/:pipe` |
 | `MySQL.API.mysqltype` | removed (parameter types are inferred from Julia values when binding) |
 | `MySQL.API` handle types (`MYSQL`, `MYSQL_STMT`, `MYSQL_RES`, `MYSQL_BIND`), raw `ccall` wrappers, `MySQL.setoptions!`/`API.getoption` | removed — there are no C handles |
+| `conn.mysql` (the raw C handle field on `Connection`) | removed — use the driver API; per-command results live on the returned cursor (`cur.rows_affected`, `DBInterface.lastrowid(cur)`) |
 
 Cursor/row types: `MySQL.Cursor{binary, buffered}` with aliases `MySQL.TextCursor`
 (`DBInterface.execute(conn, sql)`) and `MySQL.BinaryCursor` (prepared execution);
@@ -134,7 +135,9 @@ Deliberate, documented changes relative to Connector/C 1.6.0:
 `can_handle_expired_passwords`, `local_infile_handler`, `max_local_infile_bytes`,
 `zero_dates`, `time_type`, `read_env` (opt-in `MYSQL_TCP_PORT`; `MYSQL_PWD` is never
 read), `max_buffered_bytes`, `max_response_bytes`, `max_columns`, `max_result_sets`,
-`max_metadata_bytes`, `MySQL.ping`, `MySQL.escape_identifier`,
+`max_metadata_bytes`, `max_preauth_packet`, `max_auth_rounds`, `max_auth_bytes`,
+`max_session_state_bytes`, `attrs` (connection attributes sent in the handshake),
+`debug` (per-packet protocol debug logging), `MySQL.ping`, `MySQL.escape_identifier`,
 `MySQL.send_long_data!`, `MySQL.reset_statement!`.
 
 ## Option value types (2.0)
