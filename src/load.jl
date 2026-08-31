@@ -14,8 +14,7 @@ function quoteid(str)
 end
 quoteid(::Connection, str) = quoteid(str)
 
-sqltype(::Type{Union{T, Missing}}) where {T} = sqltype(T)
-sqltype(T) = get(SQLTYPES, T, "VARCHAR(255)")
+sqltype(T) = get(SQLTYPES, nonmissingtype(T), "VARCHAR(255)")
 sqltype(T, coltypes, name) = get(coltypes, name, sqltype(T))
 
 const SQLTYPES = Dict{Type, String}(

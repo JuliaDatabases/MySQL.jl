@@ -1,4 +1,4 @@
-# The prepared-statement / binary-protocol layer (`Native.Statement`, binary `Cursor`) against
+# The prepared-statement / binary-protocol layer (`MySQL.Statement`, binary `Cursor`) against
 # the fake peer: binary value codecs, parameter binding and the type signature, the
 # COM_STMT_PREPARE/EXECUTE round trip, DML and NULL parameters, the single 1615 re-prepare,
 # statement reaping, one-shot `execute(conn, sql, params)`, `executemany`, and multi-result

@@ -1,4 +1,4 @@
-# The DBInterface text-protocol layer (`Native.Connection`, `TextCursor`) against the fake
+# The DBInterface text-protocol layer (`MySQL.Connection`, `TextCursor`) against the fake
 # peer: decoding policies, the row-validity contract, multi-results, LOCAL INFILE, limits,
 # reconnect. Server scripts answer the connection phase with `plain_peer_connect!` (no TLS,
 # SET NAMES bootstrap) and then serve commands from `after`.

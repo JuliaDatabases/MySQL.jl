@@ -30,13 +30,12 @@ end
 
 # ---- decode ----
 
-function decode_binary(::Type{Union{Missing, T}}, buf::Vector{UInt8}, pos::Int, len::Int, opts::ResultOptions) where {T}
-    len < 0 && return missing
-    check_binary_span(buf, pos, len)
-    return decode_binary_missing_aware(T, buf, pos, len, opts)
-end
-
 function decode_binary(::Type{T}, buf::Vector{UInt8}, pos::Int, len::Int, opts::ResultOptions) where {T}
+    if Missing <: T
+        len < 0 && return missing
+        check_binary_span(buf, pos, len)
+        return decode_binary_missing_aware(nonmissingtype(T), buf, pos, len, opts)
+    end
     len < 0 && null_in_not_null(T)
     check_binary_span(buf, pos, len)
     return decode_binary_value(T, buf, pos, len, opts)

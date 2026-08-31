@@ -43,14 +43,19 @@ struct ConnectOptions
 end
 
 const REMOVED_KEYWORDS = Dict{Symbol, String}(
-    :ssl_cipher => "cipher lists are not configurable on the native backend (modern AEAD suites only)",
-    :ssl_crl => "certificate revocation lists are not supported by the native backend",
-    :ssl_crlpath => "certificate revocation lists are not supported by the native backend",
-    :passphrase => "encrypted private keys are not supported by the native backend",
     :charset_dir => "the native backend has no character-set files",
     :connection_handler => "the native backend has no dynamic plugins",
     :plugin_dir => "the native backend has no dynamic plugins",
-    :compress => "protocol compression is not supported yet",
+)
+
+# Reserve compatibility names that need support below the MySQL protocol layer. These are
+# unavailable in 2.0, not removed from the long-term API contract.
+const UNAVAILABLE_KEYWORDS = Dict{Symbol, String}(
+    :ssl_cipher => "cipher selection requires transport support that Reseau does not expose yet",
+    :ssl_crl => "certificate-revocation lists require transport support that Reseau does not expose yet",
+    :ssl_crlpath => "certificate-revocation lists require transport support that Reseau does not expose yet",
+    :passphrase => "encrypted private-key passphrases require transport support that Reseau does not expose yet",
+    :compress => "the compressed-packet protocol layer is planned for a later 2.x release",
 )
 
 const DEPRECATED_KEYWORDS = Dict{Symbol, String}(
@@ -99,6 +104,7 @@ function parse_tls_version(spec::Union{Nothing, String})
 end
 
 @noinline removed_keyword(k::Symbol) = return throw(ArgumentError("the `$k` option was removed: $(REMOVED_KEYWORDS[k])"))
+@noinline unavailable_keyword(k::Symbol) = return throw(ArgumentError("the `$k` option is not available in MySQL.jl 2.0: $(UNAVAILABLE_KEYWORDS[k])"))
 @noinline deferred_keyword(k::Symbol) = return throw(ArgumentError("the `$k` option is not available: $(DEFERRED_KEYWORDS[k])"))
 
 # ---- typed option extraction ----
@@ -143,8 +149,21 @@ end
 function check_keywords(kw)
     for k in keys(kw)
         k in KNOWN_KEYWORDS || throw(ArgumentError("unknown connection option `$k`"))
-        haskey(REMOVED_KEYWORDS, k) && kw[k] !== nothing && kw[k] !== false && removed_keyword(k)
         haskey(DEPRECATED_KEYWORDS, k) && kw[k] !== nothing && @warn "connection option `$k` is deprecated: $(DEPRECATED_KEYWORDS[k])" maxlog=1
+    end
+    check_keyword_availability(kw)
+    return nothing
+end
+
+@inline function check_keyword_availability(k::Symbol, value)
+    haskey(REMOVED_KEYWORDS, k) && value !== nothing && value !== false && removed_keyword(k)
+    haskey(UNAVAILABLE_KEYWORDS, k) && value !== nothing && value !== false && unavailable_keyword(k)
+    return nothing
+end
+
+function check_keyword_availability(kw)
+    for k in keys(kw)
+        check_keyword_availability(k, kw[k])
     end
     return nothing
 end
@@ -232,8 +251,10 @@ end
 const OPTION_FILE_KEYS = Dict{String, Symbol}(
     "host" => :host, "user" => :user, "password" => :password, "port" => :port,
     "database" => :db, "connect-timeout" => :connect_timeout, "connect_timeout" => :connect_timeout,
+    "compress" => :compress,
     "ssl-ca" => :ssl_ca, "ssl_ca" => :ssl_ca, "ssl-capath" => :ssl_capath, "ssl_capath" => :ssl_capath,
     "ssl-cert" => :ssl_cert, "ssl_cert" => :ssl_cert, "ssl-key" => :ssl_key, "ssl_key" => :ssl_key,
+    "ssl-cipher" => :ssl_cipher, "ssl-crl" => :ssl_crl, "ssl-crlpath" => :ssl_crlpath,
     "ssl-mode" => :ssl_mode, "ssl_mode" => :ssl_mode, "default-character-set" => :charset_name,
     "protocol" => :protocol, "bind-address" => :bind, "bind_address" => :bind, "socket" => :unix_socket,
     "tls-version" => :tls_version,
@@ -437,10 +458,10 @@ end
 """
     ConnectOptions(host, user, password=nothing; kw...)
 
-Validates the connection keywords (unknown ones are errors, removed ones explain why,
-deprecated ones warn once), applies option files when requested, the opt-in environment
-defaults (`read_env=true`: `MYSQL_TCP_PORT` fills an omitted port; `MYSQL_PWD` is never
-read), and resolves the ssl conflict table.
+Validates the connection keywords (unknown ones are errors, removed or unavailable ones
+explain why, deprecated ones warn once), applies option files when requested, the opt-in
+environment defaults (`read_env=true`: `MYSQL_TCP_PORT` fills an omitted port; `MYSQL_PWD`
+is never read), and resolves the ssl conflict table.
 """
 function ConnectOptions(host::AbstractString, user::AbstractString, password::Union{Nothing, AbstractString}=nothing; kw...)
     kwd = Dict{Symbol, Any}(pairs(kw))
@@ -451,6 +472,12 @@ function ConnectOptions(host::AbstractString, user::AbstractString, password::Un
         something(option_string_or_nothing(get(kwd, :option_group, nothing), "option_group"), ""),
         option_bool_or(get(kwd, :read_default_group, nothing), "read_default_group", false),
     )
+    # Recognized but unavailable file options must fail closed. Silently ignoring a cipher,
+    # CRL, or compression request would claim a property the connection does not have. A
+    # non-`nothing` keyword still wins over the file, including `compress=false`.
+    for k in keys(file)
+        (haskey(kwd, k) && kwd[k] !== nothing) || check_keyword_availability(k, file[k])
+    end
     # a keyword wins over the option file; `nothing` falls through
     pick(k) = return haskey(kwd, k) && kwd[k] !== nothing ? kwd[k] : get(file, k, nothing)
     host_s = String(host)

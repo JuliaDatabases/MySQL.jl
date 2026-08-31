@@ -29,11 +29,54 @@ Both execution methods return a `Cursor` object that supports the [Tables.jl](ht
 `MySQL.load(table, conn, table_name)` loads a Tables.jl-compatible source into a database table. It generates the `CREATE TABLE` statement from the table schema. Column types often need manual control; use the `coltypes` and `columnsuffix` options (see the `MySQL.load` docstring).
 
 ## API reference
+
+### Connections and results
+
 ```@docs
+MySQL.Connection
+MySQL.Statement
+MySQL.Cursor
+MySQL.ConnectOptions
 DBInterface.connect
 DBInterface.close!
-MySQL.escape
 DBInterface.execute
+DBInterface.executemultiple
 DBInterface.prepare
+DBInterface.transaction
 DBInterface.lastrowid
+```
+
+### Driver helpers
+
+```@docs
+MySQL.ping
+MySQL.escape
+MySQL.escape_identifier
+MySQL.send_long_data!
+MySQL.reset_statement!
+MySQL.load
+MySQL.juliatype
+```
+
+### Value types
+
+```@docs
+MySQL.Bit
+MySQL.DateAndTime
+```
+
+### Errors
+
+```@docs
+MySQL.MySQLError
+MySQL.Error
+MySQL.StmtError
+```
+
+## Internal implementation
+
+`MySQL.Protocol` is documented for maintainers. It is not part of the stable user API.
+
+```@docs
+MySQL.Protocol
 ```

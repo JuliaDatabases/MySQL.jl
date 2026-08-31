@@ -8,10 +8,13 @@
 # CAS: explicit `retire!` performs the same transition, so a finalizer can never re-enqueue a
 # handle that was closed explicitly, and an entry never holds a closed transport.
 
-# `Base.finalizer` registers under `@nospecialize`, which `--trim=safe` reports as an
-# unresolved finalizer; this registers through the same runtime entry Base uses, with
-# concrete argument types at every call site.
-trim_finalizer!(f::F, o::T) where {F, T} = return (ccall(:jl_gc_add_finalizer_th, Cvoid, (Ptr{Cvoid}, Any, Any), Core.getptls(), o, f); nothing)
+# Keep finalizer registration on the same built-in used by `Base.finalizer`, but retain the
+# concrete callback and object types for `juliac --trim`. `Base.finalizer` deliberately
+# erases both types with `@nospecialize`, which the trim verifier rejects.
+@inline function trim_finalizer!(f::F, o::T) where {F, T}
+    Core.finalizer(f, o)
+    return nothing
+end
 
 # Never true at run time, but not foldable at compile time. Runtime-invoked callbacks —
 # finalizers, timer/atexit hooks, task bodies — are dispatched dynamically, which

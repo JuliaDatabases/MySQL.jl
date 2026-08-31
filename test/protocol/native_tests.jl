@@ -1,12 +1,21 @@
 struct LocalInfileFunctor end
 (::LocalInfileFunctor)(::String) = nothing
 
+@testset "Type dispatch safety" begin
+    @test N.sqltype(Missing) == "VARCHAR(255)"
+    @test N.sqltype(Any) == "VARCHAR(255)"
+    @test N.sqltype(Union{Missing, Int64}) == "BIGINT"
+    @test isempty(Test.detect_unbound_args(MySQL))
+end
+
 @testset "Native options truth table" begin
     @test_throws ArgumentError N.ConnectOptions("h", "u"; bogus=1)
-    err = try; N.ConnectOptions("h", "u"; ssl_cipher="AES"); nothing; catch e; e; end
-    @test err isa ArgumentError && occursin("removed", err.msg)
+    for (name, value) in ((:ssl_cipher, "AES"), (:ssl_crl, "/x"),
+            (:ssl_crlpath, "/x"), (:passphrase, "secret"), (:compress, true))
+        err = try; N.ConnectOptions("h", "u"; name => value); nothing; catch e; e; end
+        @test err isa ArgumentError && occursin("not available in MySQL.jl 2.0", err.msg)
+    end
     @test_throws ArgumentError N.ConnectOptions("h", "u"; plugin_dir="/x")
-    @test_throws ArgumentError N.ConnectOptions("h", "u"; compress=true)
     @test N.ConnectOptions("h", "u"; compress=false) isa N.ConnectOptions
     @test_logs (:warn, r"deprecated") N.ConnectOptions("h", "u"; data_truncation=true)
     @test N.ConnectOptions("h", "u"; unix_socket="/tmp/mysql.sock").host == "h"
@@ -172,6 +181,15 @@ end
         @test_throws ArgumentError N.ConnectOptions("h", "u"; option_file=inc)
         write(inc, "?includedir /etc/mysql/conf.d\n")
         @test_throws ArgumentError N.ConnectOptions("h", "u"; option_file=inc)
+        unavailable = joinpath(dir, "unavailable.cnf")
+        for option in ("compress", "ssl-cipher=AES256", "ssl-crl=/etc/mysql/crl.pem",
+                "ssl-crlpath=/etc/mysql/crls")
+            write(unavailable, "[client]\n$option\n")
+            err = try; N.ConnectOptions("h", "u"; option_file=unavailable); nothing; catch e; e; end
+            @test err isa ArgumentError && occursin("not available in MySQL.jl 2.0", err.msg)
+        end
+        write(unavailable, "[client]\ncompress\n")
+        @test N.ConnectOptions("h", "u"; option_file=unavailable, compress=false).host == "h"
         bad = joinpath(dir, "bad.cnf")
         write(bad, "[client\nhost=x\n")
         @test_throws ArgumentError N.ConnectOptions("h", "u"; option_file=bad)

@@ -11,8 +11,8 @@ lifetimes are gone, along with the crash classes they caused (issues #220, #236,
 `MySQL.Connection` is now the native connection. Most code — `DBInterface.connect` /
 `execute` / `prepare` / `executemany` / `executemultiple` / `transaction`, Tables.jl
 cursors, `MySQL.load`, buffered (`mysql_store_result=true`, the default) and streaming
-result sets, `mysql_date_and_time` — works unchanged. Pin `MySQL = "1"` to stay on
-Connector/C (the `release-1.x` branch).
+result sets, `mysql_date_and_time` — works unchanged. Pin `MySQL = "1"` to stay on the
+last Connector/C release.
 
 ## Upgrade checklist
 
@@ -28,8 +28,8 @@ Connector/C (the `release-1.x` branch).
 5. **Local servers**: the Unix-socket / named-pipe transport is not implemented yet, and an
    empty host or `"localhost"` on Unix (`"."` on Windows) selects it, as in 1.x. Connecting
    to a local server over TCP therefore needs `protocol=:tcp` (or `host="127.0.0.1"`).
-6. **Unknown/removed keywords now error** with an explanation instead of being silently
-   swallowed — fix the call sites the errors point at.
+6. **Unknown, removed, or unavailable keywords now error** with an explanation instead of
+   being silently swallowed — fix the call sites the errors point at.
 
 ## The `MySQL.API` module is gone
 
@@ -58,9 +58,6 @@ row types `MySQL.TextRow` and `MySQL.BinaryRow` (1.x: `MySQL.TextRow` and `MySQL
 - **`port=0`** now means the default port (3306); in 1.x it meant "take the port from the
   option file". Omit `port` (or pass `nothing`) to fall back to option files.
 - **`conn.port`** is an `Int` (was a `String`), and `Base.show` prints it unquoted.
-- **`MySQL.Native`** (the 1.7 preview namespace) is gone; everything it exported lives at
-  the top level: `MySQL.ping`, `MySQL.escape`, `MySQL.escape_identifier`,
-  `MySQL.send_long_data!`, `MySQL.reset_statement!`, `MySQL.ConnectOptions`.
 - **`MySQL.load`** `debug` keyword accepts `false`/`true`/`:values`; `debug=true` logs
   generated statements only, `debug=:values` also logs row values (1.x `debug=true`
   logged values).
@@ -124,9 +121,17 @@ Deliberate, documented changes relative to Connector/C 1.6.0:
 ## Removed (error explains the replacement)
 
 - `charset_dir`; `charset_name` accepts only `"utf8mb4"`
-- `ssl_cipher`, `ssl_crl`, `ssl_crlpath`, `passphrase` (no Reseau support)
 - `connection_handler`, `plugin_dir` (no C plugins to load)
 - `protocol=:memory` (shared memory transport)
+
+## Temporarily unavailable (compatibility names are reserved)
+
+- `ssl_cipher`, `ssl_crl`, `ssl_crlpath`, and `passphrase` need matching transport support
+  in Reseau. MySQL.jl keeps these option names reserved and reports that they are not
+  available in 2.0; it does not silently ignore recognized option-file forms, and the
+  options are not declared permanently removed.
+- `compress=true` needs a compressed-packet layer with its own sequence tracking,
+  buffering, and resource limits. It is planned for a later 2.x release.
 
 ## Added
 
@@ -193,7 +198,9 @@ error rather than misbehaving:
 - **Unix sockets and Windows named pipes** (transport is TCP/TLS). As in 1.x, an empty
   host or `"localhost"` on Unix (and `"."` on Windows) selects the local transport;
   because that transport is deferred, connect raises a clear error instead of silently
-  using TCP — pass `protocol=:tcp` to force a TCP connection to a local server.
+  using TCP — pass `protocol=:tcp` to force a TCP connection to a local server. A
+  `unix_socket` value supplied for a remote TCP host remains unused, as it was with
+  Connector/C; it does not select socket transport by itself.
 - **Compression** (`compress=true` is an `ArgumentError`), server cursors /
   `COM_STMT_FETCH`, query attributes, `COM_STMT_BULK_EXECUTE`
 - MariaDB `client_ed25519` / PARSEC / `dialog` (PAM) authentication (`UnsupportedAuthError`)
@@ -201,5 +208,5 @@ error rather than misbehaving:
   not documented by the vendor sources in scope)
 - OUT-parameter interpretation beyond prepared CALL result sets
 - Pooling, cancellation, DSN parsing
-- The external interop matrix (ProxySQL / TiDB / Vitess / Aurora) runs as a separate
-  nightly lane and a manual checklist, not in `Pkg.test`
+- The external interop matrix (ProxySQL / TiDB / Vitess / Aurora) is deferred. It is not
+  automated or claimed as validated for 2.0.

@@ -1,5 +1,5 @@
 # STARTTLS and the ssl_mode matrix against a TLS-capable fake peer, plus the
-# connection-establishment deadline and the Native.connect orchestration.
+# connection-establishment deadline and the native client connect orchestration.
 const TLS = Reseau.TLS
 const N = MySQL
 

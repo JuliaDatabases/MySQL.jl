@@ -6,6 +6,7 @@ const FORBIDDEN = (
     r"\bAPI\.(?:MYSQL|MYSQL_STMT|MYSQL_RES|MYSQL_BIND)\b",
     r"\bAPI\.mysql_(?:init|options|real_connect|real_query|store_result|use_result|fetch_row|stmt_init|stmt_prepare|stmt_execute)\b",
 )
+const GENERIC_DISPATCH_CCALL = r"\bccall\s*\(\s*:jl_apply_generic\s*,"
 
 function source_files()
     files = String[]
@@ -26,8 +27,8 @@ function check_file!(violations::Vector{String}, path::String)
             occursin(pattern, line) && push!(violations, "$relative:$line_number: forbidden native dependency reference")
         end
         occursin(r"\bccall\s*\(", line) && relative != joinpath("src", "Protocol", "crypto.jl") &&
-            !occursin(r"\bccall\s*\(\s*:jl_\w+\s*,", line) &&
-            push!(violations, "$relative:$line_number: ccall is allowed only for the OpenSSL RSA wrapper and Julia runtime (:jl_*) entry points")
+            !occursin(GENERIC_DISPATCH_CCALL, line) &&
+            push!(violations, "$relative:$line_number: ccall is allowed only in the OpenSSL crypto wrapper and for the jl_apply_generic dispatch shim")
     end
     return nothing
 end
