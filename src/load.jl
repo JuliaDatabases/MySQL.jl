@@ -14,7 +14,12 @@ function quoteid(str)
 end
 quoteid(::Connection, str) = quoteid(str)
 
-sqltype(T) = get(SQLTYPES, nonmissingtype(T), "VARCHAR(255)")
+# `Decimal{P,S,T}` has a column type per (P, S) pair, so it cannot live in `SQLTYPES`.
+function sqltype(T)
+    base = nonmissingtype(T)
+    isconcretetype(base) && base <: Decimals.Decimal && return string("DECIMAL(", precision(base), ", ", Decimals.scale(base), ")")
+    return get(SQLTYPES, base, "VARCHAR(255)")
+end
 sqltype(T, coltypes, name) = get(coltypes, name, sqltype(T))
 
 const SQLTYPES = Dict{Type, String}(

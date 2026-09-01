@@ -56,6 +56,7 @@ end
 decode_binary_value(::Type{String}, buf::Vector{UInt8}, pos::Int, len::Int, opts::ResultOptions) = return decode_value(String, buf, pos, len, opts)
 decode_binary_value(::Type{Vector{UInt8}}, buf::Vector{UInt8}, pos::Int, len::Int, opts::ResultOptions) = return decode_value(Vector{UInt8}, buf, pos, len, opts)
 decode_binary_value(::Type{Dec64}, buf::Vector{UInt8}, pos::Int, len::Int, opts::ResultOptions) = return decode_value(Dec64, buf, pos, len, opts)
+decode_binary_value(::Type{Decimals.Decimal{Pr, Sc, T}}, buf::Vector{UInt8}, pos::Int, len::Int, opts::ResultOptions) where {Pr, Sc, T} = return decode_value(Decimals.Decimal{Pr, Sc, T}, buf, pos, len, opts)
 decode_binary_value(::Type{Bit}, buf::Vector{UInt8}, pos::Int, len::Int, opts::ResultOptions) = return decode_value(Bit, buf, pos, len, opts)
 
 function decode_binary_value(::Type{T}, buf::Vector{UInt8}, pos::Int, len::Int, ::ResultOptions) where {T <: Base.BitInteger}
@@ -190,6 +191,10 @@ param_type(::UInt64) = return (P.MYSQL_TYPE_LONGLONG, true)
 param_type(::Float32) = return (P.MYSQL_TYPE_FLOAT, false)
 param_type(::Float64) = return (P.MYSQL_TYPE_DOUBLE, false)
 param_type(::DecFP.DecimalFloatingPoint) = return (P.MYSQL_TYPE_STRING, false)
+# `MYSQL_TYPE_NEWDECIMAL` parameter values are the ASCII decimal string (the server reads
+# them with `str2my_decimal`), so an exact decimal binds without going through a string
+# type and its collation. 1.x had no exact decimal to bind, so nothing is preserved here.
+param_type(::Decimals.AbstractDecimal) = return (P.MYSQL_TYPE_NEWDECIMAL, false)
 param_type(::Bit) = return (P.MYSQL_TYPE_BLOB, false)
 param_type(::Vector{UInt8}) = return (P.MYSQL_TYPE_BLOB, false)
 param_type(::DateAndTime) = return (P.MYSQL_TYPE_DATETIME, false)
@@ -244,6 +249,17 @@ function bit_param_bytes(x::Bit)
 end
 encode_param_value!(buf::Vector{UInt8}, x::Bit) = return (P.write_lenenc_bytes!(buf, bit_param_bytes(x)); nothing)
 encode_param_value!(buf::Vector{UInt8}, x::DecFP.DecimalFloatingPoint) = return (P.write_lenenc_string!(buf, string(x)); nothing)
+
+# The positional digits of an exact decimal, written straight into the command buffer (no
+# intermediate `String`; §8.9 keeps the send path allocation-free).
+function encode_param_value!(buf::Vector{UInt8}, x::Decimals.AbstractDecimal)
+    n = Decimals.decimallength(x)
+    P.write_lenenc!(buf, n)
+    start = length(buf) + 1
+    resize!(buf, length(buf) + n)
+    Decimals.writedecimal!(buf, start, x)
+    return nothing
+end
 
 function encode_param_value!(buf::Vector{UInt8}, x::Date)
     P.write_u8!(buf, 4)

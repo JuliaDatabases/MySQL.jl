@@ -31,12 +31,16 @@ field_type_enum(def::P.ColumnDef) = return UInt32(def.type)
 """
     juliatype(def::Protocol.ColumnDef, opts::ResultOptions) -> Type
 
-The column's Julia type: the 1.x mapping (`MySQL.juliatype`) applied to the wire type and
-flags, then the 2.0 decoding policies: `time_type`, and `zero_dates=:missing` widening every date
-column to `Union{Missing, T}` regardless of `NOT NULL`.
+The column's Julia type: the 1.x mapping (`MySQL.juliatype`) applied to the wire type,
+flags and — for DECIMAL/NEWDECIMAL — the precision and scale recovered from the column
+definition, then the 2.0 decoding policies: `time_type`, and `zero_dates=:missing` widening
+every date column to `Union{Missing, T}` regardless of `NOT NULL`.
 """
 function juliatype(def::P.ColumnDef, opts::ResultOptions)
-    T = juliatype(field_type_enum(def), P.is_not_null(def), P.is_unsigned(def), P.is_binary(def), opts.date_and_time)
+    isunsigned = P.is_unsigned(def)
+    scale = decimal_scale(def.decimals)
+    precision = decimal_precision(def.length, scale, isunsigned)
+    T = juliatype(field_type_enum(def), P.is_not_null(def), isunsigned, P.is_binary(def), opts.date_and_time, precision, scale)
     base = nonmissingtype(T)
     base === Dates.Time && opts.time_type !== Dates.Time && (T = T === base ? opts.time_type : Union{Missing, opts.time_type})
     is_date_type(base) && opts.zero_dates == :missing && (T = Union{Missing, base})
@@ -90,6 +94,57 @@ function decode_value(::Type{Dec64}, buf::Vector{UInt8}, pos::Int, len::Int, opt
     occursin('\0', s) && conversion_error(Dec64, buf, pos, len)
     x = tryparse(Dec64, s)
     x === nothing && conversion_error(Dec64, buf, pos, len)
+    return x
+end
+
+# DECIMAL/NEWDECIMAL values are ASCII on both protocols. The canonical server form is
+# `[-]digits[.digits]` with exactly the column's scale in fractional digits, which scans
+# straight into the unscaled coefficient; anything else (a different scale, an exponent,
+# a `+` sign) falls back to `parse`, which rounds half-even at the target scale.
+function decode_value(::Type{Decimals.Decimal{Pr, Sc, T}}, buf::Vector{UInt8}, pos::Int, len::Int, opts::ResultOptions) where {Pr, Sc, T}
+    u = scan_decimal(Decimals.Decimal{Pr, Sc, T}, buf, pos, len)
+    u === nothing && return parse_decimal(Decimals.Decimal{Pr, Sc, T}, buf, pos, len, opts)
+    return reinterpret(Decimals.Decimal{Pr, Sc, T}, u)
+end
+
+# The unscaled coefficient of `buf[pos:pos+len-1]` read as `[-]digits.digits` with exactly
+# `Sc` fractional digits and at most `Pr` significant digits, or `nothing` when the text is
+# not in that form. Leading zeros are not significant, so `0.05` fits `Decimal{2,2}`.
+function scan_decimal(::Type{Decimals.Decimal{Pr, Sc, T}}, buf::Vector{UInt8}, pos::Int, len::Int) where {Pr, Sc, T}
+    stop = pos + len - 1
+    i = pos
+    i <= stop || return nothing
+    neg = @inbounds buf[i] == UInt8('-')
+    neg && (i += 1)
+    u = zero(T)
+    ntotal = 0
+    nsignificant = 0
+    nfraction = -1
+    while i <= stop
+        b = @inbounds buf[i]
+        if UInt8('0') <= b <= UInt8('9')
+            d = b - UInt8('0')
+            (nsignificant > 0 || d != 0x00) && (nsignificant += 1)
+            nsignificant <= Pr || return nothing
+            u = u * T(10) + T(d)
+            ntotal += 1
+            nfraction >= 0 && (nfraction += 1)
+        elseif b == UInt8('.') && nfraction < 0
+            nfraction = 0
+        else
+            return nothing
+        end
+        i += 1
+    end
+    (ntotal > 0 && max(nfraction, 0) == Sc) || return nothing
+    return neg ? -u : u
+end
+
+# The general fallback: `Base.parse` for decimals accepts a sign, an exponent, surrounding
+# whitespace and any scale, rounding half-even into `D`.
+function parse_decimal(::Type{D}, buf::Vector{UInt8}, pos::Int, len::Int, opts::ResultOptions) where {D <: Decimals.Decimal}
+    x = tryparse(D, decode_value(String, buf, pos, len, opts))
+    x === nothing && conversion_error(D, buf, pos, len)
     return x
 end
 

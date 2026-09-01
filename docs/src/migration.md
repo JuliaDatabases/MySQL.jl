@@ -3,8 +3,8 @@
 MySQL.jl 2.0 replaces the MariaDB Connector/C backend with a **native wire-protocol
 implementation**: the MySQL client/server protocol written in Julia on top of
 [Reseau](https://github.com/JuliaServices/Reseau.jl) transports (TCP and TLS). It is *not*
-"pure Julia" — OpenSSL underpins TLS and the RSA password exchange, and DecFP provides
-`Dec64` — but every `libmariadb` `ccall`, its dynamic plugin loading, and its C handle
+"pure Julia" — OpenSSL underpins TLS and the RSA password exchange — but every
+`libmariadb` `ccall`, its dynamic plugin loading, and its C handle
 lifetimes are gone, along with the crash classes they caused (issues #220, #236, #240,
 #208, #206).
 
@@ -19,8 +19,11 @@ last Connector/C release.
 1. **Errors**: replace `MySQL.API.Error` / `MySQL.API.StmtError` with `MySQL.Error` /
    `MySQL.StmtError` (same field names/types plus a new `sqlstate`), or catch the root
    `MySQL.MySQLError`.
-2. **Value types**: replace `MySQL.API.Bit` with `MySQL.Bit`. `MySQL.DateAndTime` and
-   `MySQL.juliatype` are unchanged.
+2. **Value types**: replace `MySQL.API.Bit` with `MySQL.Bit`. **`DECIMAL`/`NUMERIC`
+   columns now decode to `Decimals.Decimal{P,S,T}`, not `DecFP.Dec64`** — `using Decimals`
+   and see [DECIMAL columns](#decimal-columns) below. `MySQL.DateAndTime` is unchanged;
+   `MySQL.juliatype` takes two extra (optional) arguments for a decimal column's precision
+   and scale.
 3. **Multi-statements**: pass `multi_statements=true` if you relied on 1.x accepting
    `"stmt1; stmt2"` by default (an `if/elseif` bug made 1.x enable it silently).
 4. **Enum-valued options**: pass Symbols — `ssl_mode=:required` (was
@@ -40,7 +43,7 @@ last Connector/C release.
 | `MySQL.API.Error`, `MySQL.API.StmtError` | `MySQL.Error`, `MySQL.StmtError` (aliases of `MySQL.Protocol.Error`/`StmtError`; same `errno::Cuint`/`msg` fields and `showerror` text, plus `sqlstate`); root type `MySQL.MySQLError` |
 | `MySQL.API.Bit` | `MySQL.Bit` (same `bits::UInt64` field) |
 | `MySQL.DateAndTime` (`MySQL.API.DateAndTime`) | `MySQL.DateAndTime` (unchanged) |
-| `MySQL.API.juliatype` / `MySQL.juliatype` | `MySQL.juliatype` (unchanged mapping) |
+| `MySQL.API.juliatype` / `MySQL.juliatype` | `MySQL.juliatype` (same mapping except DECIMAL; two optional trailing arguments carry a decimal column's precision and scale) |
 | `MySQL.API.MYSQL_TYPE_*` constants | `MySQL.Protocol.MYSQL_TYPE_*` (wire-value `UInt8`s) |
 | `MySQL.API.SSL_MODE_*`, `MySQL.API.MYSQL_PROTOCOL_*` enums | Symbols: `ssl_mode=:disabled/:preferred/:required/:verify_ca/:verify_identity`, `protocol=:default/:tcp/:socket/:pipe` |
 | `MySQL.API.mysqltype` | removed (parameter types are inferred from Julia values when binding) |
@@ -97,6 +100,7 @@ Deliberate, documented changes relative to Connector/C 1.6.0:
 | `lastrowid` | read live connection/statement state (sticky) | snapshot from the cursor's own OK/terminator (a SELECT cursor reports 0) |
 | DML cursor `length` | `-1` surprises | DML cursors keep the `-1` sentinel; **buffered SELECT cursors report the row count** |
 | Sub-millisecond DATETIME | text errored; binary truncated silently | text warns then raises `ConversionError`; binary (prepared) warns then truncates to milliseconds — each preserves its 1.x protocol behavior (both mirror `MYSQL_TIME`) |
+| DECIMAL/NUMERIC decoding | `DecFP.Dec64` for every column: 16 significant digits, so `DECIMAL(20,4)` and `DECIMAL(65,30)` silently lost digits, and the scale was not part of the type | `Decimals.Decimal{P,S,T}` built from the column's own precision and scale: exact for the full server range (`P ≤ 65`), and the storage integer follows the precision tier (`Int32`/`Int64`/`Int128`/`Int256`) |
 | BIT decoding | text: first byte only; binary: little-endian | big-endian value of all bytes (≤ 8) in both protocols |
 | BIT parameters | little-endian `bitvalue` encoding | big-endian binary string (matches the decode) |
 | `Bool` parameters | fell through to the `MYSQL_TYPE_STRING` fallback (untested latent bug) | bound as `MYSQL_TYPE_TINY` |
@@ -110,6 +114,39 @@ Deliberate, documented changes relative to Connector/C 1.6.0:
 | Concurrent use | not thread-safe | connection operations are lock-serialized. One task must consume a streaming cursor; a command from another task drains the pending response and invalidates that cursor instead of overwriting its Julia-owned row bytes. A transaction owns the connection lock until commit or rollback |
 | `MySQL.load` | embedded backticks in identifiers were not escaped; `debug=true` logged row values | doubles embedded identifier backticks; `debug=true` logs statements only; `debug=:values` logs row values |
 | Value lifetime (#206) | `TextRow` values could alias freed C memory | rows decode from Julia-owned, cursor-owned buffers |
+
+## DECIMAL columns
+
+A `DECIMAL(P, S)` / `NUMERIC(P, S)` column decodes to
+[`Decimals.Decimal{P, S, T}`](https://github.com/quinnj/Decimals.jl) — an isbits fixed-scale
+exact decimal whose value is `unscaled * 10^-S`. The type comes from the column definition
+packet, so it is known before the first row and schema-typed access
+(`Tables.getcolumn(row, T, i, name)`) stays type-stable:
+
+```julia
+using MySQL, Decimals, Tables
+
+cur = DBInterface.execute(conn, "SELECT price FROM orders")   # price DECIMAL(12, 2)
+Tables.schema(cur)                                            # (price = Union{Missing, Decimal{12, 2, Int64}},)
+for row in cur
+    price = Tables.getcolumn(row, Union{Missing, Decimal{12, 2, Int64}}, 1, :price)
+end
+```
+
+The storage integer follows the precision: `Int32` up to 9 digits, `Int64` up to 18,
+`Int128` up to 38, and `Int256` beyond — the server's maximum precision is 65, so every
+DECIMAL column is representable exactly. Values are ASCII on the wire in **both** protocols,
+so the text and prepared-statement paths produce identical values.
+
+1.x mapped every DECIMAL column to `DecFP.Dec64`, which carries 16 significant digits and no
+declared scale, so wider columns lost digits silently. To keep the old behavior at a call
+site, ask for it explicitly: `Tables.getcolumn(row, Union{Missing, DecFP.Dec64}, i, :price)`
+still decodes a decimal column as `Dec64`.
+
+Binding parameters: a `Decimal` or `DecimalValue` binds as `MYSQL_TYPE_NEWDECIMAL` carrying
+its exact positional digits, so the server reads it as a decimal rather than as a string.
+`DecFP` values still bind as `MYSQL_TYPE_STRING`, unchanged. `MySQL.load` writes a
+`Decimal{P,S,T}` column as `DECIMAL(P, S)`.
 
 ## Deprecated (accepted with a warning; no effect)
 

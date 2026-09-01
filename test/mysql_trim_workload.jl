@@ -12,6 +12,11 @@
 
 using MySQL, DBInterface, Tables, Dates
 
+# Reached through MySQL rather than `using Decimals` so the trim project needs no extra
+# direct dependency; user code writes `using Decimals` and names `Decimal` directly.
+const Decimals = MySQL.Decimals
+const Decimal = Decimals.Decimal
+
 const P = MySQL.Protocol
 const TCP = P.Reseau.TCP
 
@@ -73,17 +78,17 @@ function ok_payload(; header::UInt8=0x00, affected::Integer=0, insert_id::Intege
     return buf
 end
 
-function coldef(name::String; type::UInt8=P.MYSQL_TYPE_VAR_STRING, flags::Integer=0, charset::Integer=0x2D)::Vector{UInt8}
+function coldef(name::String; type::UInt8=P.MYSQL_TYPE_VAR_STRING, flags::Integer=0, charset::Integer=0x2D, length::Integer=255, decimals::Integer=0)::Vector{UInt8}
     buf = UInt8[]
     for s in ("def", "db", "t", "t", name, name)
         P.write_lenenc_string!(buf, s)
     end
     P.write_lenenc!(buf, 0x0C)
     P.write_u16!(buf, charset)
-    P.write_u32!(buf, 255)                     # display length
+    P.write_u32!(buf, length)                  # display length
     P.write_u8!(buf, type)
     P.write_u16!(buf, flags)
-    P.write_u8!(buf, 0)                        # decimals
+    P.write_u8!(buf, decimals)
     P.write_u16!(buf, 0)
     return buf
 end
@@ -146,12 +151,13 @@ people_cols() = Vector{UInt8}[
     coldef("name"),
     coldef("score"; type=P.MYSQL_TYPE_DOUBLE, charset=63),
     coldef("joined"; type=P.MYSQL_TYPE_DATETIME, charset=63),
+    coldef("rate"; type=P.MYSQL_TYPE_NEWDECIMAL, charset=63, length=7, decimals=3),   # DECIMAL(5, 3)
 ]
 
 people_rows() = Vector{UInt8}[
-    text_row(Union{Missing, String}["1", "Ada", "1.5", "2024-02-29 13:14:15"]),
-    text_row(Union{Missing, String}["2", "Grace", "2.5", "2023-01-02 03:04:05"]),
-    text_row(Union{Missing, String}["3", missing, missing, missing]),
+    text_row(Union{Missing, String}["1", "Ada", "1.5", "2024-02-29 13:14:15", "12.345"]),
+    text_row(Union{Missing, String}["2", "Grace", "2.5", "2023-01-02 03:04:05", "-0.001"]),
+    text_row(Union{Missing, String}["3", missing, missing, missing, missing]),
 ]
 
 const SELECT_STMT_ID = 42
@@ -226,27 +232,30 @@ function run_workload(port::Int)::Nothing
         check(occursin("MySQL.Connection", sprint(show, conn)), "show(conn)")
 
         # buffered text protocol, consumed through the schema-typed accessor
-        cursor = DBInterface.execute(conn, "SELECT id, name, score, joined FROM people")::MySQL.TextCursor{true}
+        cursor = DBInterface.execute(conn, "SELECT id, name, score, joined, rate FROM people")::MySQL.TextCursor{true}
         check(length(cursor) == 3, "buffered cursor length")
         ids = Int32[]
         names = Union{Missing, String}[]
         scores = Union{Missing, Float64}[]
         joineds = Union{Missing, DateTime}[]
+        rates = Union{Missing, Decimal{5, 3, Int32}}[]
         for row in cursor
             push!(ids, Tables.getcolumn(row, Int32, 1, :id))
             push!(names, Tables.getcolumn(row, Union{Missing, String}, 2, :name))
             push!(scores, Tables.getcolumn(row, Union{Missing, Float64}, 3, :score))
             push!(joineds, Tables.getcolumn(row, Union{Missing, DateTime}, 4, :joined))
+            push!(rates, Tables.getcolumn(row, Union{Missing, Decimal{5, 3, Int32}}, 5, :rate))
         end
         check(ids == Int32[1, 2, 3], "text id column")
         check(isequal(names, Union{Missing, String}["Ada", "Grace", missing]), "text name column")
         check(isequal(scores, Union{Missing, Float64}[1.5, 2.5, missing]), "text score column")
         check(isequal(joineds, Union{Missing, DateTime}[DateTime(2024, 2, 29, 13, 14, 15), DateTime(2023, 1, 2, 3, 4, 5), missing]), "text datetime column")
+        check(isequal(rates, Union{Missing, Decimal{5, 3, Int32}}[Decimal{5, 3, Int32}("12.345"), Decimal{5, 3, Int32}("-0.001"), missing]), "text decimal column")
 
         # streaming text protocol
         n = 0
         total = 0
-        for row in DBInterface.execute(conn, "SELECT id, name, score, joined FROM people"; mysql_store_result=false)::MySQL.TextCursor{false}
+        for row in DBInterface.execute(conn, "SELECT id, name, score, joined, rate FROM people"; mysql_store_result=false)::MySQL.TextCursor{false}
             n += 1
             total += Int(Tables.getcolumn(row, Int32, 1, :id))
         end
@@ -264,9 +273,10 @@ function run_workload(port::Int)::Nothing
         check(isequal(bnames, Union{Missing, String}["Jane", missing]), "binary name column")
         DBInterface.close!(stmt)
 
-        # one-shot parameterized execute (prepare + execute + parked close)
+        # one-shot parameterized execute (prepare + execute + parked close), binding an
+        # exact decimal so the MYSQL_TYPE_NEWDECIMAL parameter writer is traced too
         oids = Int32[]
-        for row in DBInterface.execute(conn, "SELECT id, name FROM people WHERE id = ?", (17,))::MySQL.BinaryCursor{true}
+        for row in DBInterface.execute(conn, "SELECT id, name FROM people WHERE rate = ?", (Decimal{5, 3, Int32}("12.345"),))::MySQL.BinaryCursor{true}
             push!(oids, Tables.getcolumn(row, Int32, 1, :id))
         end
         check(oids == Int32[17, 18], "one-shot execute")

@@ -2,7 +2,8 @@
 # peer: decoding policies, the row-validity contract, multi-results, LOCAL INFILE, limits,
 # reconnect. Server scripts answer the connection phase with `plain_peer_connect!` (no TLS,
 # SET NAMES bootstrap) and then serve commands from `after`.
-using Dates, DecFP, Tables, DBInterface
+using Dates, DecFP, Tables, DBInterface, Decimals
+using Decimals: Int256
 
 # ColumnDefinition41 for a column of `type` (wire byte) with `flags`.
 function coldef(name::AbstractString; type::Integer=P.MYSQL_TYPE_VAR_STRING, flags::Integer=0, decimals::Integer=0, charset::Integer=0x2D, length::Integer=255, table::AbstractString="t")
@@ -33,7 +34,22 @@ function increment!(counter::AcceptedCounter)
     return @atomic counter.value
 end
 
-wiredef(type; flags=NOT_NULL, charset=0x2D) = P.ColumnDef("def", "db", "t", "t", "x", "x", UInt16(charset), UInt32(255), UInt8(type), UInt16(flags), UInt8(0))
+wiredef(type; flags=NOT_NULL, charset=0x2D, length=255, decimals=0) = P.ColumnDef("def", "db", "t", "t", "x", "x", UInt16(charset), UInt32(length), UInt8(type), UInt16(flags), UInt8(decimals))
+
+# The ColumnDef a server sends for `DECIMAL(precision, scale)`: the display length is
+# `precision + (scale > 0) + (unsigned ? 0 : 1)`.
+function decimaldef(precision, scale; flags=NOT_NULL, type=P.MYSQL_TYPE_NEWDECIMAL)
+    unsigned = (flags & UNSIGNED) != 0
+    len = precision + (scale > 0 ? 1 : 0) + (unsigned ? 0 : 1)
+    return wiredef(type; flags=flags, charset=63, length=len, decimals=scale)
+end
+
+# `coldef` payload bytes for the same column.
+function decimalcol(name, precision, scale; flags=NOT_NULL, type=P.MYSQL_TYPE_NEWDECIMAL)
+    unsigned = (flags & UNSIGNED) != 0
+    len = precision + (scale > 0 ? 1 : 0) + (unsigned ? 0 : 1)
+    return coldef(name; type=type, flags=flags, decimals=scale, charset=63, length=len)
+end
 
 function decode_text(T, value; opts=N.DEFAULT_RESULT_OPTIONS)
     buf = Vector{UInt8}(codeunits(value))
@@ -116,7 +132,7 @@ const TYPED_COLS = [
     coldef("i"; type=P.MYSQL_TYPE_LONG, flags=NOT_NULL),
     coldef("u"; type=P.MYSQL_TYPE_LONGLONG, flags=UNSIGNED),
     coldef("f"; type=P.MYSQL_TYPE_FLOAT),
-    coldef("d"; type=P.MYSQL_TYPE_NEWDECIMAL, decimals=3),
+    decimalcol("d", 5, 3; flags=0),
     coldef("s"; type=P.MYSQL_TYPE_VAR_STRING),
     coldef("b"; type=P.MYSQL_TYPE_BLOB, flags=BINARY),
     coldef("bit"; type=P.MYSQL_TYPE_BIT, flags=UNSIGNED),
@@ -136,8 +152,6 @@ const TYPED_COLS = [
         P.MYSQL_TYPE_INT24 => Cint,
         P.MYSQL_TYPE_LONGLONG => Int64,
         P.MYSQL_TYPE_FLOAT => Cfloat,
-        P.MYSQL_TYPE_DECIMAL => Dec64,
-        P.MYSQL_TYPE_NEWDECIMAL => Dec64,
         P.MYSQL_TYPE_DOUBLE => Cdouble,
         P.MYSQL_TYPE_YEAR => Clong,
         P.MYSQL_TYPE_TIMESTAMP => DateTime,
@@ -193,6 +207,82 @@ const TYPED_COLS = [
     end
 end
 
+@testset "DECIMAL columns map to Decimal{P,S,T}" begin
+    # the precision recovered from the display length, over the storage tiers
+    for (precision, scale, T) in ((1, 0, Int32), (9, 2, Int32), (10, 0, Int64), (18, 6, Int64),
+                                  (19, 4, Int128), (38, 10, Int128), (39, 0, Int256), (65, 30, Int256))
+        for wire in (P.MYSQL_TYPE_DECIMAL, P.MYSQL_TYPE_NEWDECIMAL)
+            @test N.juliatype(decimaldef(precision, scale; type=wire), N.DEFAULT_RESULT_OPTIONS) === Decimal{precision, scale, T}
+            @test N.juliatype(decimaldef(precision, scale; flags=NOT_NULL | UNSIGNED, type=wire), N.DEFAULT_RESULT_OPTIONS) === Decimal{precision, scale, T}
+            @test N.juliatype(decimaldef(precision, scale; flags=0, type=wire), N.DEFAULT_RESULT_OPTIONS) === Union{Missing, Decimal{precision, scale, T}}
+        end
+    end
+    # UNSIGNED must not widen a decimal (`unsigned(Decimal)` does not exist)
+    @test N.juliatype(decimaldef(12, 4; flags=NOT_NULL | UNSIGNED | P.NUM_FLAG), N.DEFAULT_RESULT_OPTIONS) === Decimal{12, 4, Int64}
+    # metadata outside the server's range is clamped to a representable Decimal, never faulted
+    @test N.juliatype(wiredef(P.MYSQL_TYPE_NEWDECIMAL; length=255, decimals=0), N.DEFAULT_RESULT_OPTIONS) === Decimal{65, 0, Int256}
+    @test N.juliatype(wiredef(P.MYSQL_TYPE_NEWDECIMAL; length=0, decimals=0), N.DEFAULT_RESULT_OPTIONS) === Decimal{1, 0, Int32}
+    @test N.juliatype(wiredef(P.MYSQL_TYPE_NEWDECIMAL; length=1, decimals=255), N.DEFAULT_RESULT_OPTIONS) === Decimal{30, 30, Int128}
+    # the canonical `[-]digits.digits` form, scanned at the column's scale
+    @test decode_text(Decimal{5, 3, Int32}, "12.345") === Decimal{5, 3, Int32}("12.345")
+    @test decode_text(Decimal{5, 3, Int32}, "-12.345") === Decimal{5, 3, Int32}("-12.345")
+    @test decode_text(Decimal{5, 3, Int32}, "0.000") === zero(Decimal{5, 3, Int32})
+    @test decode_text(Decimal{5, 3, Int32}, "-0.001") === Decimal{5, 3, Int32}("-0.001")
+    @test decode_text(Decimal{10, 0, Int64}, "-42") === Decimal{10, 0, Int64}("-42")
+    @test decode_text(Decimal{2, 2, Int32}, "0.05") === Decimal{2, 2, Int32}("0.05")   # leading zeros are not significant
+    big = "-12345678901234567890123456789012345.123456789012345678901234567890"
+    @test decode_text(Decimal{65, 30, Int256}, big) === Decimal{65, 30, Int256}(big)
+    @test decode_text(Decimal{9, 0, Int32}, "999999999") === typemax(Decimal{9, 0, Int32})
+    # a scale the column does not declare falls back to `parse` (half-even at the target)
+    @test decode_text(Decimal{5, 2, Int32}, "1.005") === Decimal{5, 2, Int32}("1.00")
+    @test decode_text(Decimal{5, 2, Int32}, "1.015") === Decimal{5, 2, Int32}("1.02")
+    @test decode_text(Decimal{10, 2, Int64}, "+1.5") === Decimal{10, 2, Int64}("1.50")
+    @test decode_text(Decimal{10, 2, Int64}, " 1.5 ") === Decimal{10, 2, Int64}("1.50")   # `parse` trims like Base
+    # malformed and out-of-range values are ConversionErrors, never ArgumentError/OverflowError
+    for bad in ("", "-", ".", "1.2x", "1.2\x005", "1..2", "12345.6", "1e3")
+        @test_throws P.ConversionError decode_text(Decimal{5, 3, Int32}, bad)
+    end
+    @test N.decode(Union{Missing, Decimal{5, 3, Int32}}, UInt8[], 1, -1, N.DEFAULT_RESULT_OPTIONS) === missing
+    @test_throws P.ConversionError N.decode(Decimal{5, 3, Int32}, UInt8[], 1, -1, N.DEFAULT_RESULT_OPTIONS)
+    # `MySQL.load` derives the column type back from the Julia type
+    @test N.sqltype(Decimal{12, 4, Int64}) == "DECIMAL(12, 4)"
+    @test N.sqltype(Union{Missing, Decimal{65, 30, Int256}}) == "DECIMAL(65, 30)"
+end
+
+# DECIMAL(5,3) NULL, DECIMAL(10,0) NOT NULL, DECIMAL(20,4) UNSIGNED NOT NULL,
+# DECIMAL(65,30) NOT NULL — the shapes the end-to-end tests drive on both protocols.
+const DECIMAL_COLS = [
+    decimalcol("rate", 5, 3; flags=0),
+    decimalcol("whole", 10, 0),
+    decimalcol("qty", 20, 4; flags=NOT_NULL | UNSIGNED),
+    decimalcol("wide", 65, 30),
+]
+
+const DECIMAL_SCHEMA_TYPES = Type[
+    Union{Missing, Decimal{5, 3, Int32}}, Decimal{10, 0, Int64},
+    Decimal{20, 4, Int128}, Decimal{65, 30, Int256},
+]
+
+const DECIMAL_WIRE_ROWS = (
+    ("12.345", "-9999999999", "0.0000", "1.000000000000000000000000000000"),
+    ("-0.001", "0", "1844674407370955.1615", "-99999999999999999999999999999999999.999999999999999999999999999999"),
+)
+
+@testset "text cursor: DECIMAL columns decode at the column's precision and scale" begin
+    rows = [text_row(DECIMAL_WIRE_ROWS[1]...), text_row(DECIMAL_WIRE_ROWS[2]...),
+            text_row(nothing, "1", "2.0000", "3.000000000000000000000000000000")]
+    with_native(c -> (expect_query(c); send_resultset(c, 1, DECIMAL_COLS, rows))) do conn
+        cur = DBInterface.execute(conn, "select decimals")
+        @test Tables.schema(cur) == Tables.Schema([:rate, :whole, :qty, :wide], DECIMAL_SCHEMA_TYPES)
+        table = Tables.columntable(cur)
+        @test isequal(table.rate, Union{Missing, Decimal{5, 3, Int32}}[Decimal{5, 3, Int32}("12.345"), Decimal{5, 3, Int32}("-0.001"), missing])
+        @test table.whole == Decimal{10, 0, Int64}[Decimal{10, 0, Int64}("-9999999999"), zero(Decimal{10, 0, Int64}), one(Decimal{10, 0, Int64})]
+        @test table.qty[2] === Decimal{20, 4, Int128}("1844674407370955.1615")   # past UInt64
+        @test table.wide[1] === one(Decimal{65, 30, Int256})
+        @test table.wide[2] === typemin(Decimal{65, 30, Int256})
+    end
+end
+
 @testset "deferred VECTOR result columns fault at metadata" begin
     vector = coldef("v"; type=P.MYSQL_TYPE_VECTOR)
     with_native(c -> begin
@@ -229,11 +319,11 @@ end
             text_row(nothing, nothing, nothing, nothing, nothing, nothing, nothing, nothing, nothing, nothing, nothing)]
     with_native(c -> (expect_query(c); send_resultset(c, 1, TYPED_COLS, rows))) do conn
         cur = DBInterface.execute(conn, "select typed")
-        @test Tables.schema(cur) == Tables.Schema([:i, :u, :f, :d, :s, :b, :bit, :dt, :da, :tm, :y], [Int32, Union{Missing, UInt64}, Union{Missing, Float32}, Union{Missing, Dec64}, Union{Missing, String}, Union{Missing, Vector{UInt8}}, Union{Missing, MySQL.Bit}, Union{Missing, DateTime}, Union{Missing, Date}, Union{Missing, Time}, Union{Missing, unsigned(Clong)}])   # YEAR → unsigned(Clong): UInt64 on 64-bit, UInt32 on Windows x64
+        @test Tables.schema(cur) == Tables.Schema([:i, :u, :f, :d, :s, :b, :bit, :dt, :da, :tm, :y], [Int32, Union{Missing, UInt64}, Union{Missing, Float32}, Union{Missing, Decimal{5, 3, Int32}}, Union{Missing, String}, Union{Missing, Vector{UInt8}}, Union{Missing, MySQL.Bit}, Union{Missing, DateTime}, Union{Missing, Date}, Union{Missing, Time}, Union{Missing, unsigned(Clong)}])   # YEAR → unsigned(Clong): UInt64 on 64-bit, UInt32 on Windows x64
         @test length(cur) == 2 && Base.IteratorSize(typeof(cur)) == Base.HasLength() && eltype(cur) == N.TextRow
         state = iterate(cur)
         row, st = state
-        @test row.i === Int32(-7) && row.u === typemax(UInt64) && row.f === 1.5f0 && row.d == d64"12.345"
+        @test row.i === Int32(-7) && row.u === typemax(UInt64) && row.f === 1.5f0 && row.d === Decimal{5, 3, Int32}("12.345")
         @test row.s == "héllo" && row.b == UInt8[0x00, 0x01] && row.bit == MySQL.Bit(0x0102)
         @test_throws P.ConversionError row.tm                               # 838 h does not fit Dates.Time
         @test row.da == Date(2024, 2, 29) && row.y === unsigned(Clong)(2024)        # YEAR is an unsigned numeric (Clong: UInt64 on 64-bit, UInt32 on Windows x64)

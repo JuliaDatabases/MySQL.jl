@@ -133,6 +133,19 @@ source are never read.
   sends `NUM_FLAG` (libmysqlclient synthesizes it client-side for `IS_NUM` types), so
   `Protocol.is_unsigned` derives numeric-ness from the wire type — otherwise
   `BIGINT UNSIGNED`/`YEAR` would decode as signed.
+- **DECIMAL is the one column whose Julia type needs more than the wire type and flags.**
+  `DECIMAL(P, S)` decodes to `Decimals.Decimal{P, S, T}`, and the column definition packet
+  carries the *display* length, not the precision:
+  `length == precision + (scale > 0) + (unsigned ? 0 : 1)`
+  (`my_decimal_precision_to_length_no_truncation`, `sql/my_decimal.h`), with `decimals` the
+  scale. `MySQL.decimal_precision`/`decimal_scale` invert that, and `MySQL.decimaltype`
+  picks the storage tier (`Int32` ≤ 9 digits, `Int64` ≤ 18, `Int128` ≤ 38, `Int256`
+  beyond — the server maximum is 65, so `Int256` always suffices). Metadata outside the
+  server's own range (a fuzzed or hostile definition) is *clamped* to a representable
+  `Decimal` rather than faulting the connection; a value that then does not fit is a
+  `ConversionError` like any other. DECIMAL values are ASCII on both protocols, so one
+  decoder serves both: a scanner for the canonical `[-]digits[.digits]` form at the
+  column's scale (no allocation), falling back to `parse` (half-even) for anything else.
 - **Rows are valid only while current** (`wrongrow`, same `ArgumentError` text as 1.x): every
   yielded row, outer-result advance, and explicit cursor close bumps the cursor's `epoch`;
   each `TextRow` carries the epoch it was issued under. Streaming cursors additionally own
@@ -197,7 +210,10 @@ source are never read.
   `mysqltype`/`bind!` mapping: `Bit` is converted to bytes and sent as `BLOB`, while DecFP
   values are converted to strings and sent as `STRING`. `Bool` maps to `TINY` (1.x left it
   at the `MYSQL_TYPE_STRING` fallback, an untested latent bug, so this is the sole deliberate
-  deviation).
+  deviation). `Decimals.Decimal`/`DecimalValue` have no 1.x counterpart and bind as
+  `MYSQL_TYPE_NEWDECIMAL`, whose value is the length-encoded ASCII form the server reads
+  with `str2my_decimal` — written straight into the command buffer with
+  `Decimals.writedecimal!`.
 - **Long data**: `MySQL.send_long_data!` copies and sends each string/blob chunk, and the
   next execute omits that parameter's inline value. Copies remain on the statement until the
   first execute response so both reconnect and the single 1615 re-prepare can replay them for
@@ -238,7 +254,7 @@ source are never read.
   column (or `UNSIGNED` on `MYSQL_TYPE_NULL`, whose Julia type is `String`) reached
   `unsigned(String)` (`is_unsigned` now trusts only the wire type); a DECIMAL value with an
   embedded NUL raised `ArgumentError` from DecFP's `Cstring` conversion instead of
-  `ConversionError`. The fuzz contract: any mutated transcript must fail as a
+  `ConversionError` (the `Decimals.Decimal` decoder that replaced it keeps that contract). The fuzz contract: any mutated transcript must fail as a
   `Protocol.MySQLError`, never a crash. The harness (`test/protocol/fuzz.jl`) drives the
   real packet reader/classifiers/scanners/decoders and the handshake/auth parsers over an
   in-memory transport. Its vendor and synthetic corpus must produce the declared clean or

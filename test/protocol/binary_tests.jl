@@ -260,6 +260,11 @@ end
     @test_throws P.ConversionError N.decode_binary(String, UInt8[0x61], typemax(Int), 0, o)
     @test N.decode_binary(Vector{UInt8}, UInt8[0x00, 0xff], 1, 2, o) == UInt8[0x00, 0xff]
     @test N.decode_binary(Dec64, Vector{UInt8}(codeunits("12.345")), 1, 6, o) == d64"12.345"
+    # DECIMAL is the ASCII form in the binary protocol too, so it decodes at the column's scale
+    @test N.decode_binary(Decimal{5, 3, Int32}, Vector{UInt8}(codeunits("12.345")), 1, 6, o) === Decimal{5, 3, Int32}("12.345")
+    @test N.decode_binary(Decimal{10, 0, Int64}, Vector{UInt8}(codeunits("-42")), 1, 3, o) === Decimal{10, 0, Int64}("-42")
+    @test N.decode_binary(Union{Missing, Decimal{5, 3, Int32}}, UInt8[], 1, -1, o) === missing
+    @test_throws P.ConversionError N.decode_binary(Decimal{5, 3, Int32}, Vector{UInt8}(codeunits("nope")), 1, 4, o)
     @test N.decode_binary(MySQL.Bit, UInt8[0x01, 0x02], 1, 2, o) == MySQL.Bit(0x0102)
     @test N.decode_binary(MySQL.Bit, fill(0xff, 8), 1, 8, o) == MySQL.Bit(typemax(UInt64))
     @test_throws P.ConversionError N.decode_binary(MySQL.Bit, fill(0xff, 9), 1, 9, o)
@@ -401,6 +406,40 @@ end
         @test Tables.columntable(DBInterface.execute(stmt, (5,))).i == Int32[7]
         DBInterface.close!(stmt)
     end
+end
+
+@testset "prepared DECIMAL: schema, values and a NEWDECIMAL parameter round trip" begin
+    param = Decimal{20, 4, Int128}("-1234567890123456.7890")
+    payloads = Vector{UInt8}[]
+    rows = [binary_row(DECIMAL_WIRE_ROWS[1]...), binary_row(DECIMAL_WIRE_ROWS[2]...),
+            binary_row(missing, "1", "2.0000", "3.000000000000000000000000000000")]
+    with_native(c -> begin
+        expect_prepare(c)
+        send_prepare_ok(c, 1, 12, paramdefs(1), DECIMAL_COLS)
+        push!(payloads, expect_execute(c))
+        send_resultset(c, 1, DECIMAL_COLS, rows)
+        expect_stmt_close(c)
+        expect_query(c); send_ok(c, 1)
+    end) do conn
+        stmt = DBInterface.prepare(conn, "SELECT rate, whole, qty, wide FROM t WHERE qty > ?")
+        @test stmt.types == DECIMAL_SCHEMA_TYPES
+        cur = DBInterface.execute(stmt, (param,))
+        @test Tables.schema(cur) == Tables.Schema([:rate, :whole, :qty, :wide], DECIMAL_SCHEMA_TYPES)
+        table = Tables.columntable(cur)
+        @test isequal(table.rate, Union{Missing, Decimal{5, 3, Int32}}[Decimal{5, 3, Int32}("12.345"), Decimal{5, 3, Int32}("-0.001"), missing])
+        @test table.whole[1] === Decimal{10, 0, Int64}("-9999999999")
+        @test table.qty[2] === Decimal{20, 4, Int128}("1844674407370955.1615")
+        @test table.wide == Decimal{65, 30, Int256}[one(Decimal{65, 30, Int256}), typemin(Decimal{65, 30, Int256}), Decimal{65, 30, Int256}("3")]
+        DBInterface.close!(stmt)
+        @test DBInterface.execute(conn, "SELECT 1").rows_affected == 0
+    end
+    # the bound parameter went out as MYSQL_TYPE_NEWDECIMAL carrying its positional digits
+    payload = only(payloads)
+    types_at = 4 + 1 + 4 + 1 + 1 + 1        # after id, flags, iteration count, null bitmap, new_params_bind_flag
+    @test payload[types_at] == P.MYSQL_TYPE_NEWDECIMAL && payload[types_at + 1] == 0x00
+    c = P.PacketCursor(payload[(types_at + 2):end])
+    @test P.read_lenenc_string!(c, "decimal parameter") == "-1234567890123456.7890"
+    @test P.atend(c)
 end
 
 @testset "parameter signature cache follows NULL type changes" begin
@@ -832,7 +871,7 @@ end
         if x isa Union{Date, DateTime, MySQL.DateAndTime, Dates.Time}
             len = Int(buf[1])
             return N.decode_binary(T, buf, 2, len, o)
-        elseif x isa Union{AbstractString, Vector{UInt8}, MySQL.Bit, DecFP.DecimalFloatingPoint}
+        elseif x isa Union{AbstractString, Vector{UInt8}, MySQL.Bit, DecFP.DecimalFloatingPoint, Decimals.AbstractDecimal}
             c = P.PacketCursor(buf); off, len = P.read_lenenc_window_len!(c, "v")
             return N.decode_binary(T, buf, off, len, o)
         else
@@ -855,6 +894,9 @@ end
     @test roundtrip(MySQL.Bit, MySQL.Bit(0x0102)) == MySQL.Bit(0x0102)
     @test roundtrip(MySQL.Bit, MySQL.Bit(typemax(UInt64))) == MySQL.Bit(typemax(UInt64))
     @test roundtrip(Dec64, d64"12.345") == d64"12.345"
+    @test roundtrip(Decimal{5, 3, Int32}, Decimal{5, 3, Int32}("-12.345")) === Decimal{5, 3, Int32}("-12.345")
+    @test roundtrip(Decimal{65, 30, Int256}, typemin(Decimal{65, 30, Int256})) === typemin(Decimal{65, 30, Int256})
+    @test roundtrip(Decimal{10, 0, Int64}, DecimalValue{Int64}(-12345, 3)) === Decimal{10, 0, Int64}("-12")
     @test roundtrip(Date, Date(2024, 2, 29)) == Date(2024, 2, 29)
     @test roundtrip(DateTime, DateTime(2024, 2, 29, 13, 14, 15, 250)) == DateTime(2024, 2, 29, 13, 14, 15, 250)
     @test roundtrip(MySQL.DateAndTime, MySQL.DateAndTime(Date(2024, 1, 2), Time(1, 2, 3, 456, 789))) == MySQL.DateAndTime(Date(2024, 1, 2), Time(1, 2, 3, 456, 789))
@@ -867,6 +909,18 @@ end
     c = P.PacketCursor(encoded_decimal)
     @test P.read_lenenc_string!(c, "Dec128 parameter") == string(decimal)
     @test P.atend(c)
+
+    # A `Decimal`/`DecimalValue` parameter is MYSQL_TYPE_NEWDECIMAL carrying the positional
+    # digits; the server parses those with `str2my_decimal`.
+    exact = Decimal{20, 6, Int128}("-1234567890123.456789")
+    @test N.param_signature(Any[exact, DecimalValue{Int64}(12345, 3)]) == UInt16[P.MYSQL_TYPE_NEWDECIMAL, P.MYSQL_TYPE_NEWDECIMAL]
+    for x in (exact, DecimalValue{Int64}(12345, 3), zero(Decimal{1, 0, Int32}), typemax(Decimal{65, 30, Int256}))
+        buf = UInt8[]
+        N.encode_param_value!(buf, x)
+        cursor = P.PacketCursor(buf)
+        @test P.read_lenenc_string!(cursor, "Decimal parameter") == string(x)
+        @test P.atend(cursor)
+    end
 end
 
 @testset "COM_STMT_SEND_LONG_DATA framing" begin

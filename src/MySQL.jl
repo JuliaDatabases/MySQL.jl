@@ -1,6 +1,6 @@
 module MySQL
 
-using Dates, DBInterface, Tables, Parsers, DecFP, Reseau
+using Dates, DBInterface, Tables, Parsers, DecFP, Decimals, Reseau
 import Random
 
 export DBInterface, DateAndTime
