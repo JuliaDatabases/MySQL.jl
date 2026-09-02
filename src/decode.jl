@@ -143,7 +143,7 @@ end
 # The general fallback: `Base.parse` for decimals accepts a sign, an exponent, surrounding
 # whitespace and any scale, rounding half-even into `D`.
 function parse_decimal(::Type{D}, buf::Vector{UInt8}, pos::Int, len::Int, opts::ResultOptions) where {D <: Decimals.Decimal}
-    x = tryparse(D, decode_value(String, buf, pos, len, opts))
+    x = Parsers.tryparse(D, buf, pos, pos + len - 1)
     x === nothing && conversion_error(D, buf, pos, len)
     return x
 end
