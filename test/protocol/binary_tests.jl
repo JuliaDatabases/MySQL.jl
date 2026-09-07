@@ -59,8 +59,8 @@ function expect_long_data(conn)
     return (statement_id, parameter_number, payload[7:end])
 end
 
-function serve_load(conn, table_name::String, column_name::String)
-    @test expect_query(conn) == "CREATE TABLE IF NOT EXISTS $table_name ($column_name VARCHAR(255) )"
+function serve_load(conn, table_name::String, column_name::String; primary_key_clause::String="")
+    @test expect_query(conn) == "CREATE TABLE IF NOT EXISTS $table_name ($primary_key_clause$column_name VARCHAR(255) )"
     send_ok(conn, 1)
     @test expect_query(conn) == "START TRANSACTION"
     send_ok(conn, 1)
@@ -122,6 +122,67 @@ execute_null_bitmap(payload, nparams) = payload[10:(9 + ((nparams + 7) >> 3))]
         @test MySQL.quoteid(conn, "`ta``ble`") == "`ta``ble`"
         @test_throws ArgumentError MySQL.load([row], conn, "ta`ble"; debug=:invalid)
     end
+end
+
+@testset "MySQL.load primary key identifier policy" begin
+    cases = (
+        ("id", "`id` INT AUTO_INCREMENT PRIMARY KEY, "),
+        ("order", "`order` INT AUTO_INCREMENT PRIMARY KEY, "),
+        ("key name", "`key name` INT AUTO_INCREMENT PRIMARY KEY, "),
+        ("key`name", "`key``name` INT AUTO_INCREMENT PRIMARY KEY, "),
+        ("`key``name`", "`key``name` INT AUTO_INCREMENT PRIMARY KEY, "),
+        ("id INT, injected", "`id INT, injected` INT AUTO_INCREMENT PRIMARY KEY, "),
+        (nothing, ""),
+        ("", ""),
+    )
+    for (name, clause) in cases
+        with_native(c -> serve_load(c, "`data`", "`value`"; primary_key_clause=clause)) do conn
+            @test MySQL.load([(value="one",)], conn, "data";
+                auto_increment_primary_key_name=name) == "`data`"
+        end
+    end
+    # The explicit opt-out still leaves both primary-key and source names unquoted.
+    seen = String[]
+    with_native(c -> begin
+        push!(seen, expect_query(c))
+        send_ok(c, 1)
+    end) do conn
+        sch = Tables.Schema((:value,), (String,))
+        MySQL.createtable(conn, "data", sch; quoteidentifiers=false,
+            auto_increment_primary_key_name="id")
+    end
+    @test only(seen) == "CREATE TABLE data (id INT AUTO_INCREMENT PRIMARY KEY, value VARCHAR(255) )"
+end
+
+@testset "MySQL.load binding failure closes the statement before rollback" begin
+    seen = String[]
+    with_native(c -> begin
+        push!(seen, expect_query(c))
+        send_ok(c, 1)
+        push!(seen, expect_query(c))
+        send_ok(c, 1; status=P.SERVER_STATUS_AUTOCOMMIT | P.SERVER_STATUS_IN_TRANS)
+        push!(seen, expect_prepare(c))
+        send_prepare_ok(c, 1, 92, paramdefs(1), P.ColumnDef[])
+        # The date fails during encoding. No COM_STMT_EXECUTE may reach the server.
+        @test expect_stmt_close(c) == 92
+        push!(seen, expect_query(c))
+        send_ok(c, 1)
+        push!(seen, expect_query(c))
+        send_ok(c, 1)
+    end) do conn
+        @test_throws InexactError MySQL.load([(value=Date(-1, 1, 1),)], conn, "data";
+            auto_increment_primary_key_name="key`name")
+        @test conn.stmts_to_close === nothing
+        @test conn.transaction_owner === nothing
+        @test DBInterface.execute(conn, "after rollback").rows_affected == 0
+    end
+    @test seen == [
+        "CREATE TABLE IF NOT EXISTS `data` (`key``name` INT AUTO_INCREMENT PRIMARY KEY, `value` DATE )",
+        "START TRANSACTION",
+        "INSERT INTO `data` (`value`) VALUES (?)",
+        "ROLLBACK",
+        "after rollback",
+    ]
 end
 
 @testset "COM_STMT_PREPARE_OK header shape" begin

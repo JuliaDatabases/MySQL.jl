@@ -46,7 +46,12 @@ function createtable(conn::Connection, nm::AbstractString, sch::Tables.Schema; d
     checkdupnames(names)
     types = [sqltype(T, coltypes, names[i]) for (i, T) in enumerate(sch.types)]
     columns = (string(quoteidentifiers ? quoteid(conn, String(names[i])) : names[i], ' ', types[i], ' ', get(columnsuffix, names[i], "")) for i = 1:length(names))
-    auto_increment_column = (auto_increment_primary_key_name === nothing || isempty(auto_increment_primary_key_name)) ? "" : "$(auto_increment_primary_key_name) INT AUTO_INCREMENT PRIMARY KEY, "
+    auto_increment_column = if auto_increment_primary_key_name === nothing || isempty(auto_increment_primary_key_name)
+        ""
+    else
+        primary_key_name = quoteidentifiers ? quoteid(conn, auto_increment_primary_key_name) : auto_increment_primary_key_name
+        "$primary_key_name INT AUTO_INCREMENT PRIMARY KEY, "
+    end
     debug && @info "executing create table statement: `$createtableclause $nm ($(auto_increment_column)$(join(columns, ", ")))`"
     return DBInterface.execute(conn, "$createtableclause $nm ($(auto_increment_column)$(join(columns, ", ")))")
 end
