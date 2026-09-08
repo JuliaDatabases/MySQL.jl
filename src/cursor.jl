@@ -330,9 +330,11 @@ DBInterface.lastrowid(c::Cursor) = return c.ok === nothing ? UInt64(0) : c.ok.la
 """
     DBInterface.close!(c::MySQL.Cursor)
 
-Discards whatever the server still has to send for the command that produced `c` (remaining
-rows and result sets). The cursor's retained buffered rows stay readable; a streaming cursor
-yields no more rows.
+Closes `c` and invalidates its current row. Further iteration yields no rows, for both
+buffered and streaming cursors. Repeated calls have no effect.
+
+If `c` still owns a pending response, discards the remaining rows and result sets for its
+command.
 """
 function DBInterface.close!(c::Cursor)
     conn = c.conn
