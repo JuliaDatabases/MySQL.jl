@@ -14,8 +14,18 @@ function quoteid(str)
 end
 quoteid(::Connection, str) = quoteid(str)
 
-sqltype(T) = get(SQLTYPES, nonmissingtype(T), "VARCHAR(255)")
-sqltype(T, coltypes, name) = get(coltypes, name, sqltype(T))
+function sqltype(T)
+    D = nonmissingtype(T)
+    if D !== Union{} && D <: DataDecimals.Decimal
+        p, s = precision(D), DataDecimals.scale(D)
+        p <= 65 && s <= 30 || throw(ArgumentError("MySQL DECIMAL requires precision <= 65 and scale <= 30"))
+        return "DECIMAL($p, $s)"
+    elseif D !== Union{} && D <: DataDecimals.DecimalValue
+        throw(ArgumentError("DecimalValue needs an explicit DECIMAL precision and scale in coltypes"))
+    end
+    return get(SQLTYPES, D, "VARCHAR(255)")
+end
+sqltype(T, coltypes, name) = haskey(coltypes, name) ? coltypes[name] : sqltype(T)
 
 const SQLTYPES = Dict{Type, String}(
     Int8 => "TINYINT",

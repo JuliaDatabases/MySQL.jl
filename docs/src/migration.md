@@ -3,8 +3,7 @@
 MySQL.jl 2.0 replaces the MariaDB Connector/C backend with a **native wire-protocol
 implementation**: the MySQL client/server protocol written in Julia on top of
 [Reseau](https://github.com/JuliaServices/Reseau.jl) transports (TCP and TLS). It is *not*
-"pure Julia" — OpenSSL underpins TLS and the RSA password exchange, and DecFP provides
-`Dec64` — but every `libmariadb` `ccall`, its dynamic plugin loading, and its C handle
+"pure Julia" — OpenSSL underpins TLS and the RSA password exchange, and DecFP input support remains available — but every `libmariadb` `ccall`, its dynamic plugin loading, and its C handle
 lifetimes are gone, along with the crash classes they caused (issues #220, #236, #240,
 #208, #206).
 
@@ -20,7 +19,11 @@ last Connector/C release.
    `MySQL.StmtError` (same field names/types plus a new `sqlstate`), or catch the root
    `MySQL.MySQLError`.
 2. **Value types**: replace `MySQL.API.Bit` with `MySQL.Bit`. `MySQL.DateAndTime` and
-   `MySQL.juliatype` are unchanged.
+   timestamp behavior stay unchanged. DECIMAL results now use
+   `DataDecimals.DecimalValue{DataDecimals.Int256}` to preserve all 65 digits
+   and the stored scale. Fixed-scale DataDecimals values can be bound directly.
+   `MySQL.load` infers `DECIMAL(P,S)` from a fixed-scale type; for `DecimalValue`,
+   specify the destination type with `coltypes`.
 3. **Multi-statements**: pass `multi_statements=true` if you relied on 1.x accepting
    `"stmt1; stmt2"` by default (an `if/elseif` bug made 1.x enable it silently).
 4. **Enum-valued options**: pass Symbols — `ssl_mode=:required` (was
@@ -40,7 +43,7 @@ last Connector/C release.
 | `MySQL.API.Error`, `MySQL.API.StmtError` | `MySQL.Error`, `MySQL.StmtError` (aliases of `MySQL.Protocol.Error`/`StmtError`; same `errno::Cuint`/`msg` fields and `showerror` text, plus `sqlstate`); root type `MySQL.MySQLError` |
 | `MySQL.API.Bit` | `MySQL.Bit` (same `bits::UInt64` field) |
 | `MySQL.DateAndTime` (`MySQL.API.DateAndTime`) | `MySQL.DateAndTime` (unchanged) |
-| `MySQL.API.juliatype` / `MySQL.juliatype` | `MySQL.juliatype` (unchanged mapping) |
+| `MySQL.API.juliatype` / `MySQL.juliatype` | `MySQL.juliatype` (DECIMAL now uses DataDecimals) |
 | `MySQL.API.MYSQL_TYPE_*` constants | `MySQL.Protocol.MYSQL_TYPE_*` (wire-value `UInt8`s) |
 | `MySQL.API.SSL_MODE_*`, `MySQL.API.MYSQL_PROTOCOL_*` enums | Symbols: `ssl_mode=:disabled/:preferred/:required/:verify_ca/:verify_identity`, `protocol=:default/:tcp/:socket/:pipe` |
 | `MySQL.API.mysqltype` | removed (parameter types are inferred from Julia values when binding) |

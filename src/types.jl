@@ -44,7 +44,7 @@ which cannot be represented by a `Dates.DateTime`; pass `mysql_date_and_time=tru
 `DBInterface.execute` or `DBInterface.prepare` to get `MySQL.DateAndTime` values that
 preserve the full microsecond precision""" maxlog=1
 
-# The wire type of a `ColumnDef` → base Julia type, exactly as 1.x computed it.
+# The wire type maps to a host type. DECIMAL uses an exact 256-bit coefficient.
 function juliatype(field_type)
     t = UInt32(field_type)
     if t == P.MYSQL_TYPE_BIT
@@ -60,7 +60,7 @@ function juliatype(field_type)
     elseif t == P.MYSQL_TYPE_FLOAT
         return Cfloat
     elseif t == P.MYSQL_TYPE_DECIMAL || t == P.MYSQL_TYPE_NEWDECIMAL
-        return Dec64
+        return DataDecimals.DecimalValue{DataDecimals.Int256}
     elseif t == P.MYSQL_TYPE_DOUBLE
         return Cdouble
     elseif t == P.MYSQL_TYPE_TINY_BLOB || t == P.MYSQL_TYPE_MEDIUM_BLOB ||
@@ -96,7 +96,7 @@ end
     MySQL.juliatype(field_type, notnullable, isunsigned, isbinary, date_and_time) -> Type
 
 The Julia type a result column decodes to, given its wire type and flags: the 1.x mapping,
-unchanged at 2.0 (unsigned integer widening, binary BLOB vs `String`, `DateAndTime` under
+with exact DataDecimals values at 2.0 (unsigned integer widening, binary BLOB vs `String`, `DateAndTime` under
 `mysql_date_and_time=true`, `Union{Missing, T}` for nullable columns).
 """
 function juliatype(field_type, notnullable, isunsigned, isbinary, date_and_time)

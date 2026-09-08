@@ -329,3 +329,13 @@ function encode_params_into!(buf::Vector{UInt8}, values, signature::Vector{UInt1
     end
     return nothing
 end
+
+function decode_binary_value(::Type{DataDecimals.DecimalValue{DataDecimals.Int256}},
+    buf::Vector{UInt8}, pos::Int, len::Int, opts::ResultOptions)
+    return decode_value(DataDecimals.DecimalValue{DataDecimals.Int256}, buf, pos, len, opts)
+end
+param_type(::DataDecimals.AbstractDecimal) = return (P.MYSQL_TYPE_STRING, false)
+function encode_param_value!(buf::Vector{UInt8}, x::DataDecimals.AbstractDecimal)
+    P.write_lenenc_string!(buf, string(x))
+    return nothing
+end

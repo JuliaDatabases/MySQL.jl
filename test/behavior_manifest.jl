@@ -13,6 +13,7 @@
 module BehaviorManifest
 
 using Test, MySQL, DBInterface, Tables, Dates, DecFP, Logging
+const DecimalResult = MySQL.DataDecimals.DecimalValue{MySQL.DataDecimals.Int256}
 
 struct Row
     name::String
@@ -341,9 +342,9 @@ end
 # A tuple, not an array literal: `end` inside `[...]` is the last-index token, which breaks
 # `begin ... end` closure bodies.
 const TEXT_ROW_TUPLE = (
-    Row("select *: Tables.schema (type mapping incl. BIGINT UNSIGNED, YEAR, BIT, TEXT, VARBINARY)", :preserve,
+    Row("select *: Tables.schema (type mapping incl. BIGINT UNSIGNED, YEAR, BIT, TEXT, VARBINARY)", :fix,
         conn -> schema_pairs(DBInterface.execute(conn, "SELECT * FROM manifest_employee"))),
-    Row("select *: columntable values (NULLs, Dec64, Time, Date, DateTime, blob, enum, single-byte BIT, utf8mb4 text)", :preserve,
+    Row("select *: columntable values (NULLs, exact decimals, Time, Date, DateTime, blob, enum, single-byte BIT, utf8mb4 text)", :fix,
         conn -> let t = Tables.columntable(DBInterface.execute(conn, "SELECT * FROM manifest_employee"))
             Base.structdiff(t, NamedTuple{(:Flags,)})   # multi-byte BIT is a :fix row below
         end),
@@ -427,13 +428,13 @@ const TEXT_ROWS = collect(Row, TEXT_ROW_TUPLE)
 # M4: the same scenarios over the binary protocol (prepared statements). `run` uses
 # `DBInterface.prepare`/`execute(stmt, params)`/`executemany`, which both backends provide.
 const BINARY_ROW_TUPLE = (
-    Row("prepared SELECT schema mirrors the text mapping", :preserve,
+    Row("prepared SELECT schema mirrors the text mapping", :fix,
         conn -> let stmt = DBInterface.prepare(conn, "SELECT ID, EmpNo, Salary, Rate, Name, JoinDate, LastLogin, LunchTime, Photo, JobType, Senior, Born FROM manifest_employee")
             sch = Tables.schema(DBInterface.execute(stmt))
             DBInterface.close!(stmt)
             collect(zip(sch.names, sch.types))
         end),
-    Row("prepared SELECT decodes values (ints, DOUBLE, Dec64, Date, DateTime, Time, blob, enum, single-byte BIT, YEAR)", :preserve,
+    Row("prepared SELECT decodes values (ints, DOUBLE, exact decimals, Date, DateTime, Time, blob, enum, single-byte BIT, YEAR)", :fix,
         conn -> let stmt = DBInterface.prepare(conn, "SELECT OfficeNo, EmpNo, Salary, Rate, JoinDate, LastLogin, LunchTime, Photo, JobType, Senior, Born FROM manifest_employee ORDER BY ID")
             t = Tables.columntable(DBInterface.execute(stmt))
             DBInterface.close!(stmt)
@@ -514,14 +515,15 @@ const BINARY_ROW_TUPLE = (
 const BINARY_ROWS = collect(Row, BINARY_ROW_TUPLE)
 const ALL_ROWS = vcat(TEXT_ROWS, BINARY_ROWS)
 
-# Golden values for the rows above that predate 2.0 as `:preserve` rows (their values were
+# Decimal result rows now use DataDecimals and are marked :fix; 1.x used Dec64.
+# Golden values for the other rows predate 2.0 as `:preserve` rows (their values were
 # proved equal to Connector/C by the pre-2.0 dual-backend manifest runs). Captured against
 # mysql:8.4 with `capture!`; `run!` asserts `row.expected`, falling back to this table.
 const GOLDENS = Dict{String, Any}(
     "select *: Tables.schema (type mapping incl. BIGINT UNSIGNED, YEAR, BIT, TEXT, VARBINARY)" =>
-        Tuple{Symbol, Type}[(:ID, Int32), (:OfficeNo, Union{Missing, Int8}), (:DeptNo, Union{Missing, Int16}), (:EmpNo, Union{Missing, UInt64}), (:Wage, Union{Missing, Float32}), (:Salary, Union{Missing, Float64}), (:Rate, Union{Missing, DecFP.Dec64}), (:LunchTime, Union{Missing, Dates.Time}), (:JoinDate, Union{Missing, Dates.Date}), (:LastLogin, Union{Missing, Dates.DateTime}), (:LastLogin2, Dates.DateTime), (:Initial, Union{Missing, String}), (:Name, Union{Missing, String}), (:Photo, Union{Missing, Vector{UInt8}}), (:JobType, Union{Missing, String}), (:Senior, Union{Missing, MySQL.Bit}), (:Born, Union{Missing, UInt64}), (:Flags, Union{Missing, MySQL.Bit}), (:Note, Union{Missing, String}), (:Raw, Union{Missing, String})],
-    "select *: columntable values (NULLs, Dec64, Time, Date, DateTime, blob, enum, single-byte BIT, utf8mb4 text)" =>
-        (ID = Int32[1, 2, 3], OfficeNo = Union{Missing, Int8}[1, 1, missing], DeptNo = Union{Missing, Int16}[2, 2, missing], EmpNo = Union{Missing, UInt64}[0x0000000000000515, 0xffffffffffffffff, missing], Wage = Union{Missing, Float32}[3.14f0, 3.14f0, missing], Salary = Union{Missing, Float64}[10000.5, 20000.25, missing], Rate = Union{Missing, DecFP.Dec64}[d64"1.001", d64"2.002", missing], LunchTime = Union{Missing, Dates.Time}[Dates.Time(12), Dates.Time(13), missing], JoinDate = Union{Missing, Dates.Date}[Dates.Date("2015-08-03"), Dates.Date("2015-08-04"), missing], LastLogin = Union{Missing, Dates.DateTime}[Dates.DateTime("2015-09-05T12:31:30"), Dates.DateTime("2015-10-12T13:12:14"), missing], LastLogin2 = Dates.DateTime[Dates.DateTime("2015-09-05T12:31:30"), Dates.DateTime("2015-10-12T13:12:14"), Dates.DateTime("2015-09-05T10:05:10")], Initial = Union{Missing, String}["A", "B", missing], Name = Union{Missing, String}["John", "Tom", missing], Photo = Union{Missing, Vector{UInt8}}[UInt8[0x61, 0x62, 0x63], UInt8[0x64, 0x65, 0x66], missing], JobType = Union{Missing, String}["HR", "HR", missing], Senior = Union{Missing, MySQL.Bit}[MySQL.Bit(0x0000000000000001), MySQL.Bit(0x0000000000000001), missing], Born = Union{Missing, UInt64}[0x00000000000007cf, 0x00000000000007e8, missing], Note = Union{Missing, String}["héllo wörld 🐘", "", missing], Raw = Union{Missing, String}["\x01\x02", "", missing]),
+        Tuple{Symbol, Type}[(:ID, Int32), (:OfficeNo, Union{Missing, Int8}), (:DeptNo, Union{Missing, Int16}), (:EmpNo, Union{Missing, UInt64}), (:Wage, Union{Missing, Float32}), (:Salary, Union{Missing, Float64}), (:Rate, Union{Missing, DecimalResult}), (:LunchTime, Union{Missing, Dates.Time}), (:JoinDate, Union{Missing, Dates.Date}), (:LastLogin, Union{Missing, Dates.DateTime}), (:LastLogin2, Dates.DateTime), (:Initial, Union{Missing, String}), (:Name, Union{Missing, String}), (:Photo, Union{Missing, Vector{UInt8}}), (:JobType, Union{Missing, String}), (:Senior, Union{Missing, MySQL.Bit}), (:Born, Union{Missing, UInt64}), (:Flags, Union{Missing, MySQL.Bit}), (:Note, Union{Missing, String}), (:Raw, Union{Missing, String})],
+    "select *: columntable values (NULLs, exact decimals, Time, Date, DateTime, blob, enum, single-byte BIT, utf8mb4 text)" =>
+        (ID = Int32[1, 2, 3], OfficeNo = Union{Missing, Int8}[1, 1, missing], DeptNo = Union{Missing, Int16}[2, 2, missing], EmpNo = Union{Missing, UInt64}[0x0000000000000515, 0xffffffffffffffff, missing], Wage = Union{Missing, Float32}[3.14f0, 3.14f0, missing], Salary = Union{Missing, Float64}[10000.5, 20000.25, missing], Rate = Union{Missing, DecimalResult}[DecimalResult("1.001"), DecimalResult("2.002"), missing], LunchTime = Union{Missing, Dates.Time}[Dates.Time(12), Dates.Time(13), missing], JoinDate = Union{Missing, Dates.Date}[Dates.Date("2015-08-03"), Dates.Date("2015-08-04"), missing], LastLogin = Union{Missing, Dates.DateTime}[Dates.DateTime("2015-09-05T12:31:30"), Dates.DateTime("2015-10-12T13:12:14"), missing], LastLogin2 = Dates.DateTime[Dates.DateTime("2015-09-05T12:31:30"), Dates.DateTime("2015-10-12T13:12:14"), Dates.DateTime("2015-09-05T10:05:10")], Initial = Union{Missing, String}["A", "B", missing], Name = Union{Missing, String}["John", "Tom", missing], Photo = Union{Missing, Vector{UInt8}}[UInt8[0x61, 0x62, 0x63], UInt8[0x64, 0x65, 0x66], missing], JobType = Union{Missing, String}["HR", "HR", missing], Senior = Union{Missing, MySQL.Bit}[MySQL.Bit(0x0000000000000001), MySQL.Bit(0x0000000000000001), missing], Born = Union{Missing, UInt64}[0x00000000000007cf, 0x00000000000007e8, missing], Note = Union{Missing, String}["héllo wörld 🐘", "", missing], Raw = Union{Missing, String}["\x01\x02", "", missing]),
     "streaming (mysql_store_result=false) yields the same rows" =>
         Tuple{Int32, Any}[(1, "John"), (2, "Tom"), (3, missing)],
     "row is valid only while current: ArgumentError text" =>
@@ -549,9 +551,9 @@ const GOLDENS = Dict{String, Any}(
     "show format" =>
         true,
     "prepared SELECT schema mirrors the text mapping" =>
-        Tuple{Symbol, Type}[(:ID, Int32), (:EmpNo, Union{Missing, UInt64}), (:Salary, Union{Missing, Float64}), (:Rate, Union{Missing, DecFP.Dec64}), (:Name, Union{Missing, String}), (:JoinDate, Union{Missing, Dates.Date}), (:LastLogin, Union{Missing, Dates.DateTime}), (:LunchTime, Union{Missing, Dates.Time}), (:Photo, Union{Missing, Vector{UInt8}}), (:JobType, Union{Missing, String}), (:Senior, Union{Missing, MySQL.Bit}), (:Born, Union{Missing, UInt64})],
-    "prepared SELECT decodes values (ints, DOUBLE, Dec64, Date, DateTime, Time, blob, enum, single-byte BIT, YEAR)" =>
-        (OfficeNo = Union{Missing, Int8}[1, 1, missing], EmpNo = Union{Missing, UInt64}[0x0000000000000515, 0xffffffffffffffff, missing], Salary = Union{Missing, Float64}[10000.5, 20000.25, missing], Rate = Union{Missing, DecFP.Dec64}[d64"1.001", d64"2.002", missing], JoinDate = Union{Missing, Dates.Date}[Dates.Date("2015-08-03"), Dates.Date("2015-08-04"), missing], LastLogin = Union{Missing, Dates.DateTime}[Dates.DateTime("2015-09-05T12:31:30"), Dates.DateTime("2015-10-12T13:12:14"), missing], LunchTime = Union{Missing, Dates.Time}[Dates.Time(12), Dates.Time(13), missing], Photo = Union{Missing, Vector{UInt8}}[UInt8[0x61, 0x62, 0x63], UInt8[0x64, 0x65, 0x66], missing], JobType = Union{Missing, String}["HR", "HR", missing], Senior = Union{Missing, MySQL.Bit}[MySQL.Bit(0x0000000000000001), MySQL.Bit(0x0000000000000001), missing], Born = Union{Missing, UInt64}[0x00000000000007cf, 0x00000000000007e8, missing]),
+        Tuple{Symbol, Type}[(:ID, Int32), (:EmpNo, Union{Missing, UInt64}), (:Salary, Union{Missing, Float64}), (:Rate, Union{Missing, DecimalResult}), (:Name, Union{Missing, String}), (:JoinDate, Union{Missing, Dates.Date}), (:LastLogin, Union{Missing, Dates.DateTime}), (:LunchTime, Union{Missing, Dates.Time}), (:Photo, Union{Missing, Vector{UInt8}}), (:JobType, Union{Missing, String}), (:Senior, Union{Missing, MySQL.Bit}), (:Born, Union{Missing, UInt64})],
+    "prepared SELECT decodes values (ints, DOUBLE, exact decimals, Date, DateTime, Time, blob, enum, single-byte BIT, YEAR)" =>
+        (OfficeNo = Union{Missing, Int8}[1, 1, missing], EmpNo = Union{Missing, UInt64}[0x0000000000000515, 0xffffffffffffffff, missing], Salary = Union{Missing, Float64}[10000.5, 20000.25, missing], Rate = Union{Missing, DecimalResult}[DecimalResult("1.001"), DecimalResult("2.002"), missing], JoinDate = Union{Missing, Dates.Date}[Dates.Date("2015-08-03"), Dates.Date("2015-08-04"), missing], LastLogin = Union{Missing, Dates.DateTime}[Dates.DateTime("2015-09-05T12:31:30"), Dates.DateTime("2015-10-12T13:12:14"), missing], LunchTime = Union{Missing, Dates.Time}[Dates.Time(12), Dates.Time(13), missing], Photo = Union{Missing, Vector{UInt8}}[UInt8[0x61, 0x62, 0x63], UInt8[0x64, 0x65, 0x66], missing], JobType = Union{Missing, String}["HR", "HR", missing], Senior = Union{Missing, MySQL.Bit}[MySQL.Bit(0x0000000000000001), MySQL.Bit(0x0000000000000001), missing], Born = Union{Missing, UInt64}[0x00000000000007cf, 0x00000000000007e8, missing]),
     "prepared WHERE with a bound parameter filters rows" =>
         Int32[1],
     "prepared row is valid only while current: ArgumentError text" =>

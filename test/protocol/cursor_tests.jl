@@ -136,8 +136,8 @@ const TYPED_COLS = [
         P.MYSQL_TYPE_INT24 => Cint,
         P.MYSQL_TYPE_LONGLONG => Int64,
         P.MYSQL_TYPE_FLOAT => Cfloat,
-        P.MYSQL_TYPE_DECIMAL => Dec64,
-        P.MYSQL_TYPE_NEWDECIMAL => Dec64,
+        P.MYSQL_TYPE_DECIMAL => MySQL.DataDecimals.DecimalValue{MySQL.DataDecimals.Int256},
+        P.MYSQL_TYPE_NEWDECIMAL => MySQL.DataDecimals.DecimalValue{MySQL.DataDecimals.Int256},
         P.MYSQL_TYPE_DOUBLE => Cdouble,
         P.MYSQL_TYPE_YEAR => Clong,
         P.MYSQL_TYPE_TIMESTAMP => DateTime,
@@ -229,11 +229,11 @@ end
             text_row(nothing, nothing, nothing, nothing, nothing, nothing, nothing, nothing, nothing, nothing, nothing)]
     with_native(c -> (expect_query(c); send_resultset(c, 1, TYPED_COLS, rows))) do conn
         cur = DBInterface.execute(conn, "select typed")
-        @test Tables.schema(cur) == Tables.Schema([:i, :u, :f, :d, :s, :b, :bit, :dt, :da, :tm, :y], [Int32, Union{Missing, UInt64}, Union{Missing, Float32}, Union{Missing, Dec64}, Union{Missing, String}, Union{Missing, Vector{UInt8}}, Union{Missing, MySQL.Bit}, Union{Missing, DateTime}, Union{Missing, Date}, Union{Missing, Time}, Union{Missing, unsigned(Clong)}])   # YEAR → unsigned(Clong): UInt64 on 64-bit, UInt32 on Windows x64
+        @test Tables.schema(cur) == Tables.Schema([:i, :u, :f, :d, :s, :b, :bit, :dt, :da, :tm, :y], [Int32, Union{Missing, UInt64}, Union{Missing, Float32}, Union{Missing, MySQL.DataDecimals.DecimalValue{MySQL.DataDecimals.Int256}}, Union{Missing, String}, Union{Missing, Vector{UInt8}}, Union{Missing, MySQL.Bit}, Union{Missing, DateTime}, Union{Missing, Date}, Union{Missing, Time}, Union{Missing, unsigned(Clong)}])   # YEAR → unsigned(Clong): UInt64 on 64-bit, UInt32 on Windows x64
         @test length(cur) == 2 && Base.IteratorSize(typeof(cur)) == Base.HasLength() && eltype(cur) == N.TextRow
         state = iterate(cur)
         row, st = state
-        @test row.i === Int32(-7) && row.u === typemax(UInt64) && row.f === 1.5f0 && row.d == d64"12.345"
+        @test row.i === Int32(-7) && row.u === typemax(UInt64) && row.f === 1.5f0 && row.d === MySQL.DataDecimals.DecimalValue{MySQL.DataDecimals.Int256}(12345, 3)
         @test row.s == "héllo" && row.b == UInt8[0x00, 0x01] && row.bit == MySQL.Bit(0x0102)
         @test_throws P.ConversionError row.tm                               # 838 h does not fit Dates.Time
         @test row.da == Date(2024, 2, 29) && row.y === unsigned(Clong)(2024)        # YEAR is an unsigned numeric (Clong: UInt64 on 64-bit, UInt32 on Windows x64)

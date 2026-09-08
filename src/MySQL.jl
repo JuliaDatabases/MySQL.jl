@@ -1,5 +1,6 @@
 module MySQL
 
+import DataDecimals
 using Dates, DBInterface, Tables, Parsers, DecFP, Reseau
 import Random
 

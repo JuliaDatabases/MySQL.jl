@@ -108,8 +108,8 @@ end
 function decode_value(::Type{T}, buf::Vector{UInt8}, pos::Int, len::Int, ::ResultOptions) where {T <: Union{Integer, AbstractFloat}}
     len == 0 && conversion_error(T, buf, pos, len)
     (T <: Unsigned && buf[pos] == UInt8('-')) && conversion_error(T, buf, pos, len)
-    x, code, _ = Parsers.typeparser(T, buf, pos, pos + len - 1, buf[pos], Int16(0), Parsers.OPTIONS)
-    (Parsers.ok(code) && Parsers.eof(code)) || conversion_error(T, buf, pos, len)
+    x = Parsers.tryparse(T, buf, pos, pos + len - 1)
+    x === nothing && conversion_error(T, buf, pos, len)
     return x
 end
 
@@ -281,4 +281,14 @@ function decode_value(::Type{Dates.Microsecond}, buf::Vector{UInt8}, pos::Int, l
     micros = parse_time_micros(buf, pos, len)
     micros === nothing && conversion_error(Dates.Microsecond, buf, pos, len)
     return Dates.Microsecond(micros)
+end
+
+# MySQL DECIMAL has up to 65 digits. Preserve its coefficient and scale exactly.
+function decode_value(::Type{DataDecimals.DecimalValue{DataDecimals.Int256}},
+    buf::Vector{UInt8}, pos::Int, len::Int, opts::ResultOptions)
+    D = DataDecimals.DecimalValue{DataDecimals.Int256}
+    s = decode_value(String, buf, pos, len, opts)
+    x = tryparse(D, s)
+    x === nothing && conversion_error(D, buf, pos, len)
+    return x
 end

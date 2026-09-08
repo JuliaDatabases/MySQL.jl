@@ -1,4 +1,5 @@
 using Test, MySQL, DBInterface, Tables, Dates, DecFP, Harbor
+const DecimalResult = MySQL.DataDecimals.DecimalValue{MySQL.DataDecimals.Int256}
 
 const MYSQL_IMAGE_REF = get(ENV, "MYSQL_IMAGE", "mysql:8")
 const MYSQL_TEST_USER = "root"
@@ -243,7 +244,7 @@ expected = (
   EmpNo      = Union{Missing, UInt64}[1301, 1422, 1567, 3200],
   Wage       = Union{Missing, Float32}[3.14, 3.14, 3.14, 3.14],
   Salary     = Union{Missing, Float64}[10000.5, 20000.25, 30000.0, 15000.5],
-  Rate       = Union{Missing, Dec64}[d64"1.001", d64"2.002", d64"3.003", d64"2.5"],
+  Rate       = Union{Missing, DecimalResult}[DecimalResult(1001,3), DecimalResult(2002,3), DecimalResult(3003,3), DecimalResult(2500,3)],
   LunchTime  = Union{Missing, Dates.Time}[Dates.Time(12,00,00), Dates.Time(13,00,00), Dates.Time(12,30,00), Dates.Time(12,30,00)],
   JoinDate   = Union{Missing, Dates.Date}[Date("2015-08-03"), Date("2015-08-04"), Date("2015-06-02"), Date("2015-07-25")],
   LastLogin  = Union{Missing, Dates.DateTime}[DateTime("2015-09-05T12:31:30"), DateTime("2015-10-12T13:12:14"), DateTime("2015-09-05T10:05:10"), DateTime("2015-10-10T12:12:25")],
@@ -339,7 +340,7 @@ for i = 1:length(expected)
 end
 
 # MySQL.load
-MySQL.load(Base.structdiff(expected, NamedTuple{(:LastLogin2, :Senior,)}), conn, "Employee_copy"; limit=4, columnsuffix=Dict(:Name=>"CHARACTER SET utf8mb4"), debug=true)
+MySQL.load(Base.structdiff(expected, NamedTuple{(:LastLogin2, :Senior,)}), conn, "Employee_copy"; limit=4, coltypes=Dict(:Rate=>"DECIMAL(5,3)"), columnsuffix=Dict(:Name=>"CHARACTER SET utf8mb4"), debug=true)
 res = DBInterface.execute(conn, "select * from Employee_copy") |> columntable
 @test length(res) == 14
 @test length(res[1]) == 4
