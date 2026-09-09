@@ -92,8 +92,8 @@ raise `ArgumentError` unless their value is `nothing` or `false`.
 | `port` | `3306` | TCP port; omitted/`nothing` uses file or opt-in environment defaults; `0` explicitly selects 3306 |
 | `protocol` | `:default` | `:tcp`, or the deferred `:socket`/`:pipe` (they raise a clear error) |
 | `bind` | `nothing` | local interface/address to connect from |
-| `connect_timeout` | `nothing` | seconds for the whole establishment (dial, TLS, authentication, charset bootstrap) |
-| `read_timeout`, `write_timeout` | `nothing` | seconds per transport read/write; expiry closes the connection |
+| `connect_timeout` | `nothing` | positive integer seconds for the whole establishment (dial, TLS, authentication, charset bootstrap) |
+| `read_timeout`, `write_timeout` | `nothing` | positive integer seconds per transport read/write; expiry closes the connection |
 | `reconnect` | `false` | after a command fails on a dead connection, the next command reconnects (never inside a transaction) |
 | `init_command` | `nothing` | SQL run after authentication and charset bootstrap; it must also succeed in expired-password sandbox mode |
 | `charset_name` | `"utf8mb4"` | the only supported character set; the session is bootstrapped to utf8mb4 |
