@@ -167,8 +167,9 @@ source are never read.
   every date column typed `Union{Missing,T}`, `:error`); partial zero dates are errors
   unless `:missing`; DATETIME/TIMESTAMP decode to `Timestamp{P}` (Durations.jl) at the
   column's declared `fsp` (`decimals` in the column definition: 0 → Second, 1–3 →
-  Millisecond, 4–6 → Microsecond), keeping every digit; a value finer than the declared
-  precision is a `ConversionError` (servers never send one). 1.x's `DateTime` mapping
+  Millisecond, 4–6 → Microsecond), keeping every digit; a value finer than the resolution
+  `P` is a `ConversionError`, never a truncation (servers never send one; the exact `fsp`
+  is not enforced, so a `DATETIME(1)` column accepts `.12`). 1.x's `DateTime` mapping
   truncated or failed, and its `DateAndTime` text path read `DATETIME(1..5)` fractions as
   an unscaled microsecond count.
 - **LOCAL INFILE** follows the plan's state table: refusal (`nothing`) always raises
@@ -263,18 +264,19 @@ source are never read.
 - **The per-row hot path is allocation-free** (§8.9 gate: no allocation per row — a fixed
   slack for cursors, metadata, and arenas — asserted serverless in
   `test/protocol/perf_tests.jl` and against live servers in `test/perf/perf_gates.jl`).
-  Five per-row allocations were eliminated: the closure passed to `guarded` per scanned
-  row; the `lock(l) do` closure and the `Union{Nothing, Tuple}` iteration-protocol return
+  Six per-row allocations were eliminated: the closure passed to `guarded` per scanned
+  row; the `String` copy per DECIMAL value (DataDecimals parses the byte span in place
+  with Parsers 3, or its own scanner reads a `DataString` view with Parsers 2); the `lock(l) do` closure and the `Union{Nothing, Tuple}` iteration-protocol return
   of the streaming `iterate` (now a thin `@inline` wrapper over a `Bool`-returning
   `stream_advance!`); the mutable `PacketCursor` per scan (cursors own a scratch one,
   rebound per row); the `String`/`Vector{UInt8}` copy per string or blob value
   (`DataString`/`DataBytes` views of the row buffer); and the box of the
   `Union{PacketView, ResultEnd}` value `read_row!` returns — inlining does not split it, so
   cursors read through `read_row_packet!`, which returns `(PacketView, isrow::Bool)`, and
-  call `finish_result!` on the terminator themselves. A streaming cursor with view-typed
-  columns keeps its rows in 64 KiB arenas (`RETAIN_ARENA_BYTES`) instead of the reused
-  buffer pair: two allocations per arena, never per row, and a retained view keeps at
-  most one arena alive.
+  call `finish_result!` on the terminator themselves. A streaming cursor keeps its rows in
+  64 KiB arenas (`STREAM_ARENA_BYTES`) instead of a reused buffer pair: two allocations per
+  arena, never per row, every value taken from a row stays valid, and a retained view keeps
+  at most one arena alive.
 - **Command-phase reads are batched through a 64 KiB read buffer** (`PacketIO.readbuf`).
   Reseau's `unsafe_read` costs one `recv` per call, so per-packet exact reads dominated
   large scans (native was 0.3–0.5× Connector/C; with batching ≥ 0.9×). Reads stay

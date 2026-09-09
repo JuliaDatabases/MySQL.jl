@@ -15,7 +15,8 @@ protocol), `BinaryCursor` for `execute(stmt, params)` (binary protocol). It iter
 satisfies the Tables.jl row interface. `buffered=true` (`mysql_store_result=true`, the
 default) reads the whole result set at execute time under `max_buffered_bytes`;
 `buffered=false` streams rows on each `iterate` and ties up the connection until exhausted. A
-row is valid only while it is the cursor's current row.
+row is valid only while it is the cursor's current row; the values taken from it (including
+`DataString`/`DataBytes` views) stay valid.
 """
 mutable struct Cursor{binary, buffered} <: DBInterface.Cursor
     conn::Connection
@@ -34,7 +35,6 @@ mutable struct Cursor{binary, buffered} <: DBInterface.Cursor
     status::UInt16
     warnings::UInt16
     buf::Vector{UInt8}
-    spare::Vector{UInt8}
     rowstarts::Vector{Int}
     offsets::Vector{Int}
     lengths::Vector{Int}
@@ -45,8 +45,7 @@ mutable struct Cursor{binary, buffered} <: DBInterface.Cursor
     finished::Bool
     closed::Bool
     opts::ResultOptions
-    retain_rows::Bool   # a column decodes to a view of the row buffer: streaming rows are kept in arenas
-    arena_pos::Int      # next free byte of `buf` (a retaining streaming cursor appends rows to it)
+    arena_pos::Int      # next free byte of `buf` (a streaming cursor appends its rows to it)
 end
 
 const TextCursor = Cursor{false}
@@ -120,19 +119,7 @@ function Tables.getcolumn(r::Row, ::Type{T}, i::Int, nm::Symbol) where {T}
     c = getcursor(r)
     getepoch(r) == (@atomic c.epoch) || wrongrow(getrownumber(r))
     check_active(c)
-    retain_view_buffer!(c, T)
     return decode_column(c, T, i)
-end
-
-retain_view_buffer!(::Cursor, ::Type) = return nothing
-function retain_view_buffer!(c::Cursor{B, false}, ::Type{T}) where {B, T}
-    # Typed access can request a view even when the schema has only numeric columns.
-    # Keep the current row and append subsequent rows before exposing such a value.
-    if !c.retain_rows && is_view_type(T)
-        c.retain_rows = true
-        c.arena_pos = c.scratch.stop + 1
-    end
-    return nothing
 end
 
 Tables.getcolumn(r::Row, i::Int) = return Tables.getcolumn(r, getcursor(r).types[i], i, getcursor(r).names[i])
@@ -171,7 +158,7 @@ end
 # A result-less (DML/OK) cursor has zero rows: `length` is 0 and `collect` works (1.x
 # reported the C client's `-1` sentinel); its outcome lives in `rows_affected`/`lastrowid`.
 function empty_cursor(conn::Connection, sql::String, token::Int, ok::P.OKPacket, ::Val{binary}, ::Val{buffered}, opts::ResultOptions, number::Int) where {binary, buffered}
-    c = Cursor{binary, buffered}(conn, sql, token, @atomic(conn.generation), nothing, EMPTY_NAMES, EMPTY_TYPES, nothing, EMPTY_COLTYPES, 0, 0, Core.bitcast(Int64, ok.affected_rows), ok, ok.status, ok.warnings, EMPTY_BYTES, EMPTY_BYTES, EMPTY_INTS, EMPTY_INTS, EMPTY_INTS, P.PacketCursor(EMPTY_BYTES), 0, 0, number, true, false, opts, false, 1)
+    c = Cursor{binary, buffered}(conn, sql, token, @atomic(conn.generation), nothing, EMPTY_NAMES, EMPTY_TYPES, nothing, EMPTY_COLTYPES, 0, 0, Core.bitcast(Int64, ok.affected_rows), ok, ok.status, ok.warnings, EMPTY_BYTES, EMPTY_INTS, EMPTY_INTS, EMPTY_INTS, P.PacketCursor(EMPTY_BYTES), 0, 0, number, true, false, opts, 1)
     P.more_results(ok) || release_token!(c)
     return c
 end
@@ -193,7 +180,7 @@ function finish_result_cursor!(conn::Connection, sql::String, token::Int, header
         charge_buffered!(conn, s, header.metadata_bytes + (2 * n + 1) * sizeof(Int))
         binary && charge_buffered!(conn, s, n * sizeof(UInt8))
     end
-    c = Cursor{binary, buffered}(conn, sql, token, @atomic(conn.generation), nothing, names, types, lookup, coltypes, n, buffered ? 0 : -1, Int64(0), nothing, UInt16(0), UInt16(0), UInt8[], UInt8[], Int[], Vector{Int}(undef, n), Vector{Int}(undef, n), P.PacketCursor(EMPTY_BYTES), 0, 0, number, false, false, opts, any(is_view_type, types), 1)
+    c = Cursor{binary, buffered}(conn, sql, token, @atomic(conn.generation), nothing, names, types, lookup, coltypes, n, buffered ? 0 : -1, Int64(0), nothing, UInt16(0), UInt16(0), UInt8[], Int[], Vector{Int}(undef, n), Vector{Int}(undef, n), P.PacketCursor(EMPTY_BYTES), 0, 0, number, false, false, opts, 1)
     buffered && buffer_rows!(c, s)
     return c
 end
@@ -204,11 +191,11 @@ function is_view_type(T::Type)
     return B === DataString || B === DataBytes
 end
 
-# A streaming cursor with view-typed columns appends its rows to a shared arena and starts a
-# fresh one once the current one holds this many bytes: the views stay valid (an arena is
-# never overwritten), one retained view keeps at most one arena alive, and the cost is two
+# A streaming cursor appends its rows to an arena and starts a fresh one once the current one
+# holds this many bytes: string/bytes views of earlier rows stay valid (an arena is never
+# overwritten), one retained view keeps at most one arena alive, and the cost is two
 # allocations per arena rather than per row (§8.9).
-const RETAIN_ARENA_BYTES = 64 * 1024
+const STREAM_ARENA_BYTES = 64 * 1024
 
 # `binary`/`buffered` travel as `Val`s so every cursor construction (and the row scan
 # machinery behind it) is concretely typed — `--trim=safe` needs the resolution, and the
@@ -246,6 +233,16 @@ function charge_buffered!(conn::Connection, s::P.Session, n::Int)
     return nothing
 end
 
+# A `DataString`/`DataBytes` view addresses its buffer with an `Int32` offset (the Arrow view
+# layout), so a buffered result with such columns cannot exceed 2 GiB — reachable only with
+# `max_buffered_bytes` raised past its 256 MiB default; streaming arenas are never that big.
+const MAX_VIEW_BYTES = Int(typemax(Int32))
+
+@noinline function check_view_buffer!(c::Cursor, s::P.Session, total::Int)
+    any(is_view_type, c.types) || return nothing
+    throw(P.fault!(s, P.ProtocolError("buffered result of $total bytes exceeds the $MAX_VIEW_BYTES-byte limit of DataString/DataBytes views; use mysql_store_result=false")))
+end
+
 # Reads every row of the result into the cursor's contiguous buffer, charging the
 # connection's per-command budget (earlier results of the same command count too).
 function buffer_rows!(c::Cursor{binary, true}, s::P.Session) where {binary}
@@ -261,6 +258,7 @@ function buffer_rows!(c::Cursor{binary, true}, s::P.Session) where {binary}
             n = P.payload_length(p)
             charge_buffered!(conn, s, n + sizeof(Int))
             old = length(c.buf)
+            old + n > MAX_VIEW_BYTES && check_view_buffer!(c, s, old + n)
             push!(c.rowstarts, old + 1)
             resize!(c.buf, old + n)
             copyto!(c.buf, old + 1, p.buf, p.lo, n)
@@ -279,7 +277,7 @@ end
 function drain_rows!(c::Cursor{binary, false}, s::P.Session) where {binary}
     try
         while !c.finished
-            p, isrow = P.read_row_packet!(s; dest=c.spare)
+            p, isrow = P.read_row_packet!(s)   # into the session's buffer: the rows are discarded
             isrow || finish!(c, P.finish_result!(s, p))
         end
     catch
@@ -330,16 +328,11 @@ function stream_advance!(c::Cursor{binary, false}, i::Int) where {binary}
         claim_streaming_owner!(c)
         check_active(c)
         s = session(conn)
-        # A row whose string/bytes values are views must keep its bytes: it is appended to
-        # the current arena (after the bytes of every earlier row, which stay untouched) or
-        # starts a fresh one, instead of overwriting the reused buffer pair.
-        if c.retain_rows
-            dest, pos = c.buf, c.arena_pos
-            if pos > RETAIN_ARENA_BYTES
-                dest, pos = Vector{UInt8}(undef, RETAIN_ARENA_BYTES), 1
-            end
-        else
-            dest, pos = c.spare, 1
+        # The row is appended to the current arena, after the bytes of every earlier row
+        # (which stay untouched), or starts a fresh one.
+        dest, pos = c.buf, c.arena_pos
+        if pos > STREAM_ARENA_BYTES
+            dest, pos = Vector{UInt8}(undef, STREAM_ARENA_BYTES), 1
         end
         # A failure in the read, the terminator, or the scan ends the cursor.
         try
@@ -351,12 +344,8 @@ function stream_advance!(c::Cursor{binary, false}, i::Int) where {binary}
             # Stale the old row before replacing any state that it can observe. If scanning
             # the new row fails, the old row must not decode with partially replaced offsets.
             @atomic c.epoch += 1
-            if c.retain_rows
-                c.buf = dest
-                c.arena_pos = p.hi + 1
-            else
-                c.buf, c.spare = c.spare, c.buf
-            end
+            c.buf = dest
+            c.arena_pos = p.hi + 1
             scan_current!(c, p, i, s)
         catch
             c.finished = true

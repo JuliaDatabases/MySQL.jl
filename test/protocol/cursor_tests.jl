@@ -183,7 +183,7 @@ const TYPED_COLS = [
         )
         @test decode_text(T, value) === expected
     end
-    @test decode_text(N.DecimalResult, "12.345") == parse(N.DecimalResult, "12.345")
+    @test decode_text(N.DecimalResult, "12.345") == N.DecimalResult("12.345")
     # an embedded NUL must be a ConversionError (fuzz finding)
     @test_throws P.ConversionError decode_text(N.DecimalResult, "12.\x0045")
     @test decode_text(MySQL.Bit, "\x01\x02") == MySQL.Bit(0x0102)
@@ -312,7 +312,7 @@ end
     @test decode_text(Timestamp{Millisecond}, "2024-01-01 00:00:00.123") === Timestamp{Millisecond}(2024, 1, 1, 0, 0, 0, 123)
     @test decode_text(Timestamp{Microsecond}, "2024-01-01 00:00:00.123456") === Timestamp{Microsecond}(2024, 1, 1, 0, 0, 0, 123, 456)
     @test decode_text(Timestamp{Microsecond}, "2024-01-01 00:00:00.5") === Timestamp{Microsecond}(2024, 1, 1, 0, 0, 0, 500)
-    # a value finer than the column's declared precision (servers never send one) is an error, never truncated
+    # a value finer than the type's resolution (servers never send one) is an error, never truncated
     @test_throws P.ConversionError decode_text(Timestamp{Second}, "2024-01-01 00:00:00.5")
     @test_throws P.ConversionError decode_text(Timestamp{Millisecond}, "2024-01-01 00:00:00.1234")
 end
@@ -440,13 +440,13 @@ end
 
 @testset "streaming views: rows are kept in shared arenas" begin
     # Out-of-line (> 12 byte) `DataString`/`DataBytes` values view the row buffer. A streaming
-    # cursor with such columns keeps its rows in shared arenas, so views collected while
+    # cursor keeps its rows in shared arenas, so views collected while
     # iterating stay valid after later rows (in the same arena, in the next one, or in one the
     # packet reader had to grow for a row wider than an arena) and after the result is done.
     cols = [coldef("i"; type=P.MYSQL_TYPE_LONG, flags=NOT_NULL), coldef("s"; flags=NOT_NULL), coldef("b"; type=P.MYSQL_TYPE_BLOB, flags=NOT_NULL | BINARY)]
-    nrows = 4 * N.RETAIN_ARENA_BYTES ÷ 48                        # ~48-byte rows: several arenas
+    nrows = 4 * N.STREAM_ARENA_BYTES ÷ 48                        # ~48-byte rows: several arenas
     value(i) = "value-$(lpad(i, 6, '0'))-" * "x"^(i % 17)         # 13–29 bytes: never inline
-    wide = "w"^(N.RETAIN_ARENA_BYTES + 10)                         # wider than one arena
+    wide = "w"^(N.STREAM_ARENA_BYTES + 10)                         # wider than one arena
     payload(i) = i == 100 ? wide : value(i)
     rows = [text_row(string(i), value(i), payload(i)) for i in 1:nrows]
     with_native(c -> begin
@@ -454,7 +454,6 @@ end
         expect_query(c); send_ok(c, 1)
     end) do conn
         cur = DBInterface.execute(conn, "select"; mysql_store_result=false)
-        @test cur.retain_rows
         strings = DataString[]
         bytes = DataBytes[]
         arenas = Set{UInt}()
@@ -467,13 +466,13 @@ end
         @test all(i -> strings[i] == value(i), 1:nrows)
         @test all(i -> bytes[i] == codeunits(payload(i)), 1:nrows)
         # bounded and shared: neither one buffer for the whole result nor one per row
-        @test 3 <= length(arenas) <= sum(length, rows) ÷ N.RETAIN_ARENA_BYTES + 2
+        @test 3 <= length(arenas) <= sum(length, rows) ÷ N.STREAM_ARENA_BYTES + 2
         @test DBInterface.execute(conn, "after").rows_affected == 0
         @test all(i -> strings[i] == value(i), 1:nrows)             # untouched by the next command
     end
 end
 
-@testset "explicit streaming views retain a numeric row buffer" begin
+@testset "explicit typed views of a streaming numeric row stay valid" begin
     cols = [coldef("x"; type=P.MYSQL_TYPE_LONGLONG, flags=NOT_NULL)]
     values = ["123456789012345678", "223456789012345678", "323456789012345678", "423456789012345678"]
     for T in (DataString, DataBytes)
@@ -482,18 +481,31 @@ end
             expect_query(c); send_ok(c, 1)
         end) do conn
             cur = DBInterface.execute(conn, "select"; mysql_store_result=false)
-            @test !cur.retain_rows
             row, state = iterate(cur)
             value = Tables.getcolumn(row, T, 1, :x)
             expected = T === DataString ? values[1] : codeunits(values[1])
             @test value == expected
-            @test cur.retain_rows
             row, state = iterate(cur, state)
             row, state = iterate(cur, state)
             @test value == expected
-            DBInterface.execute(conn, "after") # drains the fourth row through the spare buffer
+            DBInterface.execute(conn, "after")   # drains the fourth row (into the session buffer)
             @test value == expected
         end
+    end
+end
+
+@testset "buffered views are limited to Int32 offsets" begin
+    # A view's buffer offset is an Int32, so a buffered result with string/bytes columns is
+    # capped at 2 GiB (asserted through the check itself: a 2 GiB fixture is impractical).
+    with_native(c -> begin
+        expect_query(c); send_resultset(c, 1, [coldef("x"; type=P.MYSQL_TYPE_LONG, flags=NOT_NULL)], [text_row("1")])
+        expect_query(c); send_resultset(c, 1, [coldef("s"; flags=NOT_NULL)], [text_row("a")])
+    end) do conn
+        numeric = DBInterface.execute(conn, "numbers")
+        @test N.check_view_buffer!(numeric, N.session(conn), N.MAX_VIEW_BYTES + 1) === nothing
+        strings = DBInterface.execute(conn, "strings")
+        @test_throws P.ProtocolError N.check_view_buffer!(strings, N.session(conn), N.MAX_VIEW_BYTES + 1)
+        @test !isopen(conn)                                                # the fault is terminal
     end
 end
 

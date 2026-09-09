@@ -6,7 +6,7 @@ using Test, MySQL, DataDecimals
     for s in ("12345678901234567890123456789012345678901234567890123456789012345.1234",
               "-0.000000000000000000000000000001", "0.00")
         bytes = collect(codeunits(s))
-        expected = parse(D, s)
+        expected = D(s)   # the string constructor: it needs no Parsers extension
         @test MySQL.decode_value(D, bytes, 1, length(bytes), opts) === expected
         @test MySQL.decode_binary_value(D, bytes, 1, length(bytes), opts) === expected
         @test string(expected) == s

@@ -237,7 +237,15 @@ function append_payload!(buf::Vector{UInt8}, p::DataStrings.StringPayload, data:
     return nothing
 end
 # Decimals travel as their exact ASCII form (a MYSQL_TYPE_STRING parameter).
-encode_param_value!(buf::Vector{UInt8}, x::DataDecimals.AbstractDecimal) = return (P.write_lenenc_string!(buf, string(x)); nothing)
+# A decimal parameter is its plain decimal text, written in place (no `string(x)` copy).
+function encode_param_value!(buf::Vector{UInt8}, x::DataDecimals.AbstractDecimal)
+    n = DataDecimals.decimallength(x)
+    P.write_lenenc!(buf, n)
+    pos = length(buf) + 1
+    resize!(buf, pos + n - 1)
+    DataDecimals.writedecimal!(buf, pos, x)
+    return nothing
+end
 # A BIT parameter is the big-endian binary string of its value (no leading zero bytes, at
 # least one byte), matching the big-endian BIT *decode*. (Connector/C's 1.x `bitvalue`
 # encoding was little-endian; documented as a Fix in the migration guide.)

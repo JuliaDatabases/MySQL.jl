@@ -1,7 +1,7 @@
 # Serverless subset of the §8.9 performance/allocation gates: the per-row allocation
 # contract of the read/scan/decode hot path — nothing is allocated per row (string and
-# bytes values are views; a streaming cursor with such columns allocates one arena per
-# `RETAIN_ARENA_BYTES` of rows) — asserted against the fake peer on every CI lane (no Docker needed). The full
+# bytes values are views; a streaming cursor allocates one arena per `STREAM_ARENA_BYTES`
+# of rows) — asserted against the fake peer on every CI lane (no Docker needed). The full
 # server-backed correctness/limit/allocation gates and the timing report live in
 # `test/perf/perf_gates.jl` and run inside `Pkg.test` when Docker is available.
 
@@ -36,7 +36,8 @@ function perf_text_row(i::Int)
     buf = UInt8[]
     P.write_lenenc_string!(buf, string(i))
     P.write_lenenc_string!(buf, "3.25")
-    P.write_lenenc_string!(buf, "name-$(i % 100)")
+    P.write_lenenc_string!(buf, "name-$(i % 100)-of-the-batch")   # > 12 bytes: an out-of-line view
+    P.write_lenenc_string!(buf, "12345.67")
     i % 10 == 0 ? P.write_u8!(buf, P.NULL_VALUE) : P.write_lenenc_string!(buf, "7")
     return buf
 end
@@ -63,6 +64,8 @@ function perf_scan_rows(cursor, sch::Tables.Schema)
         v === missing && return nothing
         if v isa AbstractString
             acc.v += ncodeunits(v)
+        elseif v isa DataDecimals.AbstractDecimal
+            acc.v += DataDecimals.decimallength(v)
         elseif v isa AbstractFloat
             acc.v += unsafe_trunc(Int, v)
         else
@@ -96,6 +99,7 @@ end
         coldef("i"; type=P.MYSQL_TYPE_LONG, flags=NOT_NULL),
         coldef("f"; type=P.MYSQL_TYPE_DOUBLE),
         coldef("s"; type=P.MYSQL_TYPE_VAR_STRING),
+        coldef("d"; type=P.MYSQL_TYPE_NEWDECIMAL, flags=NOT_NULL, decimals=2),
         coldef("n"; type=P.MYSQL_TYPE_LONG),
     ]
     null_cols = [coldef("a"; type=P.MYSQL_TYPE_LONG), coldef("b"; type=P.MYSQL_TYPE_SHORT)]

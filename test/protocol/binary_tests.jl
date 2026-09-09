@@ -379,7 +379,7 @@ end
     @test_throws P.ConversionError N.decode_binary(String, UInt8[0x61], 2, 1, o)
     @test_throws P.ConversionError N.decode_binary(String, UInt8[0x61], typemax(Int), 0, o)
     @test N.decode_binary(Vector{UInt8}, UInt8[0x00, 0xff], 1, 2, o) == UInt8[0x00, 0xff]
-    @test N.decode_binary(N.DecimalResult, Vector{UInt8}(codeunits("12.345")), 1, 6, o) == parse(N.DecimalResult, "12.345")
+    @test N.decode_binary(N.DecimalResult, Vector{UInt8}(codeunits("12.345")), 1, 6, o) == N.DecimalResult("12.345")
     @test N.decode_binary(MySQL.Bit, UInt8[0x01, 0x02], 1, 2, o) == MySQL.Bit(0x0102)
     @test N.decode_binary(MySQL.Bit, fill(0xff, 8), 1, 8, o) == MySQL.Bit(typemax(UInt64))
     @test_throws P.ConversionError N.decode_binary(MySQL.Bit, fill(0xff, 9), 1, 9, o)
@@ -391,7 +391,7 @@ end
     @test N.decode_binary(Timestamp{Microsecond}, dt7, 1, 7, o) === Timestamp{Microsecond}(2024, 2, 29, 13, 14, 15)
     dt11 = vcat(dt7, reinterpret(UInt8, UInt32[250000]))                    # .250000 → 250 ms exactly
     @test N.decode_binary(Timestamp{Millisecond}, dt11, 1, 11, o) === Timestamp{Millisecond}(2024, 2, 29, 13, 14, 15, 250)
-    @test_throws P.ConversionError N.decode_binary(Timestamp{Second}, dt11, 1, 11, o)   # finer than the declared precision
+    @test_throws P.ConversionError N.decode_binary(Timestamp{Second}, dt11, 1, 11, o)   # finer than the type's resolution
     dtsub = vcat(dt7, reinterpret(UInt8, UInt32[250500]))
     @test N.decode_binary(Timestamp{Microsecond}, dtsub, 1, 11, o) === Timestamp{Microsecond}(2024, 2, 29, 13, 14, 15, 250, 500)
     @test_throws P.ConversionError N.decode_binary(Timestamp{Millisecond}, dtsub, 1, 11, o)
@@ -988,7 +988,7 @@ end
     @test roundtrip(MySQL.Bit, MySQL.Bit(0x7f)) == MySQL.Bit(0x7f)
     @test roundtrip(MySQL.Bit, MySQL.Bit(0x0102)) == MySQL.Bit(0x0102)
     @test roundtrip(MySQL.Bit, MySQL.Bit(typemax(UInt64))) == MySQL.Bit(typemax(UInt64))
-    @test roundtrip(N.DecimalResult, DataDecimals.Decimal64{3}("12.345")) == parse(N.DecimalResult, "12.345")
+    @test roundtrip(N.DecimalResult, DataDecimals.Decimal64{3}("12.345")) == N.DecimalResult("12.345")
     @test roundtrip(Date, Date(2024, 2, 29)) == Date(2024, 2, 29)
     @test roundtrip(Timestamp{Millisecond}, DateTime(2024, 2, 29, 13, 14, 15, 250)) === Timestamp{Millisecond}(2024, 2, 29, 13, 14, 15, 250)
     @test roundtrip(Timestamp{Microsecond}, Timestamp{Microsecond}(2024, 1, 2, 1, 2, 3, 456, 789)) === Timestamp{Microsecond}(2024, 1, 2, 1, 2, 3, 456, 789)
