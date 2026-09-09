@@ -148,7 +148,7 @@ keywords, removed 1.x keywords, and keywords that are not available yet all rais
 | `max_allowed_packet` | 16 MiB | largest packet sent or accepted |
 | `max_buffered_bytes` | 256 MiB | retained bytes of one buffered command (`nothing` = unlimited) |
 | `max_response_bytes` | `nothing` | cap on a whole response, streamed rows included |
-| `max_columns`, `max_result_sets`, `max_metadata_bytes` | 4096, 1024, 16 MiB | per-command bounds |
+| `max_columns`, `max_result_sets`, `max_metadata_bytes` | 4096, 1024, 16 MiB | columns per result or parameters per prepared statement; result sets and metadata bytes per command |
 | `max_preauth_packet`, `max_auth_rounds`, `max_auth_bytes`, `max_session_state_bytes` | 1 MiB, 8, 64 KiB, 1 MiB | connection-phase bounds |
 
 Deprecated 1.x keywords (`data_truncation`, `net_buffer_length`, `secure_auth`,
