@@ -33,8 +33,12 @@ last Connector/C release.
 5. **Local servers**: every host, `"localhost"` and `""` included, is dialed over TCP (the
    Connector/C rule that turned `localhost` into a Unix socket is gone). The socket and
    named-pipe transports are not implemented yet: `protocol=:socket`/`:pipe` or
-   `named_pipe=true` raise a clear error, and a `unix_socket` path is accepted but unused.
-   Accounts scoped to `'user'@'localhost'` match loopback TCP connections too.
+   `named_pipe=true` raise a clear error (an explicit `protocol=:tcp` overrides
+   `named_pipe`). A `unix_socket` path is accepted but unused.
+   TCP access also needs a matching account grant. With `skip_name_resolve`, a
+   `'user'@'localhost'` grant need not cover `127.0.0.1` or `::1`; see
+   [MySQL's host-resolution rules](https://dev.mysql.com/doc/refman/8.0/en/server-system-variables.html#sysvar_skip_name_resolve).
+   Socket-only authentication also needs a TCP-compatible account.
 6. **Unknown, removed, or unavailable keywords now error** with an explanation instead of
    being silently swallowed — fix the call sites the errors point at.
 
@@ -207,7 +211,7 @@ error rather than misbehaving:
 
 - **Unix sockets and Windows named pipes** (transport is TCP/TLS). Every host, including
   `"localhost"`, is dialed over TCP; asking for the local transport explicitly
-  (`protocol=:socket`/`:pipe`, `named_pipe=true`) raises a clear error, and a `unix_socket`
+  (`protocol=:socket`/`:pipe`, or `named_pipe=true` without `protocol=:tcp`) raises a clear error, and a `unix_socket`
   path (keyword or option file) is accepted but unused until the transport exists.
 - **Compression** (`compress=true` is an `ArgumentError`), server cursors /
   `COM_STMT_FETCH`, query attributes, `COM_STMT_BULK_EXECUTE`

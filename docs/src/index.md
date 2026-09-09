@@ -74,7 +74,8 @@ inserts its rows in batches. Close the connection with `DBInterface.close!(conn)
 ## Connection options
 
 `DBInterface.connect(MySQL.Connection, host, user, password; kw...)` accepts the keywords
-below (`password=nothing` means no password is sent; `""` sends an empty one). Unknown
+below (`password=nothing` can use an option-file password; `""` overrides it with an empty
+password). Unknown
 keywords, removed 1.x keywords, and keywords that are not available yet all raise an
 `ArgumentError` that explains the situation.
 
@@ -107,7 +108,7 @@ keywords, removed 1.x keywords, and keywords that are not available yet all rais
 | `local_files` | `false` | allow `LOAD DATA LOCAL INFILE`; requires `local_infile_handler` |
 | `local_infile_handler` | `nothing` | `filename -> IO` (or `nothing` to refuse) called when the server requests a local file |
 | `max_local_infile_bytes` | 1 GiB | cap on one upload |
-| `can_handle_expired_passwords` | `false` | connect in sandbox mode with an expired password |
+| `can_handle_expired_passwords` | `false` | advertise expired-password support; the required charset bootstrap can still fail with error 1820, so this does not yet provide a password-reset connection |
 
 **TLS**
 
@@ -125,7 +126,7 @@ keywords, removed 1.x keywords, and keywords that are not available yet all rais
 
 | keyword | default | meaning |
 |---|---|---|
-| `default_auth` | server default | plugin to answer the handshake with |
+| `default_auth` | supported server default, else `caching_sha2_password` | plugin to answer the handshake with; an auth switch selects the account's plugin |
 | `get_server_public_key` | `false` | fetch the server's RSA key for `caching_sha2`/`sha256` full authentication over plain TCP |
 | `server_public_key` | `nothing` | path of that key in PEM form |
 | `enable_cleartext_plugin` | `false` | allow `mysql_clear_password` (PAM/LDAP accounts) |
@@ -141,7 +142,8 @@ keywords, removed 1.x keywords, and keywords that are not available yet all rais
 `mysql_date_and_time=true` on `execute`/`prepare` decodes DATETIME/TIMESTAMP to
 `MySQL.DateAndTime` with microsecond precision.
 
-**Limits** (all are enforced before memory is allocated)
+**Limits** (received lengths are checked before growing their payload buffers; outgoing
+commands are checked after encoding and before sending)
 
 | keyword | default | meaning |
 |---|---|---|
@@ -149,7 +151,8 @@ keywords, removed 1.x keywords, and keywords that are not available yet all rais
 | `max_buffered_bytes` | 256 MiB | retained bytes of one buffered command (`nothing` = unlimited) |
 | `max_response_bytes` | `nothing` | cap on a whole response, streamed rows included |
 | `max_columns`, `max_result_sets`, `max_metadata_bytes` | 4096, 1024, 16 MiB | columns per result or parameters per prepared statement; result sets and metadata bytes per command |
-| `max_preauth_packet`, `max_auth_rounds`, `max_auth_bytes`, `max_session_state_bytes` | 1 MiB, 8, 64 KiB, 1 MiB | connection-phase bounds |
+| `max_preauth_packet`, `max_auth_rounds`, `max_auth_bytes` | 1 MiB, 8, 64 KiB | connection-phase bounds |
+| `max_session_state_bytes` | 1 MiB | session-state blocks in an OK packet, including command responses |
 
 Deprecated 1.x keywords (`data_truncation`, `net_buffer_length`, `secure_auth`,
 `multi_results`) are accepted with a warning and have no effect; see the
