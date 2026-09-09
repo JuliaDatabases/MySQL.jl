@@ -270,7 +270,7 @@ const OPTION_FILE_KEYS = Dict{String, Symbol}(
 """
     default_option_files() -> Vector{String}
 
-The client option files Oracle's clients read, minus server-only locations. `.mylogin.cnf`
+The standard client option locations supported by the native reader. `.mylogin.cnf`
 (an obfuscated login-path file) is reported so it can be skipped with a warning.
 """
 function default_option_files()
@@ -294,7 +294,10 @@ function strip_option_comment(value::AbstractString)
     escaped = false
     for i in eachindex(value)
         ch = value[i]
-        if escaped
+        # Backslashes escape quotes, but never protect an unquoted comment marker.
+        if quote_char === nothing && ch == '#'
+            return strip(SubString(value, firstindex(value), prevind(value, i)))
+        elseif escaped
             escaped = false
         elseif ch == '\\'
             escaped = true
@@ -302,8 +305,6 @@ function strip_option_comment(value::AbstractString)
             quote_char = ch
         elseif quote_char == ch
             quote_char = nothing
-        elseif quote_char === nothing && ch == '#'
-            return strip(SubString(value, firstindex(value), prevind(value, i)))
         end
     end
     return strip(value)
@@ -355,8 +356,8 @@ end
 """
     read_option_file(path; group="client") -> Dict{Symbol, String}
 
-Parses the `[client]` group plus `group` of a my.cnf/my.ini file. The requested group
-overrides `[client]` independent of file order. `!include`/`!includedir` directives are
+Parses the `[client]` group plus `group` of a my.cnf/my.ini file. Group names are
+case-insensitive; the last option in file order wins. `!include`/`!includedir` directives are
 rejected (fail closed), and unknown keys are ignored.
 """
 function read_option_file(path::AbstractString; group::AbstractString="client")
@@ -364,12 +365,11 @@ function read_option_file(path::AbstractString; group::AbstractString="client")
 end
 
 function read_option_file(io::IO, path::AbstractString; group::AbstractString="client")
-    client_opts = Dict{Symbol, String}()
-    group_opts = Dict{Symbol, String}()
+    opts = Dict{Symbol, String}()
     current = ""
     requested_group = lowercase(group)
     for (lineno, raw) in enumerate(eachline(io))
-        line = strip(raw)
+        line = strip_option_comment(raw)
         (isempty(line) || startswith(line, '#') || startswith(line, ';')) && continue
         (startswith(line, '!') || startswith(lowercase(line), "?includedir")) && throw(ArgumentError("$path:$lineno: `$(first(split(line)))` directives are not supported (fail closed)"))
         if startswith(line, '[')
@@ -377,15 +377,13 @@ function read_option_file(io::IO, path::AbstractString; group::AbstractString="c
             current = lowercase(strip(SubString(line, nextind(line, firstindex(line)), prevind(line, lastindex(line)))))
             continue
         end
-        target = current == "client" ? client_opts : current == requested_group ? group_opts : nothing
-        target === nothing && continue
+        (current == "client" || current == requested_group) || continue
         key, value = occursin('=', line) ? (strip(first(split(line, '='; limit=2))), strip(last(split(line, '='; limit=2)))) : (line, "")
         sym = get(OPTION_FILE_KEYS, lowercase(replace(key, '_' => '-')), nothing)
         sym === nothing && continue
-        target[sym] = parse_option_value(value)
+        opts[sym] = parse_option_value(value)
     end
-    requested_group == "client" || merge!(client_opts, group_opts)
-    return client_opts
+    return opts
 end
 
 # Sentinel-concrete arguments ("" = not given) so the call is statically resolvable.
@@ -393,6 +391,7 @@ function load_option_files(option_file::String, read_default_file::Bool, option_
     group = option_group == "" ? "client" : option_group
     paths = String[]
     (read_default_file || read_default_group || (option_group != "" && option_file == "")) && append!(paths, default_option_files())
+    option_file == "" || isfile(option_file) || throw(ArgumentError("option_file does not name a readable file: $(repr(option_file))"))
     option_file == "" || push!(paths, option_file)
     merged = Dict{Symbol, String}()
     for path in paths
@@ -483,7 +482,11 @@ function ConnectOptions(host::AbstractString, user::AbstractString, password::Un
     # CRL, or compression request would claim a property the connection does not have. A
     # non-`nothing` keyword still wins over the file, including `compress=false`.
     for k in keys(file)
-        (haskey(kwd, k) && kwd[k] !== nothing) || check_keyword_availability(k, file[k])
+        (haskey(kwd, k) && kwd[k] !== nothing) && continue
+        # Disabled compression requests need no compressed transport. File booleans
+        # use MySQL's string spellings; keyword booleans still require Bool.
+        k == :compress && lowercase(file[k]) in ("0", "off", "false") && continue
+        check_keyword_availability(k, file[k])
     end
     # a keyword wins over the option file; `nothing` falls through
     pick(k) = return haskey(kwd, k) && kwd[k] !== nothing ? kwd[k] : get(file, k, nothing)
