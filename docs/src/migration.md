@@ -15,12 +15,14 @@ last Connector/C release.
 
 ## Upgrade checklist
 
+MySQL.jl 2.0 requires **Julia 1.10 or later**.
+
 1. **Errors**: replace `MySQL.API.Error` / `MySQL.API.StmtError` with `MySQL.Error` /
    `MySQL.StmtError` (same field names/types plus a new `sqlstate`), or catch the root
    `MySQL.MySQLError`.
-2. **Value types**: replace `MySQL.API.Bit` with `MySQL.Bit`. `MySQL.DateAndTime` and
-   timestamp behavior stay unchanged. DECIMAL results decode to `MySQL.DecimalResult`
-   (`DataDecimals.DecimalValue{DataDecimals.Int256}`), which preserves all 65 digits and
+2. **Value types**: replace `MySQL.API.Bit` with `MySQL.Bit`. The `MySQL.DateAndTime` type
+   stays unchanged; temporal decoding corrections are listed below. DECIMAL results decode
+   to `MySQL.DecimalResult` (`DataDecimals.DecimalValue{DataDecimals.Int256}`), which preserves all 65 digits and
    the stored scale, instead of `DecFP.Dec64`. DataDecimals values bind directly as
    parameters, and `MySQL.load` infers `DECIMAL(P,S)` from a fixed-scale type (for a
    `DecimalValue` column, specify the destination type with `coltypes`). DecFP is no longer
@@ -79,8 +81,8 @@ The observable 1.x surface is preserved unless a row below says otherwise, inclu
 positional `connect(MySQL.Connection, host, user, passwd)`, `passwd=nothing` vs `""`,
 option files (subset; unsupported directives fail closed), `init_command`,
 `found_rows`/`no_schema`/`ignore_space` as independent flags, the result type mapping
-(`MySQL.juliatype`) exactly as 1.6.0 computes it, driver-keyword dispatch on `execute`
-(SQL parameters still cannot be passed as keywords), `executemany`, the `wrongrow`
+(`MySQL.juliatype`) except for DECIMAL and the decoding policies below, driver-keyword
+dispatch on `execute` (SQL parameters still cannot be passed as keywords), `executemany`, the `wrongrow`
 contract ("a row is only valid while it is the cursor's current row", same
 `ArgumentError`), `rows_affected::Int64` bitcast semantics, cursor `close!`/`close`
 idempotence, and escaping (`MySQL.escape`).
@@ -121,7 +123,7 @@ Deliberate, documented changes relative to Connector/C 1.6.0:
 | Transactions | lock not held | the connection lock is held across `DBInterface.transaction(f, conn)`: other tasks block until commit/rollback |
 | Cleanup/finalizers | abandoned C handles depended on Connector/C lifetimes | explicit `close!` or a do-block remains the contract; a dropped connection only enqueues its transport for the timer reaper, and a dropped statement only parks its preallocated id for the next command. Finalizers do no protocol or transport I/O; explicit close, timer reaping, and parked statement close are exactly-once |
 | Concurrent use | not thread-safe | connection operations are lock-serialized. One task must consume a streaming cursor; a command from another task drains the pending response and invalidates that cursor instead of overwriting its Julia-owned row bytes. A transaction owns the connection lock until commit or rollback |
-| `MySQL.load` | one round trip per row; embedded backticks in identifiers were not escaped; `debug=true` logged row values | rows are inserted in multi-row batches (`batchsize=1000`, bounded by the packet size and the 65535-marker limit); doubles embedded identifier backticks; `debug=true` logs statements only; `debug=:values` logs row values |
+| `MySQL.load` | one round trip per row; embedded backticks in identifiers were not escaped; `debug=true` logged row values | rows are inserted in multi-row batches (`batchsize=1000`, bounded by the packet size, `max_columns`, and the 65535-marker limit); doubles embedded identifier backticks; `debug=true` logs statements only; `debug=:values` logs row values |
 | Value lifetime (#206) | `TextRow` values could alias freed C memory | rows decode from Julia-owned, cursor-owned buffers |
 
 ## Deprecated (accepted with a warning; no effect)
@@ -165,7 +167,8 @@ read), `max_buffered_bytes`, `max_response_bytes`, `max_columns`, `max_result_se
 Connection-option values are validated against closed type sets (this is also what makes
 the client compilable with `juliac --trim=safe`): string options accept `String` or
 `SubString{String}`; integer options accept the standard machine integer types or a decimal
-string; boolean options accept `Bool`; `attrs` accepts `Vector{Pair{String, String}}`;
+string (the public `DBInterface.connect` method requires an integer or `nothing` for
+`port`); boolean options accept `Bool`; `attrs` accepts `Vector{Pair{String, String}}`;
 `zero_dates` accepts a `Symbol` or `String`; `time_type` accepts exactly `Dates.Time` or
 `Dates.Microsecond`. Anything else raises an `ArgumentError` naming the option (1.x
 silently accepted, coerced, or ignored some of these).
@@ -181,10 +184,10 @@ schema-aware sinks make. The runtime-schema conveniences (`Tables.columntable`, 
 `row.name` access, `MySQL.load`) build columns from runtime `Type` values and are not
 statically resolvable; use them from regular Julia. A custom `local_infile_handler` (and
 the `IO` it returns) is dispatched dynamically and works in a trimmed binary only if its
-methods were compiled in. `read_timeout`/`write_timeout` work in trimmed executables (the
-trim workload exercises armed deadlines, including abandoned-connection reaping);
-`connect_timeout` hangs with Reseau ≤ 1.4.1 — its deadline-armed dial parked on tasks a
-trimmed build never ran, fixed in
+methods were compiled in. The trim workload also exercises abandoned-connection reaping,
+but leaves all connection deadlines disabled; it does not validate timeout behavior.
+`connect_timeout` hangs in trimmed executables with Reseau ≤ 1.4.1 — its deadline-armed
+dial parked on tasks a trimmed build never ran, fixed in
 [Reseau #151](https://github.com/JuliaServices/Reseau.jl/pull/151).
 
 ## Security: what `ssl_mode=:preferred` does and does not give you
