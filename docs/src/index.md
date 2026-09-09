@@ -58,6 +58,12 @@ Parameters are bound by their Julia type: integers, floats, `String`s, `Vector{U
 (binary), `Date`/`DateTime`/`Time`/`MySQL.DateAndTime`, `MySQL.Bit`, DataDecimals
 decimals, `Bool`, and `missing`/`nothing` for NULL.
 
+Pass a tuple, named tuple, vector, or `Tables.AbstractRow` for multiple parameters.
+Values bind to `?` markers in iteration order; names do not change that order. Named SQL
+markers such as `:name` are not supported. A bare scalar binds one parameter; use
+`(bytes,)` to bind a byte vector as one binary value. `executemany` takes one collection
+per parameter, as in the example below.
+
 ```julia
 stmt = DBInterface.prepare(conn, "INSERT INTO users (name, joined) VALUES (?, ?)")
 DBInterface.execute(stmt, ("alice", Date(2026, 1, 2)))
@@ -203,8 +209,11 @@ Result columns decode to the Julia types below (`Union{Missing, T}` unless the c
 | `BIT(n)` | `MySQL.Bit` |
 | `DATE`, `TIME`, `DATETIME`/`TIMESTAMP` | `Date`, `Time` (or `Microsecond`), `DateTime` (or `MySQL.DateAndTime`) |
 | `YEAR` | `Clong` (unsigned) |
-| `CHAR`/`VARCHAR`/`TEXT`, `ENUM`, `SET`, `JSON` | `String` |
-| `BINARY`/`VARBINARY`/`BLOB`, `GEOMETRY` | `Vector{UInt8}` |
+| `CHAR`/`VARCHAR`/`TEXT`, `BINARY`/`VARBINARY`, `ENUM`, `SET`, `JSON` | `String` |
+| `BLOB`, `GEOMETRY` | `Vector{UInt8}` |
+
+`BINARY`/`VARBINARY` retain the 1.x `String` mapping. Use `codeunits(value)` to access
+their raw bytes, which need not be valid UTF-8.
 
 `MySQL.juliatype` computes the mapping for a wire type and its flags.
 

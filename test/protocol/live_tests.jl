@@ -88,7 +88,7 @@ function run_live_lane(ref::String; soak::Bool=false, manifest::Bool=false)
                 exec!(root, "ALTER USER 'expired'@'%' PASSWORD EXPIRE")
                 # without the flag the server refuses the login outright
                 err = try; N.connect("127.0.0.1", "expired", "expiredpw"; port=port, ssl_mode=:required, connect_timeout=10); nothing; catch e; e; end
-                @test err isa P.Error && err.errno == P.ER_MUST_CHANGE_PASSWORD
+                @test err isa P.Error && err.errno == 1862 # ER_MUST_CHANGE_PASSWORD_LOGIN; 1820 is the sandbox query error
                 # with it the connection is in sandbox mode: only a password reset is allowed,
                 # after which the session is a normal one
                 h = N.connect("127.0.0.1", "expired", "expiredpw"; port=port, ssl_mode=:required, can_handle_expired_passwords=true, connect_timeout=10)
@@ -149,15 +149,24 @@ function run_live_lane(ref::String; soak::Bool=false, manifest::Bool=false)
             # an idle connection reaped by wait_timeout: MySQL 8.0.24+ announces it (4031),
             # MariaDB just closes (2006); either way the next command reconnects
             conn = DBInterface.connect(MySQL.Connection, "127.0.0.1", "root", ROOT_PW; port=port, reconnect=true)
+            stmt = nothing
             try
+                stmt = DBInterface.prepare(conn, "SELECT HEX(?) AS data")
                 DBInterface.execute(conn, "SET SESSION wait_timeout = 1")
+                N.send_long_data!(stmt, 0, UInt8[0x00])
+                N.send_long_data!(stmt, 0, UInt8[0xff])
                 sleep(2.5)
                 err = try; DBInterface.execute(conn, "SELECT 1"); nothing; catch e; e; end
                 @test err isa MySQL.Error && err.errno in (4031, P.CR_SERVER_GONE_ERROR)
                 @test !isopen(conn)
+                # The next execute re-prepares on the new session and replays copied
+                # long-data chunks. No statement execute was attempted on the dead one.
+                @test only(Tables.columntable(DBInterface.execute(stmt, (UInt8[],))).data) == "00FF"
+                @test isempty(stmt.long_data) && stmt.generation == (@atomic conn.generation)
                 @test Tables.columntable(DBInterface.execute(conn, "SELECT 1 AS v")).v == [1]
                 @test isopen(conn)
             finally
+                stmt === nothing || DBInterface.close!(stmt)
                 DBInterface.close!(conn)
             end
             # the executable behavior manifest: golden values on the primary lane only
