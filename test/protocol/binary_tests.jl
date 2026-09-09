@@ -157,7 +157,7 @@ end
 
 @testset "MySQL.load batches rows into multi-row INSERTs" begin
     # five rows, batchsize=2: one statement for the 2-row batches (executed twice), one for
-    # the 1-row tail; both are parked and closed before the COMMIT goes out
+    # the 1-row tail; each old shape is closed before its replacement is prepared
     seen = String[]
     closed = UInt32[]
     executes = 0
@@ -168,9 +168,10 @@ end
         push!(seen, expect_prepare(c)); send_prepare_ok(c, 1, 93, paramdefs(4), P.ColumnDef[])
         expect_execute(c); executes += 1; send_ok(c, 1; affected=2)
         expect_execute(c); executes += 1; send_ok(c, 1; affected=2)
+        push!(closed, expect_stmt_close(c))
         push!(seen, expect_prepare(c)); send_prepare_ok(c, 1, 94, paramdefs(2), P.ColumnDef[])
         expect_execute(c); executes += 1; send_ok(c, 1; affected=1)
-        push!(closed, expect_stmt_close(c)); push!(closed, expect_stmt_close(c))
+        push!(closed, expect_stmt_close(c))
         push!(seen, expect_query(c)); send_ok(c, 1)
     end) do conn
         @test_throws ArgumentError MySQL.load(rows, conn, "t"; batchsize=0)   # validated before any I/O
@@ -1198,5 +1199,56 @@ end
         @test stmt.nparams == 1 && stmt.names == [:x]
         @test Tables.columntable(DBInterface.execute(stmt, (6,))).x == Int32[6]
         DBInterface.close!(stmt)
+    end
+end
+
+# A Tables source can reuse a byte buffer while its schema remains known.
+struct ReusedLoadBytes
+    bytes::Vector{UInt8}
+    n::Int
+end
+Tables.istable(::Type{ReusedLoadBytes}) = true
+Tables.rowaccess(::Type{ReusedLoadBytes}) = true
+Tables.rows(x::ReusedLoadBytes) = x
+Tables.schema(::ReusedLoadBytes) = Tables.Schema((:value,), (Vector{UInt8},))
+Base.IteratorSize(::Type{ReusedLoadBytes}) = Base.SizeUnknown()
+function Base.iterate(x::ReusedLoadBytes, i=1)
+    i > x.n && return nothing
+    x.bytes[1] = UInt8(i)
+    return ((value=x.bytes,), i + 1)
+end
+
+@testset "load respects parameter limits and snapshots reused bytes" begin
+    # max_columns bounds prepared parameters too. The default 1000-row batch must shrink.
+    with_native(c -> begin
+        expect_query(c); send_ok(c, 1)
+        expect_query(c); send_ok(c, 1; status=P.SERVER_STATUS_IN_TRANS)
+        sql = expect_prepare(c)
+        @test count(==('?'), sql) == 4
+        send_prepare_ok(c, 1, 101, paramdefs(4), P.ColumnDef[])
+        expect_execute(c); send_ok(c, 1; affected=2, status=P.SERVER_STATUS_IN_TRANS)
+        @test expect_stmt_close(c) == 101
+        @test count(==('?'), expect_prepare(c)) == 2
+        send_prepare_ok(c, 1, 102, paramdefs(2), P.ColumnDef[])
+        expect_execute(c); send_ok(c, 1; affected=1, status=P.SERVER_STATUS_IN_TRANS)
+        @test expect_stmt_close(c) == 102
+        @test expect_query(c) == "COMMIT"; send_ok(c, 1)
+    end; connect_kw=(; max_columns=4)) do conn
+        @test MySQL.load([(a=i, b=i) for i in 1:3], conn, "bounded") == "`bounded`"
+    end
+    with_native(c -> begin
+        expect_query(c); send_ok(c, 1)
+        expect_query(c); send_ok(c, 1; status=P.SERVER_STATUS_IN_TRANS)
+        expect_prepare(c); send_prepare_ok(c, 1, 103, paramdefs(3), P.ColumnDef[])
+        payload = expect_execute(c)
+        # id, flags, iterations, NULL bitmap, new-types flag, 3 type pairs
+        pc = P.PacketCursor(payload, 18, length(payload))
+        @test [P.read_lenenc_bytes!(pc) for _ in 1:3] == [UInt8[1], UInt8[2], UInt8[3]]
+        @test P.atend(pc)
+        send_ok(c, 1; affected=3, status=P.SERVER_STATUS_IN_TRANS)
+        @test expect_stmt_close(c) == 103
+        @test expect_query(c) == "COMMIT"; send_ok(c, 1)
+    end) do conn
+        @test MySQL.load(ReusedLoadBytes(UInt8[0], 3), conn, "bytes") == "`bytes`"
     end
 end

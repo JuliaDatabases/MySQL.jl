@@ -78,7 +78,31 @@ const DEFAULT_LOAD_BATCHSIZE = 1000
 # inside `max_allowed_packet` (large rows shrink the batch; a single row is never split).
 load_value_bytes(x::AbstractString) = return ncodeunits(x) + 9
 load_value_bytes(x::AbstractVector{UInt8}) = return length(x) + 9
+load_value_bytes(x::DataDecimals.AbstractDecimal) = return ncodeunits(string(x)) + 9
 load_value_bytes(::Any) = return 16
+
+# Tables sources may reuse mutable byte storage when advancing to the next row.
+load_value(x) = return x
+load_value(x::AbstractVector{UInt8}) = return Vector{UInt8}(x)
+
+# Keep only the current batch shape. Size-limited batches can have many distinct row
+# counts; retaining all their statements also retains all their server-side metadata.
+function load_batch!(stmt::Union{Nothing, Statement}, conn::Connection, params::Vector{Any}, nrows::Int, prefix::String, markers::String, debug::Bool)
+    if stmt === nothing || stmt.nparams != length(params)
+        stmt === nothing || DBInterface.close!(stmt)
+        sql = prefix * join(Iterators.repeated(markers, nrows), ", ")
+        debug && @info "executing insert statement: `$sql`"
+        stmt = DBInterface.prepare(conn, sql)
+    end
+    try
+        DBInterface.execute(stmt, params)
+    catch
+        DBInterface.close!(stmt)
+        rethrow()
+    end
+    empty!(params)
+    return stmt
+end
 
 """
     MySQL.load(table, conn, name; append=true, quoteidentifiers=true, limit=typemax(Int64), batchsize=1000, createtableclause=nothing, coltypes=Dict(), columnsuffix=Dict(), auto_increment_primary_key_name=nothing, debug=false)
@@ -105,7 +129,9 @@ name in front of the source columns.
 
 Rows are inserted inside one transaction with prepared multi-row `INSERT` statements of up
 to `batchsize` rows each (fewer when a batch would approach the packet limit, and at most
-65535 bound values per statement); `limit` stops after that many rows.
+65535 bound values per statement, further bounded by `max_columns`); `limit` stops after
+that many rows. The packet budget uses the client's `max_allowed_packet` option; set it
+no higher than the server's value. Byte vectors are copied before advancing the source.
 
 `debug=true` logs the generated statements without row values; `debug=:values` also logs
 each inserted row's values.
@@ -131,9 +157,12 @@ function load(itr, conn::Connection, name::AbstractString="mysql_" * Random.rand
     sch = Tables.schema(rows)
     if sch === nothing
         # we want to ensure we always have a schema, so materialize if needed
-        rows = Tables.rows(columntable(rows))
+        rows = Tables.rows(Tables.columntable(rows))
         sch = Tables.schema(rows)
     end
+    ncols = length(sch.names)
+    maxparams = min(MAX_STATEMENT_PARAMS, conn.options.limits.max_columns)
+    1 <= ncols <= maxparams || throw(ArgumentError("source must have 1:$maxparams columns"))
     # ensure table exists
     if quoteidentifiers
         name = quoteid(conn, name)
@@ -149,33 +178,19 @@ function load(itr, conn::Connection, name::AbstractString="mysql_" * Random.rand
         debug_statements && @info "executing delete statement: `DELETE FROM $name`"
         DBInterface.execute(conn, "DELETE FROM $name")
     end
-    ncols = length(sch.names)
     # rows per statement: the requested batch, the marker limit, and the packet budget
-    maxrows = min(Int(batchsize), max(1, MAX_STATEMENT_PARAMS ÷ max(ncols, 1)))
+    maxrows = Int(min(batchsize, maxparams ÷ ncols))
     maxbytes = conn.options.limits.max_packet ÷ 4
     columns = join((quoteid(conn, string(column)) for column in sch.names), ", ")
     rowmarkers = "(" * join(Iterators.repeated("?", ncols), ", ") * ")"
     insert_prefix = "INSERT INTO $name ($columns) VALUES "
     # start a transaction for inserting rows
     DBInterface.transaction(conn) do
-        # one prepared statement per distinct batch row count (the full batch plus the tail)
-        stmts = Dict{Int, Statement}()
+        stmt = nothing
         params = Any[]
         rowvals = Vector{Any}(undef, ncols)
         nbuffered = 0
         nbytes = 0
-        function flush!()
-            stmt = get!(stmts, nbuffered) do
-                sql = insert_prefix * join(Iterators.repeated(rowmarkers, nbuffered), ", ")
-                debug_statements && @info "executing insert statement: `$sql`"
-                return DBInterface.prepare(conn, sql)
-            end
-            DBInterface.execute(stmt, params)
-            empty!(params)
-            nbuffered = 0
-            nbytes = 0
-            return nothing
-        end
         try
             for (i, row) in enumerate(rows)
                 i > limit && break
@@ -184,21 +199,27 @@ function load(itr, conn::Connection, name::AbstractString="mysql_" * Random.rand
                 rowbytes = 0
                 for j in 1:ncols
                     x = Tables.getcolumn(r, j)
-                    rowvals[j] = x
+                    rowvals[j] = load_value(x)
                     rowbytes += load_value_bytes(x)
                 end
                 # a row that would push the batch over the packet budget starts the next one
-                (nbuffered > 0 && nbytes + rowbytes > maxbytes) && flush!()
+                if nbuffered > 0 && nbytes + rowbytes > maxbytes
+                    stmt = load_batch!(stmt, conn, params, nbuffered, insert_prefix, rowmarkers, debug_statements)
+                    nbuffered = 0
+                    nbytes = 0
+                end
                 append!(params, rowvals)
                 nbuffered += 1
                 nbytes += rowbytes
-                nbuffered == maxrows && flush!()
+                if nbuffered == maxrows
+                    stmt = load_batch!(stmt, conn, params, nbuffered, insert_prefix, rowmarkers, debug_statements)
+                    nbuffered = 0
+                    nbytes = 0
+                end
             end
-            nbuffered > 0 && flush!()
+            nbuffered > 0 && (stmt = load_batch!(stmt, conn, params, nbuffered, insert_prefix, rowmarkers, debug_statements))
         finally
-            for stmt in values(stmts)
-                DBInterface.close!(stmt)
-            end
+            stmt === nothing || DBInterface.close!(stmt)
         end
     end
 

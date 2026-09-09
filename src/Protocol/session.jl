@@ -97,7 +97,7 @@ mid-response — and `ProtocolError` during the connection phase; everything els
     is_deadline_error(err) && return TimeoutError("deadline expired while waiting for the server (phase $phase); the connection has been closed")
     if err isa EOFError || (err isa Reseau.TLS.TLSError && err.cause isa EOFError)
         s.authenticated || return ProtocolError("connection closed by the server in the middle of the protocol stream")
-        (phase == CMD_SENT && s.io.received_bytes == 0) && return Error(CR_SERVER_GONE_ERROR, "MySQL server has gone away", "HY000")
+        ((phase == READY || phase == CMD_SENT) && s.io.received_bytes == 0) && return Error(CR_SERVER_GONE_ERROR, "MySQL server has gone away", "HY000")
         return Error(CR_SERVER_LOST, "Lost connection to MySQL server during query", "HY000")
     end
     # A TLS 1.3 server may reject the session (e.g. a missing client certificate) on the

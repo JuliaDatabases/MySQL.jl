@@ -4,6 +4,7 @@ using Harbor
 include(joinpath(@__DIR__, "..", "behavior_manifest.jl"))
 using .BehaviorManifest
 include(joinpath(@__DIR__, "leak_soak.jl"))
+include(joinpath(@__DIR__, "..", "user_workflow.jl"))
 
 const LIVE_IMAGES = split(get(ENV, "MYSQL_NATIVE_IMAGES", "mysql:8.4,mariadb:11.4"), ',')
 const ROOT_PW = "native-secret"
@@ -127,6 +128,13 @@ function run_live_lane(ref::String; soak::Bool=false, manifest::Bool=false)
             @test P.read_command_response!(root.session) isa Union{P.OKPacket, P.EOFPacket}
             N.close!(root)
             @test !isopen(root)
+            conn = DBInterface.connect(MySQL.Connection, "127.0.0.1", "root", ROOT_PW; port=port)
+            try
+                run_user_workflow(conn)
+            finally
+                DBInterface.close!(conn)
+            end
+            @test !isopen(conn)
             # the executable behavior manifest: golden values on the primary lane only
             # (goldens are captured against mysql:8.4; server wording differs on MariaDB)
             manifest && BehaviorManifest.run!(

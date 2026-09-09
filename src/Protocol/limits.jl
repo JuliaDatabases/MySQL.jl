@@ -12,7 +12,7 @@ is checked against these *before* allocation.
 - `max_packet` (16 MiB, cap 1 GiB): one logical (reassembled) packet after authentication
 - `max_preauth_packet` (1 MiB): one logical packet before authentication completes
 - `max_auth_rounds` (8) / `max_auth_bytes` (64 KiB): authentication exchange bounds
-- `max_columns` (4096): columns per result set
+- `max_columns` (4096): columns per result set or parameters per prepared statement
 - `max_result_sets` (1024): result sets per command
 - `max_metadata_bytes` (16 MiB): column-definition bytes per command
 - `max_buffered_bytes` (256 MiB, `nothing` = unlimited): all retained buffered storage of

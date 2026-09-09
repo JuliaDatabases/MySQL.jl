@@ -33,8 +33,12 @@ last Connector/C release.
 5. **Local servers**: every host, `"localhost"` and `""` included, is dialed over TCP (the
    Connector/C rule that turned `localhost` into a Unix socket is gone). The socket and
    named-pipe transports are not implemented yet: `protocol=:socket`/`:pipe` or
-   `named_pipe=true` raise a clear error, and a `unix_socket` path is accepted but unused.
-   Accounts scoped to `'user'@'localhost'` match loopback TCP connections too.
+   `named_pipe=true` raise a clear error (an explicit `protocol=:tcp` overrides
+   `named_pipe`). A `unix_socket` path is accepted but unused.
+   TCP access also needs a matching account grant. With `skip_name_resolve`, a
+   `'user'@'localhost'` grant need not cover `127.0.0.1` or `::1`; see
+   [MySQL's host-resolution rules](https://dev.mysql.com/doc/refman/8.0/en/server-system-variables.html#sysvar_skip_name_resolve).
+   Socket-only authentication also needs a TCP-compatible account.
 6. **Unknown, removed, or unavailable keywords now error** with an explanation instead of
    being silently swallowed — fix the call sites the errors point at.
 
@@ -100,7 +104,7 @@ Deliberate, documented changes relative to Connector/C 1.6.0:
 | `connect_timeout` | C socket timeout with platform-dependent meaning | one monotonic establishment deadline spanning dial, greeting, TLS, the whole auth exchange, and the charset bootstrap |
 | `read_timeout` / `write_timeout` | `MYSQL_OPT_READ_TIMEOUT`/`MYSQL_OPT_WRITE_TIMEOUT`: per socket operation | same meaning: re-armed before every transport read/write, so a slowly-consumed streaming result never expires while the server keeps answering; expiry closes the connection |
 | `reconnect` | C auto-reconnect | the same contract, made explicit: the command that hits a dead connection reports it (`MySQL.Error` 2006/2013), and the *next* command reconnects — only before a send, never mid-command, never inside a transaction; a reconnect that itself fails leaves the connection retryable, not closed |
-| Connection loss | `API.Error` 2006 "server has gone away" / 2013 "lost connection during query" | the same `MySQL.Error` codes (2006 when the server dropped the connection instead of answering, e.g. an idle connection reaped by `wait_timeout`; 2013 mid-response); the connection is closed until `reconnect` or a new connect |
+| Connection loss | `API.Error` 2006 "server has gone away" / 2013 "lost connection during query" | peer EOF maps to `MySQL.Error` 2006 before an answer and 2013 mid-response; MySQL 8.4's unsolicited sequence-0 idle-disconnect ERR currently raises a sequence-mismatch `ProtocolError`; the connection is closed until `reconnect` or a new connect |
 | `executemultiple` | first-OK result yielded nothing; later results mutated one cursor (stale `lookup`, aliased metadata) | every result (DML/OK included) is a **distinct cursor** with immutable metadata and its own OK snapshot; advancing past an unconsumed streaming result drains and invalidates it |
 | `lastrowid` | read live connection/statement state (sticky) | snapshot from the cursor's own OK/terminator (a SELECT cursor reports 0) |
 | DML cursor `length` | `-1` surprises | DML cursors keep the `-1` sentinel; **buffered SELECT cursors report the row count** |
@@ -208,7 +212,7 @@ error rather than misbehaving:
 
 - **Unix sockets and Windows named pipes** (transport is TCP/TLS). Every host, including
   `"localhost"`, is dialed over TCP; asking for the local transport explicitly
-  (`protocol=:socket`/`:pipe`, `named_pipe=true`) raises a clear error, and a `unix_socket`
+  (`protocol=:socket`/`:pipe`, or `named_pipe=true` without `protocol=:tcp`) raises a clear error, and a `unix_socket`
   path (keyword or option file) is accepted but unused until the transport exists.
 - **Compression** (`compress=true` is an `ArgumentError`), server cursors /
   `COM_STMT_FETCH`, query attributes, `COM_STMT_BULK_EXECUTE`

@@ -2,7 +2,7 @@
 
 This file accompanies `src/Protocol/`. It records where every byte-level fact came from,
 the places where the vendor documents disagree, and every consultation of a third-party
-implementation (none so far). Section numbers of the form §N.M refer to the internal
+implementation (including the review-policy exception logged below). Section numbers of the form §N.M refer to the internal
 design plan that drove the rewrite; the ones that gate CI are: §8.4 = fuzzing, §8.9 =
 per-row performance/allocation gates (allocations per row ≤ String/Vector columns + 1),
 §8.10 = leak/lifecycle soak, §4.2 = the 1.x behavior table now in
@@ -306,6 +306,24 @@ source are never read.
   query attributes / bulk execute / compression; OUT-param round trips beyond CALL result
   sets; the 60–90-day preview soak (calendar). See `docs/src/migration.md`.
 
+## Round-1 live finding still open
+
+On MySQL 8.4, `SET SESSION wait_timeout=1`, a two-second idle wait, then `SELECT 1`
+reproduces `ProtocolError("sequence id mismatch: expected 1, got 0")`. The captured
+packet has header `91 00 00 00` and payload prefix `ff bf 0f 23 48 59 30 30 30`:
+ERR 4031 / HY000, sent before the next command, when the server closes an idle connection.
+This is not the peer-EOF path covered by the 2006/2013 mapping. With `reconnect=true`, the
+following command reconnects successfully. Add a narrowly validated terminal-disconnect
+exception at the start of a command response; other sequence mismatches must still fault.
+
 ## Third-party consultations
 
-None.
+- **2026-09-08, Codex round-1 review — policy exception.** Question: does
+  `sha256_password` require an empty response or a NUL byte for an empty password?
+  The reviewer opened Oracle's GPL client source
+  [`sql-common/client_authentication.cc` on the `8.4` branch](https://github.com/mysql/mysql-server/blob/8.4/sql-common/client_authentication.cc)
+  before reading the source restrictions above. The source sends one NUL byte. This
+  consultation violated the review policy. No code was copied, and no authentication
+  implementation or test was changed based on it. A separate live check on MySQL 8.4
+  accepted the existing empty response over both TCP and TLS. The maintainer must review
+  this exception; the source-pattern check cannot validate consultation history.

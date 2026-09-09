@@ -88,14 +88,25 @@ function fill_readbuf!(io::PacketIO, transport::Transport, needed::Int)
     while total < needed
         arm_read_deadline!(io, transport)
         got = transport_read_some!(transport, io.readbuf, total + 1, length(io.readbuf) - total)
-        if got == 0
-            io.received_bytes += total   # a cut-short response still counts as started
-            throw(EOFError())
-        end
+        got == 0 && throw(EOFError())
+        io.received_bytes += got
         total += got
     end
     io.readlim = total
-    io.received_bytes += total
+    return nothing
+end
+
+# Count each partial read before the next read can throw. Exact unsafe_read cannot report
+# how many bytes it consumed before EOF (including a cut-short first packet header).
+function packet_read_exact!(io::PacketIO, transport::Transport, dest::Vector{UInt8}, offset::Int, n::Int)
+    while n > 0
+        arm_read_deadline!(io, transport)
+        got = transport_read_some!(transport, dest, offset, n)
+        got == 0 && throw(EOFError())
+        io.received_bytes += got
+        offset += got
+        n -= got
+    end
     return nothing
 end
 
@@ -110,10 +121,7 @@ transport, so the STARTTLS empty-reader invariant is untouched.
 """
 function packet_read!(io::PacketIO, transport::Transport, dest::Vector{UInt8}, offset::Int, n::Int, buffered::Bool)
     if !buffered || !supports_buffered_reads(transport)
-        arm_read_deadline!(io, transport)
-        transport_read!(transport, dest, offset, n)
-        io.received_bytes += n
-        return nothing
+        return packet_read_exact!(io, transport, dest, offset, n)
     end
     avail = buffered_bytes_available(io)
     take = min(avail, n)
@@ -125,10 +133,7 @@ function packet_read!(io::PacketIO, transport::Transport, dest::Vector{UInt8}, o
     end
     n == 0 && return nothing
     if n >= length(io.readbuf) >> 1
-        arm_read_deadline!(io, transport)
-        transport_read!(transport, dest, offset, n)
-        io.received_bytes += n
-        return nothing
+        return packet_read_exact!(io, transport, dest, offset, n)
     end
     fill_readbuf!(io, transport, n)
     copyto!(dest, offset, io.readbuf, io.readpos, n)
