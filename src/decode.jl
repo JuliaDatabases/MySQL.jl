@@ -77,7 +77,7 @@ end
 
 # Strings and bytes decode to DataStrings views: values of up to 12 bytes are stored inline,
 # longer ones reference the cursor's buffer (which a buffered cursor never mutates and a
-# streaming cursor allocates per row), so no bytes are copied and nothing is allocated.
+# streaming cursor appends rows to retained arenas), so no heap payload is copied or allocated.
 # Requesting `String`/`Vector{UInt8}` explicitly (`Tables.getcolumn(row, String, i, name)`)
 # still yields a copy.
 function decode_value(::Type{DataString}, buf::Vector{UInt8}, pos::Int, len::Int, ::ResultOptions)
