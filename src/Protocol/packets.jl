@@ -158,17 +158,26 @@ bounding the reassembled size by `max_payload` *before* growing the buffer. `max
 bounds the cumulative payload bytes since `newcommand!`. `dest` is the buffer the payload is
 read into (a cursor passes its own buffer so rows never alias the shared reader buffer).
 `buffered=true` batches transport reads through `io.readbuf` (command phase only).
+`stale_err=true` (the first packet of a command response) additionally accepts an ERR
+packet numbered 0 where sequence 1 was expected: a MySQL server that closes an idle
+connection (`wait_timeout`, error 4031) announces it with such a packet before the client's
+next command, so it arrives as the "response". The returned view then carries `seq == 0`
+so the session can treat it as the terminal disconnect it is.
 """
-function readpacket!(io::PacketIO, transport::Transport, max_payload::Int; max_response::Union{Nothing, Int}=nothing, dest::Vector{UInt8}=io.inbuf, buffered::Bool=false)
+function readpacket!(io::PacketIO, transport::Transport, max_payload::Int; max_response::Union{Nothing, Int}=nothing, dest::Vector{UInt8}=io.inbuf, buffered::Bool=false, stale_err::Bool=false)
     total = 0
     nchunks = 0
     first_chunk_len = -1
     seq = io.seq
+    stale = false
     while true
         packet_read!(io, transport, io.header, 1, PACKET_HEADER_LEN, buffered)
         len = Int(io.header[1]) | (Int(io.header[2]) << 8) | (Int(io.header[3]) << 16)
         got = io.header[4]
-        got == io.seq || sequence_mismatch(io.seq, got)
+        if got != io.seq
+            (stale_err && total == 0 && io.seq == 0x01 && got == 0x00) || sequence_mismatch(io.seq, got)
+            stale = true
+        end
         io.seq += 0x01
         nchunks += 1
         first_chunk_len < 0 && (first_chunk_len = len)
@@ -180,6 +189,10 @@ function readpacket!(io::PacketIO, transport::Transport, max_payload::Int; max_r
         total += len
         io.response_bytes = next_response_bytes
         len < MAX_CHUNK && break
+    end
+    if stale
+        (total > 0 && dest[1] == ERR_HEADER) || sequence_mismatch(0x01, 0x00)
+        seq = 0x00
     end
     return PacketView(dest, 1, total, seq, nchunks, first_chunk_len)
 end

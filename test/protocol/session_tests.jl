@@ -849,6 +849,40 @@ end
             @test_throws P.ProtocolError P.read_greeting!(s)
             @test s.phase == P.BROKEN
         end
+        # MySQL 8.0.24+ announces an idle disconnect with ERR 4031 numbered 0, sent before the
+        # client's next command: reported as that error, and the session is dead
+        farewell = vcat(UInt8[0xFF, 0xBF, 0x0F, UInt8('#')], codeunits("HY000"), codeunits("The client was disconnected by the server because of inactivity."))
+        with_peer(conn -> (server_handshake!(conn); send_packet(conn, 0, farewell); read_command(conn))) do client
+            s = P.Session(client)
+            client_handshake!(s)
+            P.query!(s, "SELECT 1")
+            err = try; P.read_command_response!(s); nothing; catch e; e; end
+            @test err isa P.Error && err.errno == 4031 && err.sqlstate == "HY000" && occursin("inactivity", err.msg)
+            @test s.phase == P.BROKEN && !isopen(s)
+        end
+        # the same shape for a prepare, and only an ERR is accepted at sequence 0
+        with_peer(conn -> (server_handshake!(conn); send_packet(conn, 0, farewell); read_command(conn))) do client
+            s = P.Session(client)
+            client_handshake!(s)
+            P.stmt_prepare!(s, "SELECT ?")
+            err = try; P.read_prepare_response!(s); nothing; catch e; e; end
+            @test err isa P.Error && err.errno == 4031 && s.phase == P.BROKEN
+        end
+        with_peer(conn -> (server_handshake!(conn); send_packet(conn, 0, ok_payload()); read_command(conn))) do client
+            s = P.Session(client)
+            client_handshake!(s)
+            P.query!(s, "SELECT 1")
+            err = try; P.read_command_response!(s); nothing; catch e; e; end
+            @test err isa P.ProtocolError && occursin("sequence id mismatch", err.msg)
+        end
+        # a sequence-0 ERR anywhere else in a response is still a mismatch
+        with_peer(conn -> (server_handshake!(conn); read_command(conn); send_packet(conn, 1, column_count(1)); send_packet(conn, 0, farewell))) do client
+            s = P.Session(client)
+            client_handshake!(s)
+            P.query!(s, "SELECT 1")
+            err = try; P.read_command_response!(s); nothing; catch e; e; end
+            @test err isa P.ProtocolError && occursin("sequence id mismatch", err.msg)
+        end
     end
 
     @testset "FaultTransport interruption points" begin

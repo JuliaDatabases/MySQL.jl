@@ -298,7 +298,16 @@ function connect(opts::ConnectOptions)
         policy = P.AuthPolicy(opts.auth.secure_transport || secure, secure && opts.tls.mode == P.SSL_VERIFY_IDENTITY, opts.auth.server_public_key, opts.auth.get_server_public_key, opts.auth.enable_cleartext_plugin, opts.auth.insecure_cleartext_auth)
         trace = Symbol[]
         ok = P.authenticate!(s, opts.user, opts.password, policy; db=opts.db, attrs=opts.attrs, default_auth=opts.default_auth, trace=trace)
-        bootstrapped = bootstrap_charset!(s, ok)
+        bootstrapped = try
+            bootstrap_charset!(s, ok)
+        catch err
+            # Sandbox mode (an expired password, accepted because of
+            # `can_handle_expired_passwords`) refuses everything but a password reset, the
+            # charset bootstrap included; the handshake already asked for utf8mb4, so hand the
+            # session over for the `ALTER USER ... IDENTIFIED BY` the user must run.
+            (opts.can_handle_expired_passwords && err isa P.Error && err.errno == P.ER_MUST_CHANGE_PASSWORD && s.phase == P.READY) || rethrow()
+            false
+        end
         deadline == 0 || apply_deadline!(s.transport, Int64(0))
         # from here on `read_timeout`/`write_timeout` apply per transport operation
         P.set_timeouts!(s, timeout_ns(opts.read_timeout), timeout_ns(opts.write_timeout))

@@ -539,7 +539,7 @@ end
         stmt = DBInterface.prepare(conn, "INSERT INTO t (a, b) VALUES (?, ?)")
         @test stmt.nparams == 2 && isempty(stmt.names)
         cur = DBInterface.execute(stmt, ("x", 3))
-        @test cur.rows_affected == 2 && DBInterface.lastrowid(cur) == 41 && length(cur) == -1
+        @test cur.rows_affected == 2 && DBInterface.lastrowid(cur) == 41 && length(cur) == 0
         @test isempty(Tables.columntable(cur))
         DBInterface.close!(stmt)
     end

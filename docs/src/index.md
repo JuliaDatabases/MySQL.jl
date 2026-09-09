@@ -108,7 +108,7 @@ keywords, removed 1.x keywords, and keywords that are not available yet all rais
 | `local_files` | `false` | allow `LOAD DATA LOCAL INFILE`; requires `local_infile_handler` |
 | `local_infile_handler` | `nothing` | `filename -> IO` (or `nothing` to refuse) called when the server requests a local file |
 | `max_local_infile_bytes` | 1 GiB | cap on one upload |
-| `can_handle_expired_passwords` | `false` | advertise expired-password support; the required charset bootstrap can still fail with error 1820, so this does not yet provide a password-reset connection |
+| `can_handle_expired_passwords` | `false` | connect in sandbox mode with an expired password: only `ALTER USER USER() IDENTIFIED BY '…'` / `SET PASSWORD` succeed until the password is reset (other statements fail with error 1820) |
 
 **TLS**
 

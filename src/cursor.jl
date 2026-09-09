@@ -154,8 +154,10 @@ function col_index(c::Cursor, nm::Symbol)
     return lk[nm]
 end
 
+# A result-less (DML/OK) cursor has zero rows: `length` is 0 and `collect` works (1.x
+# reported the C client's `-1` sentinel); its outcome lives in `rows_affected`/`lastrowid`.
 function empty_cursor(conn::Connection, sql::String, token::Int, ok::P.OKPacket, ::Val{binary}, ::Val{buffered}, opts::ResultOptions, number::Int) where {binary, buffered}
-    c = Cursor{binary, buffered}(conn, sql, token, @atomic(conn.generation), nothing, EMPTY_NAMES, EMPTY_TYPES, nothing, EMPTY_COLTYPES, 0, -1, Core.bitcast(Int64, ok.affected_rows), ok, ok.status, ok.warnings, EMPTY_BYTES, EMPTY_BYTES, EMPTY_INTS, EMPTY_INTS, EMPTY_INTS, P.PacketCursor(EMPTY_BYTES), 0, 0, number, true, false, opts)
+    c = Cursor{binary, buffered}(conn, sql, token, @atomic(conn.generation), nothing, EMPTY_NAMES, EMPTY_TYPES, nothing, EMPTY_COLTYPES, 0, 0, Core.bitcast(Int64, ok.affected_rows), ok, ok.status, ok.warnings, EMPTY_BYTES, EMPTY_BYTES, EMPTY_INTS, EMPTY_INTS, EMPTY_INTS, P.PacketCursor(EMPTY_BYTES), 0, 0, number, true, false, opts)
     P.more_results(ok) || release_token!(c)
     return c
 end

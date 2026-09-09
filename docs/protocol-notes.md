@@ -306,15 +306,18 @@ source are never read.
   query attributes / bulk execute / compression; OUT-param round trips beyond CALL result
   sets; the 60–90-day preview soak (calendar). See `docs/src/migration.md`.
 
-## Round-1 live finding still open
+## Idle disconnect announcements (round-1 live finding, resolved)
 
 On MySQL 8.4, `SET SESSION wait_timeout=1`, a two-second idle wait, then `SELECT 1`
-reproduces `ProtocolError("sequence id mismatch: expected 1, got 0")`. The captured
+produced `ProtocolError("sequence id mismatch: expected 1, got 0")`. The captured
 packet has header `91 00 00 00` and payload prefix `ff bf 0f 23 48 59 30 30 30`:
-ERR 4031 / HY000, sent before the next command, when the server closes an idle connection.
-This is not the peer-EOF path covered by the 2006/2013 mapping. With `reconnect=true`, the
-following command reconnects successfully. Add a narrowly validated terminal-disconnect
-exception at the start of a command response; other sequence mismatches must still fault.
+ERR 4031 / HY000 (`ER_CLIENT_INTERACTION_TIMEOUT`, MySQL 8.0.24+), sent *before* the
+client's next command, when the server closes an idle connection — so it arrives as the
+first packet of the next command's response, numbered 0 where 1 is expected. The packet
+reader accepts exactly that shape (`stale_err`: first packet of a fresh command response,
+sequence 0, ERR header) and the session reports it as a terminal `Error(4031)` (BROKEN,
+transport closed), so `reconnect=true` recovers on the following command. Every other
+sequence mismatch still faults. MariaDB closes idle connections silently (peer EOF → 2006).
 
 ## Third-party consultations
 

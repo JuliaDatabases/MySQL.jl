@@ -316,7 +316,8 @@ end
         expect_query(c); send_resultset(c, 1, [coldef("x"; type=P.MYSQL_TYPE_LONG)], [text_row("1")])
     end) do conn
         cur = DBInterface.execute(conn, "insert")
-        @test cur.rows_affected == 3 && DBInterface.lastrowid(cur) == 41 && length(cur) == -1 && isempty(Tables.columntable(cur))
+        @test cur.rows_affected == 3 && DBInterface.lastrowid(cur) == 41 && length(cur) == 0 && isempty(Tables.columntable(cur))
+        @test isempty(collect(cur)) && iterate(cur) === nothing               # a result-less cursor is an empty, HasLength iterator
         @test Tables.schema(cur) == Tables.Schema(Symbol[], Type[])
         @test sprint(show, cur) == "MySQL.TextCursor(rows_affected=3)"
         cur = DBInterface.execute(conn, "update")

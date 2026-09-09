@@ -360,12 +360,12 @@ const TEXT_ROW_TUPLE = (
             iterate(cur, st)
             try; r1.ID; "no error"; catch e; (typeof(e) <: ArgumentError, e.msg); end
         end),
-    Row("DML cursor: rows_affected, lastrowid, length, and empty schema", :preserve,
+    Row("DML cursor: rows_affected, lastrowid, length 0 (1.x: the C client's -1 sentinel), and empty schema", :fix,
         conn -> let cur = DBInterface.execute(conn, "INSERT INTO manifest_employee (Name) VALUES ('x'), ('y')")
             res = (cur.rows_affected, Int(DBInterface.lastrowid(cur)) > 0, length(cur), isempty(Tables.columntable(cur)), Tables.schema(cur).names)
             DBInterface.execute(conn, "DELETE FROM manifest_employee WHERE Name IN ('x', 'y')")
             res
-        end),
+        end; legacy=(2, true, -1, true, ())),
     Row("lastrowid on a SELECT cursor: snapshot of the cursor's own terminator (1.x: sticky connection state)", :fix,
         conn -> begin
             DBInterface.execute(conn, "INSERT INTO manifest_employee (Name) VALUES ('z')")
@@ -530,8 +530,8 @@ const GOLDENS = Dict{String, Any}(
         Tuple{Int32, Any}[(1, "John"), (2, "Tom"), (3, missing)],
     "row is valid only while current: ArgumentError text" =>
         (true, "row 1 is no longer valid; mysql results are forward-only iterators where each row is only valid when iterated"),
-    "DML cursor: rows_affected, lastrowid, length, and empty schema" =>
-        (2, true, -1, true, ()),
+    "DML cursor: rows_affected, lastrowid, length 0 (1.x: the C client's -1 sentinel), and empty schema" =>
+        (2, true, 0, true, ()),
     "server error keeps the connection usable; errno and showerror format" =>
         (0x0000047a, "(1146): Table 'manifest.does_not_exist' doesn't exist", Int64[1]),
     "CALL: first result via execute, remaining results drained by the next command" =>

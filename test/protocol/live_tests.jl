@@ -85,8 +85,19 @@ function run_live_lane(ref::String; soak::Bool=false, manifest::Bool=false)
                 exec!(root, "CREATE USER IF NOT EXISTS 'nat'@'%' IDENTIFIED WITH mysql_native_password BY 'natpw'")
                 exec!(root, "CREATE USER IF NOT EXISTS 'sha'@'%' IDENTIFIED WITH sha256_password BY 'shapw'")
                 exec!(root, "CREATE USER IF NOT EXISTS 'expired'@'%' IDENTIFIED WITH caching_sha2_password BY 'expiredpw' PASSWORD EXPIRE")
-                err = try; N.connect("127.0.0.1", "expired", "expiredpw"; port=port, ssl_mode=:required, can_handle_expired_passwords=true, connect_timeout=10); nothing; catch e; e; end
+                exec!(root, "ALTER USER 'expired'@'%' PASSWORD EXPIRE")
+                # without the flag the server refuses the login outright
+                err = try; N.connect("127.0.0.1", "expired", "expiredpw"; port=port, ssl_mode=:required, connect_timeout=10); nothing; catch e; e; end
                 @test err isa P.Error && err.errno == P.ER_MUST_CHANGE_PASSWORD
+                # with it the connection is in sandbox mode: only a password reset is allowed,
+                # after which the session is a normal one
+                h = N.connect("127.0.0.1", "expired", "expiredpw"; port=port, ssl_mode=:required, can_handle_expired_passwords=true, connect_timeout=10)
+                @test !h.bootstrapped && h.auth_trace[end] == :ok && isopen(h)
+                err = try; exec!(h, "SELECT 1"); nothing; catch e; e; end
+                @test err isa P.Error && err.errno == P.ER_MUST_CHANGE_PASSWORD && isopen(h)
+                exec!(h, "ALTER USER USER() IDENTIFIED BY 'expiredpw2'")
+                @test select_strings(h, "SELECT 1, @@character_set_connection")[1] == ["1", "utf8mb4"]
+                N.close!(h)
                 # full auth over plaintext is refused by default, then succeeds with RSA, then the cache makes it fast
                 err = try; N.connect("127.0.0.1", "plain", "plainpw"; port=port, ssl_mode=:disabled, connect_timeout=10); nothing; catch e; e; end
                 @test err isa P.AuthError
@@ -135,6 +146,20 @@ function run_live_lane(ref::String; soak::Bool=false, manifest::Bool=false)
                 DBInterface.close!(conn)
             end
             @test !isopen(conn)
+            # an idle connection reaped by wait_timeout: MySQL 8.0.24+ announces it (4031),
+            # MariaDB just closes (2006); either way the next command reconnects
+            conn = DBInterface.connect(MySQL.Connection, "127.0.0.1", "root", ROOT_PW; port=port, reconnect=true)
+            try
+                DBInterface.execute(conn, "SET SESSION wait_timeout = 1")
+                sleep(2.5)
+                err = try; DBInterface.execute(conn, "SELECT 1"); nothing; catch e; e; end
+                @test err isa MySQL.Error && err.errno in (4031, P.CR_SERVER_GONE_ERROR)
+                @test !isopen(conn)
+                @test Tables.columntable(DBInterface.execute(conn, "SELECT 1 AS v")).v == [1]
+                @test isopen(conn)
+            finally
+                DBInterface.close!(conn)
+            end
             # the executable behavior manifest: golden values on the primary lane only
             # (goldens are captured against mysql:8.4; server wording differs on MariaDB)
             manifest && BehaviorManifest.run!(
