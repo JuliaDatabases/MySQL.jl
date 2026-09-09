@@ -109,6 +109,18 @@ function transport_read_some!(t::Union{Reseau.TCP.Conn, Reseau.TLS.Conn}, buf::V
     return Base.readbytes!(t, view(buf, offset:lastindex(buf)), n; all=false)
 end
 
+function transport_read_some!(t::FaultTransport, buf::Vector{UInt8}, offset::Int, n::Int)
+    if t.fail_read_at >= 0
+        allowed = t.fail_read_at - t.read_bytes
+        allowed <= 0 && throw(t.read_error)
+        n = min(n, allowed)
+    end
+    dest = view(buf, offset:(offset + n - 1))
+    got = t.inner isa IOBuffer ? readbytes!(t.inner, dest, n) : readbytes!(t.inner, dest, n; all=false)
+    t.read_bytes += got
+    return got
+end
+
 @inline transport_write(t::Transport, bytes::Vector{UInt8}) = return (write(t, bytes); nothing)
 
 transport_isopen(t::Transport) = return isopen(t)

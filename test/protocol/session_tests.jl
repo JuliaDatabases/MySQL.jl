@@ -818,6 +818,31 @@ end
             @test_throws ErrorException P.drain_step!(s)
             P.drain!(s)
         end
+        # All truncated first-header positions count as a response, on both real TCP and
+        # the unbuffered fault path. drain! must propagate these client errors too.
+        answer = framed(0x01, ok_payload())
+        for cut in 0:(length(answer) - 1), injected in (false, true)
+            t = injected ? P.FaultTransport(IOBuffer(answer); fail_read_at=cut) :
+                P.FaultTransport(IOBuffer(answer[1:cut]))
+            s = P.Session(t)
+            s.authenticated = true
+            s.phase = P.CMD_SENT
+            s.io.seq = 0x01
+            err = try; P.drain!(s); nothing; catch e; e; end
+            @test err isa P.Error && err.errno == (cut == 0 ? P.CR_SERVER_GONE_ERROR : P.CR_SERVER_LOST)
+            @test s.io.received_bytes == cut
+            @test s.phase == P.BROKEN
+        end
+        for cut in 1:3
+            with_peer(conn -> (server_handshake!(conn); read_command(conn); send_raw(conn, answer[1:cut]))) do client
+                s = P.Session(client)
+                client_handshake!(s)
+                P.ping!(s)
+                err = try; P.read_command_response!(s); nothing; catch e; e; end
+                @test err isa P.Error && err.errno == P.CR_SERVER_LOST
+                @test s.io.received_bytes == cut
+            end
+        end
         # peer closes during the greeting: still a protocol-level failure
         with_peer(conn -> send_raw(conn, UInt8[0x10, 0x00, 0x00, 0x00, 0x0a])) do client
             s = P.Session(client)
