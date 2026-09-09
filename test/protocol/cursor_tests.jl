@@ -2,7 +2,7 @@
 # peer: decoding policies, the row-validity contract, multi-results, LOCAL INFILE, limits,
 # reconnect. Server scripts answer the connection phase with `plain_peer_connect!` (no TLS,
 # SET NAMES bootstrap) and then serve commands from `after`.
-using Dates, DecFP, Tables, DBInterface
+using Dates, Tables, DBInterface
 
 # ColumnDefinition41 for a column of `type` (wire byte) with `flags`.
 function coldef(name::AbstractString; type::Integer=P.MYSQL_TYPE_VAR_STRING, flags::Integer=0, decimals::Integer=0, charset::Integer=0x2D, length::Integer=255, table::AbstractString="t")
@@ -178,9 +178,9 @@ const TYPED_COLS = [
         )
         @test decode_text(T, value) === expected
     end
-    @test decode_text(Dec64, "12.345") == d64"12.345"
-    # an embedded NUL must be a ConversionError, not an ArgumentError from DecFP's Cstring (fuzz finding)
-    @test_throws P.ConversionError decode_text(Dec64, "12.\x0045")
+    @test decode_text(N.DecimalResult, "12.345") == parse(N.DecimalResult, "12.345")
+    # an embedded NUL must be a ConversionError (fuzz finding)
+    @test_throws P.ConversionError decode_text(N.DecimalResult, "12.\x0045")
     @test decode_text(MySQL.Bit, "\x01\x02") == MySQL.Bit(0x0102)
     @test decode_text(Vector{UInt8}, "\x00\xff") == UInt8[0x00, 0xff]
     @test decode_text(String, "héllo") == "héllo"
@@ -237,9 +237,7 @@ end
         @test row.s == "héllo" && row.b == UInt8[0x00, 0x01] && row.bit == MySQL.Bit(0x0102)
         @test_throws P.ConversionError row.tm                               # 838 h does not fit Dates.Time
         @test row.da == Date(2024, 2, 29) && row.y === unsigned(Clong)(2024)        # YEAR is an unsigned numeric (Clong: UInt64 on 64-bit, UInt32 on Windows x64)
-        @test_logs (:warn, r"microsecond") begin
-            @test_throws P.ConversionError row.dt
-        end
+        @test (@test_logs (:warn, r"microsecond") row.dt) == DateTime(2024, 2, 29, 13, 14, 15, 250)   # sub-ms warns once, truncates
         @test propertynames(row) == [:i, :u, :f, :d, :s, :b, :bit, :dt, :da, :tm, :y] && length(row) == 11
         @test Base.IndexStyle(typeof(row)) == Base.IndexLinear()
         row2, _ = iterate(cur, st)
@@ -301,8 +299,13 @@ end
     @test_throws P.ConversionError decode_text(Dates.Microsecond, "839:00:00"; opts=duration)
     @test_throws P.ConversionError decode_text(Dates.Microsecond, "01:02:03."; opts=duration)
     @test_throws P.ConversionError decode_text(Dates.Microsecond, "01:02:03.1234567"; opts=duration)
-    @test decode_text(DateAndTime, "2024-01-01 00:00:00.1") == DateAndTime(Date(2024, 1, 1), Time(0, 0, 0, 0, 1))
+    # fractional digits are scaled by their position (DATETIME(1) `.1` is 100 ms; 1.x read it as 1 µs)
+    @test decode_text(DateAndTime, "2024-01-01 00:00:00.1") == DateAndTime(Date(2024, 1, 1), Time(0, 0, 0, 100, 0))
+    @test decode_text(DateAndTime, "2024-01-01 00:00:00.123") == DateAndTime(Date(2024, 1, 1), Time(0, 0, 0, 123, 0))
     @test decode_text(DateAndTime, "2024-01-01 00:00:00.123456") == DateAndTime(Date(2024, 1, 1), Time(0, 0, 0, 123, 456))
+    # sub-millisecond precision into a DateTime warns once and truncates (same as the binary path)
+    @test decode_text(DateTime, "2024-01-01 00:00:00.123") == DateTime(2024, 1, 1, 0, 0, 0, 123)
+    @test (@test_logs (:warn, r"microsecond") decode_text(DateTime, "2024-01-01 00:00:00.123456")) == DateTime(2024, 1, 1, 0, 0, 0, 123)
 end
 
 @testset "DML cursors, lastrowid snapshots, rows_affected bitcast" begin
@@ -795,8 +798,8 @@ end
         @test_throws ErrorException (DBInterface.close!(conn); DBInterface.execute(conn, "after close"))
         @test sprint(show, conn) == "MySQL.Connection(disconnected)"
     end
-    # reconnect=true: a new session before the next send once the old one is known dead,
-    # old cursors invalidated, never inside a transaction and never after a protocol fault
+    # reconnect=true: a new session before the next send once the old one is known dead
+    # (closed or broken), old cursors invalidated, never inside a transaction
     accepted = AcceptedCounter(0)
     listener = Reseau.TCP.listen(Reseau.TCP.loopback_addr(0))
     port = Int(Reseau.TCP.addr(listener).port)
@@ -857,11 +860,13 @@ end
         @test (@atomic accepted.value) == 2
         conn.handle.session.status = P.SERVER_STATUS_AUTOCOMMIT
         conn.handle.session.phase = P.READY
-        @test_throws P.ProtocolError DBInterface.execute(conn, "peer hangs up")
-        @test !isopen(conn)
-        err = try; DBInterface.execute(conn, "after broken"); nothing; catch e; e; end
+        # the server drops the connection instead of answering: the classic 2006, the session
+        # is BROKEN, and the *next* command reconnects (the libmysqlclient contract)
+        err = try; DBInterface.execute(conn, "peer hangs up"); nothing; catch e; e; end
         @test err isa P.Error && err.errno == P.CR_SERVER_GONE_ERROR
-        @test (@atomic accepted.value) == 2                                    # BROKEN never reconnects
+        @test !isopen(conn) && conn.handle.session.phase == P.BROKEN
+        @test DBInterface.execute(conn, "after broken").rows_affected == 0
+        @test (@atomic accepted.value) == 3 && isopen(conn)
         DBInterface.close!(conn)
     finally
         close(listener)

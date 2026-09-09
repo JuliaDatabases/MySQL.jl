@@ -23,16 +23,16 @@ end
     @test N.ConnectOptions("h", "u"; named_pipe=nothing, protocol=:tcp).host == "h"
     @test_throws ArgumentError N.ConnectOptions("h", "u"; protocol=:socket)
     @test N.ConnectOptions("h", "u"; named_pipe=true, protocol=:tcp).host == "h"
-    if Sys.iswindows()
-        @test_throws ArgumentError N.ConnectOptions(".", "u")
-    else
-        @test_throws ArgumentError N.ConnectOptions("", "u")
-        @test_throws ArgumentError N.ConnectOptions("localhost", "u")
-        @test_throws ArgumentError N.ConnectOptions("localhost", "u"; protocol=:default)
-        @test_throws ArgumentError N.ConnectOptions("localhost", "u"; protocol="default")
-        @test N.ConnectOptions("", "u"; protocol=:tcp).host == "localhost"
-        @test N.ConnectOptions("localhost", "u"; protocol=:tcp).host == "localhost"
-    end
+    # every host is dialed over TCP; only an explicit local-transport request is (deferred) error
+    @test N.ConnectOptions("", "u").host == "localhost"
+    @test N.ConnectOptions("localhost", "u").host == "localhost"
+    @test N.ConnectOptions("localhost", "u"; protocol=:default).host == "localhost"
+    @test N.ConnectOptions("localhost", "u"; protocol="default").host == "localhost"
+    @test N.ConnectOptions(".", "u").host == "."
+    @test N.ConnectOptions("localhost", "u"; unix_socket="/tmp/mysql.sock").host == "localhost"
+    @test_throws ArgumentError N.ConnectOptions("localhost", "u"; protocol=:socket)
+    @test_throws ArgumentError N.ConnectOptions("localhost", "u"; protocol=:pipe)
+    @test_throws ArgumentError N.ConnectOptions("localhost", "u"; protocol=:memory)
     @test N.ConnectOptions("h", "u"; protocol=:tcp).port == 3306
     @test N.ConnectOptions("h", "u"; protocol="tcp").port == 3306
     @test_throws ArgumentError N.ConnectOptions("h", "u"; protocol="socket")
@@ -197,14 +197,11 @@ end
         write(socket_protocol, "[client]\nprotocol=socket\n")
         @test_throws ArgumentError N.ConnectOptions("h", "u"; option_file=socket_protocol)
         @test N.ConnectOptions("h", "u"; option_file=socket_protocol, protocol=:tcp).host == "h"
+        # a `socket=` path in the file (the stock my.cnf) never selects the deferred transport
         socket_path = joinpath(dir, "socket-path.cnf")
         write(socket_path, "[client]\nhost=localhost\nsocket=/tmp/mysql-option.sock\n")
-        if Sys.iswindows()
-            @test N.ConnectOptions("", "u"; option_file=socket_path).host == "localhost"
-        else
-            @test_throws ArgumentError N.ConnectOptions("", "u"; option_file=socket_path)
-            @test N.ConnectOptions("", "u"; option_file=socket_path, protocol=:tcp).host == "localhost"
-        end
+        @test N.ConnectOptions("", "u"; option_file=socket_path).host == "localhost"
+        @test N.ConnectOptions("", "u"; option_file=socket_path, protocol=:tcp).host == "localhost"
         # missing file is skipped; .mylogin.cnf is skipped with a warning
         @test N.ConnectOptions("h", "u"; option_file=joinpath(dir, "missing.cnf")).host == "h"
         login = joinpath(dir, ".mylogin.cnf")

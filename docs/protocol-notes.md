@@ -159,17 +159,19 @@ source are never read.
   `ConversionError` otherwise, `time_type=Dates.Microsecond` is lossless; `zero_dates`
   (`:sentinel` default → `Date(0)`/`DateTime(0)`, `:missing` → `missing` and every date
   column typed `Union{Missing,T}`, `:error`); partial zero dates are errors unless
-  `:missing`; DATETIME values with sub-millisecond digits preserve the 1.x warning and
-  conversion failure. `DateAndTime` preserves the 1.x unscaled fractional-digit quirk,
-  which is numerically correct only at precision 6.
+  `:missing`; a DATETIME value with sub-millisecond digits decoded to `DateTime` warns
+  once and truncates to milliseconds on both protocols (1.x failed on the text path);
+  `DateAndTime` scales the fractional digits by position (1.x's text path read them as an
+  unscaled microsecond count, correct only at precision 6).
 - **LOCAL INFILE** follows the plan's state table: refusal (`nothing`) always raises
   `LocalInfileRefused` even when the server accepts the empty upload; a handler error before
   any data (including the source's first read) is re-raised after resynchronizing; an error,
   size-limit crossing or write fault after data closes the connection; an unsolicited `0xFB`
   is a `ProtocolError`. Later results of the same COM_QUERY can request another upload.
-- **Reconnect** is narrow: only before a send, only when the transport is known closed,
-  never from `BROKEN` and never inside a transaction; it bumps the generation so older cursors invalidate.
-  `transaction` holds the connection lock across `f`.
+- **Reconnect** is narrow: only before a send, only once the session is known dead
+  (closed, or `BROKEN` by a fault — the command that hit the fault reports it as the
+  classic `Error` 2006/2013), never inside a transaction; it bumps the generation so
+  older cursors invalidate. `transaction` holds the connection lock across `f`.
 - Handle-level facts from the 8.4 lane: the terminator OK of a SELECT carries
   `last_insert_id = 0`; mariadb:11.4 and mysql:8.4 both serve the fixture identically.
 
@@ -194,8 +196,9 @@ source are never read.
   unsigned)` signature per statement (`Statement.last_signature`) and resends the types only
   when the signature changes (a NULL parameter's slot is `MYSQL_TYPE_NULL`, so a value that
   flips NULL↔non-NULL forces a resend). Parameter type/encoding mirrors the effective 1.x
-  `mysqltype`/`bind!` mapping: `Bit` is converted to bytes and sent as `BLOB`, while DecFP
-  values are converted to strings and sent as `STRING`. `Bool` maps to `TINY` (1.x left it
+  `mysqltype`/`bind!` mapping: `Bit` is converted to bytes and sent as `BLOB`, while decimal
+  values (DataDecimals; DecFP through the package extension) are converted to strings and
+  sent as `STRING`. `Bool` maps to `TINY` (1.x left it
   at the `MYSQL_TYPE_STRING` fallback, an untested latent bug, so this is the sole deliberate
   deviation).
 - **Long data**: `MySQL.send_long_data!` copies and sends each string/blob chunk, and the
@@ -216,10 +219,9 @@ source are never read.
   Execute-time column definitions are authoritative and refresh the statement's cached
   metadata; a statement prepared without static metadata still honours the per-execute
   `mysql_date_and_time` keyword after that refresh.
-- **Binary temporal decoding preserves the 1.x prepared-statement quirks** except the shared
-  Fixes: a sub-millisecond DATETIME **warns and truncates to milliseconds** (this differs from
-  the text path, which warns and fails — both faithfully mirror what 1.x does on each
-  protocol); BIT is the big-endian value of all bytes (Fix), TIME honours sign and days and
+- **Binary temporal decoding preserves the 1.x prepared-statement behaviour** except the
+  shared Fixes: a sub-millisecond DATETIME **warns and truncates to milliseconds** (the text
+  path now does the same; 1.x failed there); BIT is the big-endian value of all bytes (Fix), TIME honours sign and days and
   applies the `Dates.Time` range policy (Fix), and zero/partial dates follow the unified
   `zero_dates` policy (Fix; 1.x binary mapped zero components to 1970).
 - **Statement reaping is finalizer-free**: `DBInterface.close!(stmt)` and a dropped
@@ -237,8 +239,9 @@ source are never read.
   (`detect_kind` now ASCII-lowers bytes); a wire-supplied `NUM_FLAG` on a non-numeric
   column (or `UNSIGNED` on `MYSQL_TYPE_NULL`, whose Julia type is `String`) reached
   `unsigned(String)` (`is_unsigned` now trusts only the wire type); a DECIMAL value with an
-  embedded NUL raised `ArgumentError` from DecFP's `Cstring` conversion instead of
-  `ConversionError`. The fuzz contract: any mutated transcript must fail as a
+  embedded NUL raised `ArgumentError` from the then-`Dec64` decoder's `Cstring` conversion
+  instead of `ConversionError` (DECIMAL now decodes through DataDecimals, which rejects it
+  as a parse failure). The fuzz contract: any mutated transcript must fail as a
   `Protocol.MySQLError`, never a crash. The harness (`test/protocol/fuzz.jl`) drives the
   real packet reader/classifiers/scanners/decoders and the handshake/auth parsers over an
   in-memory transport. Its vendor and synthetic corpus must produce the declared clean or

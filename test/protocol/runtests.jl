@@ -1,6 +1,6 @@
 # Native wire-protocol tests. These need no database server (scripted loopback peer only)
 # and therefore run on every platform and CI lane.
-using Test, MySQL, SHA
+using Test, MySQL, SHA, DataDecimals
 
 const P = MySQL.Protocol
 const Reseau = P.Reseau

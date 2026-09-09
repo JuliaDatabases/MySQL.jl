@@ -55,7 +55,7 @@ end
 # big-endian value of all bytes; DECIMAL is the ASCII form), so the text decoders apply.
 decode_binary_value(::Type{String}, buf::Vector{UInt8}, pos::Int, len::Int, opts::ResultOptions) = return decode_value(String, buf, pos, len, opts)
 decode_binary_value(::Type{Vector{UInt8}}, buf::Vector{UInt8}, pos::Int, len::Int, opts::ResultOptions) = return decode_value(Vector{UInt8}, buf, pos, len, opts)
-decode_binary_value(::Type{Dec64}, buf::Vector{UInt8}, pos::Int, len::Int, opts::ResultOptions) = return decode_value(Dec64, buf, pos, len, opts)
+decode_binary_value(::Type{DecimalResult}, buf::Vector{UInt8}, pos::Int, len::Int, opts::ResultOptions) = return decode_value(DecimalResult, buf, pos, len, opts)
 decode_binary_value(::Type{Bit}, buf::Vector{UInt8}, pos::Int, len::Int, opts::ResultOptions) = return decode_value(Bit, buf, pos, len, opts)
 
 function decode_binary_value(::Type{T}, buf::Vector{UInt8}, pos::Int, len::Int, ::ResultOptions) where {T <: Base.BitInteger}
@@ -189,7 +189,7 @@ param_type(::Int64) = return (P.MYSQL_TYPE_LONGLONG, false)
 param_type(::UInt64) = return (P.MYSQL_TYPE_LONGLONG, true)
 param_type(::Float32) = return (P.MYSQL_TYPE_FLOAT, false)
 param_type(::Float64) = return (P.MYSQL_TYPE_DOUBLE, false)
-param_type(::DecFP.DecimalFloatingPoint) = return (P.MYSQL_TYPE_STRING, false)
+param_type(::DataDecimals.AbstractDecimal) = return (P.MYSQL_TYPE_STRING, false)
 param_type(::Bit) = return (P.MYSQL_TYPE_BLOB, false)
 param_type(::Vector{UInt8}) = return (P.MYSQL_TYPE_BLOB, false)
 param_type(::DateAndTime) = return (P.MYSQL_TYPE_DATETIME, false)
@@ -227,8 +227,10 @@ encode_param_value!(buf::Vector{UInt8}, x::Union{Int32, UInt32}) = return (P.wri
 encode_param_value!(buf::Vector{UInt8}, x::Union{Int64, UInt64}) = return (P.write_u64!(buf, Core.bitcast(UInt64, x)); nothing)
 encode_param_value!(buf::Vector{UInt8}, x::Float32) = return (P.write_u32!(buf, Core.bitcast(UInt32, x)); nothing)
 encode_param_value!(buf::Vector{UInt8}, x::Float64) = return (P.write_u64!(buf, Core.bitcast(UInt64, x)); nothing)
-encode_param_value!(buf::Vector{UInt8}, x::AbstractString) = return (P.write_lenenc_string!(buf, String(x)); nothing)
+encode_param_value!(buf::Vector{UInt8}, x::AbstractString) = return (P.write_lenenc_string!(buf, x); nothing)
 encode_param_value!(buf::Vector{UInt8}, x::Vector{UInt8}) = return (P.write_lenenc_bytes!(buf, x); nothing)
+# Decimals travel as their exact ASCII form (a MYSQL_TYPE_STRING parameter).
+encode_param_value!(buf::Vector{UInt8}, x::DataDecimals.AbstractDecimal) = return (P.write_lenenc_string!(buf, string(x)); nothing)
 # A BIT parameter is the big-endian binary string of its value (no leading zero bytes, at
 # least one byte), matching the big-endian BIT *decode*. (Connector/C's 1.x `bitvalue`
 # encoding was little-endian; documented as a Fix in the migration guide.)
@@ -243,7 +245,6 @@ function bit_param_bytes(x::Bit)
     return bytes
 end
 encode_param_value!(buf::Vector{UInt8}, x::Bit) = return (P.write_lenenc_bytes!(buf, bit_param_bytes(x)); nothing)
-encode_param_value!(buf::Vector{UInt8}, x::DecFP.DecimalFloatingPoint) = return (P.write_lenenc_string!(buf, string(x)); nothing)
 
 function encode_param_value!(buf::Vector{UInt8}, x::Date)
     P.write_u8!(buf, 4)
@@ -327,15 +328,5 @@ function encode_params_into!(buf::Vector{UInt8}, values, signature::Vector{UInt1
         (x === missing || x === nothing || i in skip) && continue
         encode_param_value!(buf, x)
     end
-    return nothing
-end
-
-function decode_binary_value(::Type{DataDecimals.DecimalValue{DataDecimals.Int256}},
-    buf::Vector{UInt8}, pos::Int, len::Int, opts::ResultOptions)
-    return decode_value(DataDecimals.DecimalValue{DataDecimals.Int256}, buf, pos, len, opts)
-end
-param_type(::DataDecimals.AbstractDecimal) = return (P.MYSQL_TYPE_STRING, false)
-function encode_param_value!(buf::Vector{UInt8}, x::DataDecimals.AbstractDecimal)
-    P.write_lenenc_string!(buf, string(x))
     return nothing
 end

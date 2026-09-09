@@ -797,13 +797,31 @@ end
             @test_throws P.ProtocolError P.read_command_response!(s)
             @test s.phase == P.BROKEN
         end
-        # peer closes mid-packet
+        # peer closes mid-packet: the classic 2013 "lost connection during query"
         with_peer(conn -> (server_handshake!(conn); read_command(conn); send_raw(conn, UInt8[0x10, 0x00, 0x00, 0x01, 0x00]))) do client
             s = P.Session(client)
             client_handshake!(s)
             P.ping!(s)
             err = try; P.read_command_response!(s; kind=P.CMD_SIMPLE); nothing; catch e; e; end
-            @test err isa P.ProtocolError && occursin("closed", err.msg)
+            @test err isa P.Error && err.errno == P.CR_SERVER_LOST && occursin("Lost connection", err.msg)
+            @test s.phase == P.BROKEN
+        end
+        # peer closes instead of answering: the classic 2006 "server has gone away"
+        with_peer(conn -> (server_handshake!(conn); read_command(conn))) do client
+            s = P.Session(client)
+            client_handshake!(s)
+            P.query!(s, "SELECT 1")
+            err = try; P.read_command_response!(s); nothing; catch e; e; end
+            @test err isa P.Error && err.errno == P.CR_SERVER_GONE_ERROR && err.sqlstate == "HY000"
+            @test s.phase == P.BROKEN
+            # a faulted session is not drained further (drain! only swallows real server ERRs)
+            @test_throws ErrorException P.drain_step!(s)
+            P.drain!(s)
+        end
+        # peer closes during the greeting: still a protocol-level failure
+        with_peer(conn -> send_raw(conn, UInt8[0x10, 0x00, 0x00, 0x00, 0x0a])) do client
+            s = P.Session(client)
+            @test_throws P.ProtocolError P.read_greeting!(s)
             @test s.phase == P.BROKEN
         end
     end

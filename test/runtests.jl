@@ -137,6 +137,9 @@ run_integration = docker_available() && get(ENV, "MYSQL_INTEGRATION", "1") != "0
 # Native wire-protocol tests (no database server needed)
 include("protocol/runtests.jl")
 
+# DecFP parameter/load interop via the package extension (no server needed)
+include("decfp_tests.jl")
+
 # JuliaC --trim=safe compilation of the main entrypoints (test/mysql_trim_workload.jl);
 # needs no server (scripted loopback peer). Julia 1.12+ only; skip with MYSQL_RUN_TRIM_TESTS=0.
 include("trim_compile_tests.jl")

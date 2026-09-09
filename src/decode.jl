@@ -83,13 +83,10 @@ end
 
 decode_value(::Type{Vector{UInt8}}, buf::Vector{UInt8}, pos::Int, len::Int, ::ResultOptions) = return buf[pos:(pos + len - 1)]
 
-function decode_value(::Type{Dec64}, buf::Vector{UInt8}, pos::Int, len::Int, opts::ResultOptions)
-    s = decode_value(String, buf, pos, len, opts)
-    # DecFP parses through a Cstring; an embedded NUL would raise an ArgumentError from the
-    # ccall conversion instead of a ConversionError
-    occursin('\0', s) && conversion_error(Dec64, buf, pos, len)
-    x = tryparse(Dec64, s)
-    x === nothing && conversion_error(Dec64, buf, pos, len)
+# DECIMAL (up to 65 digits) arrives as its ASCII form; the coefficient and scale are kept exactly.
+function decode_value(::Type{DecimalResult}, buf::Vector{UInt8}, pos::Int, len::Int, opts::ResultOptions)
+    x = tryparse(DecimalResult, decode_value(String, buf, pos, len, opts))
+    x === nothing && conversion_error(DecimalResult, buf, pos, len)
     return x
 end
 
@@ -214,10 +211,9 @@ function decode_value(::Type{DateTime}, buf::Vector{UInt8}, pos::Int, len::Int, 
     kind == :zero && return zero_date_value(DateTime, buf, pos, len, opts)
     kind == :partial && conversion_error(DateTime, "partial zero date \"$(String(buf[pos:(pos + len - 1)]))\" (use zero_dates=:missing)")
     y, mo, d, h, mi, s, micros = parts
-    if micros % 1000 != 0
-        dateandtime_warning()
-        conversion_error(DateTime, buf, pos, len)
-    end
+    # `DateTime` carries milliseconds: finer precision warns once and is truncated (the same
+    # policy on both protocols; 1.x failed on the text path and truncated on the binary one).
+    micros % 1000 == 0 || dateandtime_warning()
     Dates.validargs(DateTime, y, mo, d, h, mi, s, micros ÷ 1000) === nothing || conversion_error(DateTime, buf, pos, len)
     return DateTime(y, mo, d, h, mi, s, micros ÷ 1000)
 end
@@ -231,11 +227,8 @@ function decode_value(::Type{DateAndTime}, buf::Vector{UInt8}, pos::Int, len::In
     y, mo, d, h, mi, s, micros = parts
     Dates.validargs(Date, y, mo, d) === nothing || conversion_error(DateAndTime, buf, pos, len)
     (h < 24 && mi < 60 && s < 60) || conversion_error(DateAndTime, buf, pos, len)
-    # Preserve 1.x: fractional digits were treated as an unscaled microsecond count. This is
-    # numerically correct only when the server sends all six fractional digits.
-    fraction_digits = len == 19 ? 0 : len - 20
-    legacy_micros = fraction_digits == 0 ? 0 : micros ÷ (10 ^ (6 - fraction_digits))
-    return DateAndTime(Date(y, mo, d), Time(h, mi, s) + Dates.Microsecond(legacy_micros))
+    millis, micro = divrem(micros, 1000)
+    return DateAndTime(Date(y, mo, d), Time(h, mi, s, millis, micro))
 end
 
 # TIME: [-]H+:MM:SS[.ffffff], hours up to 838. Returns the signed total in microseconds.
@@ -281,14 +274,4 @@ function decode_value(::Type{Dates.Microsecond}, buf::Vector{UInt8}, pos::Int, l
     micros = parse_time_micros(buf, pos, len)
     micros === nothing && conversion_error(Dates.Microsecond, buf, pos, len)
     return Dates.Microsecond(micros)
-end
-
-# MySQL DECIMAL has up to 65 digits. Preserve its coefficient and scale exactly.
-function decode_value(::Type{DataDecimals.DecimalValue{DataDecimals.Int256}},
-    buf::Vector{UInt8}, pos::Int, len::Int, opts::ResultOptions)
-    D = DataDecimals.DecimalValue{DataDecimals.Int256}
-    s = decode_value(String, buf, pos, len, opts)
-    x = tryparse(D, s)
-    x === nothing && conversion_error(D, buf, pos, len)
-    return x
 end

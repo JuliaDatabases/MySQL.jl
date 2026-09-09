@@ -398,12 +398,14 @@ const TEXT_ROW_TUPLE = (
             DBInterface.execute(conn, "SET SESSION SQL_MODE=''")
             try; Tables.columntable(DBInterface.execute(conn, "SELECT CAST('0000-00-00' AS DATE) AS d")).d; catch e; :error; end
         end; expected=Union{Missing, Date}[Date(0)], legacy=:error),
-    Row("DATETIME with sub-millisecond precision warns and fails", :preserve,
-        conn -> try; Tables.columntable(DBInterface.execute(conn, "SELECT CAST('2021-01-02 01:02:03.456789' AS DATETIME(6)) AS dt")).dt; catch; :error; end),
+    Row("DATETIME with sub-millisecond precision warns and truncates to ms (1.x text failed)", :fix,
+        conn -> try; Tables.columntable(DBInterface.execute(conn, "SELECT CAST('2021-01-02 01:02:03.456789' AS DATETIME(6)) AS dt")).dt; catch; :error; end;
+        legacy=:error),
     Row("mysql_date_and_time=true maps DATETIME(6) to DateAndTime", :preserve,
         conn -> Tables.columntable(DBInterface.execute(conn, "SELECT CAST('2021-01-02 01:02:03.456789' AS DATETIME(6)) AS dt"; mysql_date_and_time=true)).dt),
-    Row("DateAndTime preserves the 1.x unscaled DATETIME(1) fraction", :preserve,
-        conn -> Tables.columntable(DBInterface.execute(conn, "SELECT CAST('2021-01-02 01:02:03.4' AS DATETIME(1)) AS dt"; mysql_date_and_time=true)).dt),
+    Row("DateAndTime scales a short DATETIME(1) fraction (1.x read it as an unscaled microsecond count)", :fix,
+        conn -> Tables.columntable(DBInterface.execute(conn, "SELECT CAST('2021-01-02 01:02:03.4' AS DATETIME(1)) AS dt"; mysql_date_and_time=true)).dt;
+        legacy=Union{Missing, DateAndTime}[DateAndTime(Dates.Date("2021-01-02"), Dates.Time(1, 2, 3, 0, 4))]),
     Row("transaction returns f()'s value and commits", :preserve,
         conn -> begin
             v = DBInterface.transaction(conn) do
@@ -487,7 +489,7 @@ const BINARY_ROW_TUPLE = (
         prepared_call_results;
         expected=[(ID = Int32[1, 2, 3],), (Name = Union{Missing, String}["John", "Tom", missing],), NamedTuple()],
         skip_legacy="1.6.0 does not provide the prepared multi-result contract and can call mysql_num_rows(NULL) on CALL's final OK"),
-    Row("prepared DATETIME(6) → DateTime warns and truncates to ms (1.x prepared quirk; the text path fails)", :preserve,
+    Row("prepared DATETIME(6) → DateTime warns and truncates to ms", :preserve,
         conn -> let stmt = DBInterface.prepare(conn, "SELECT CAST('2021-01-02 01:02:03.456789' AS DATETIME(6)) AS dt")
             v = try; Tables.columntable(DBInterface.execute(stmt)).dt; catch; :error; end
             DBInterface.close!(stmt)
@@ -538,12 +540,12 @@ const GOLDENS = Dict{String, Any}(
         "a\\'b\\\\c\\n",
     "zero DATETIME under SQL_MODE='' decodes to the DateTime(0) sentinel" =>
         Union{Missing, Dates.DateTime}[Dates.DateTime("0000-01-01T00:00:00")],
-    "DATETIME with sub-millisecond precision warns and fails" =>
-        :error,
+    "DATETIME with sub-millisecond precision warns and truncates to ms (1.x text failed)" =>
+        Union{Missing, Dates.DateTime}[Dates.DateTime("2021-01-02T01:02:03.456")],
     "mysql_date_and_time=true maps DATETIME(6) to DateAndTime" =>
         Union{Missing, DateAndTime}[DateAndTime(Dates.Date("2021-01-02"), Dates.Time(1, 2, 3, 456, 789))],
-    "DateAndTime preserves the 1.x unscaled DATETIME(1) fraction" =>
-        Union{Missing, DateAndTime}[DateAndTime(Dates.Date("2021-01-02"), Dates.Time(1, 2, 3, 0, 4))],
+    "DateAndTime scales a short DATETIME(1) fraction (1.x read it as an unscaled microsecond count)" =>
+        Union{Missing, DateAndTime}[DateAndTime(Dates.Date("2021-01-02"), Dates.Time(1, 2, 3, 400, 0))],
     "transaction returns f()'s value and commits" =>
         (7, 1),
     "cursor close is idempotent and a closed cursor iterates empty" =>
@@ -564,7 +566,7 @@ const GOLDENS = Dict{String, Any}(
         (i8 = Int8[-128], u8 = UInt8[0xff], i16 = Int16[-32768], u16 = UInt16[0xffff], i32 = Int32[-2147483648], u32 = UInt32[0xffffffff], i64 = Int64[-9223372036854775808], u64 = UInt64[0xffffffffffffffff], f32 = Float32[1.5f0], f64 = Float64[-2.5], d64 = Union{Missing, String}["12.345678"], d128 = Union{Missing, String}["12345678901234567890123456789.123460"], s = String["héllo"], bytes = Union{Missing, String}["00FF"], d = Union{Missing, String}["2024-02-29"], dt = Union{Missing, String}["2024-02-29 13:14:15.250000"], dat = Union{Missing, String}["2024-02-29 13:14:15.250500"], tm = Union{Missing, String}["13:14:15.250500"], m_null = Int64[1], n_null = Int64[1]),
     "executemany bulk-inserts each parameter row in a transaction" =>
         (a = Union{Missing, Int32}[1, 2, 3], b = Union{Missing, String}["x", "y", "z"]),
-    "prepared DATETIME(6) → DateTime warns and truncates to ms (1.x prepared quirk; the text path fails)" =>
+    "prepared DATETIME(6) → DateTime warns and truncates to ms" =>
         Union{Missing, Dates.DateTime}[Dates.DateTime("2021-01-02T01:02:03.456")],
     "prepared mysql_date_and_time=true maps DATETIME(6) to DateAndTime" =>
         Union{Missing, DateAndTime}[DateAndTime(Dates.Date("2021-01-02"), Dates.Time(1, 2, 3, 456, 789))],
@@ -581,10 +583,10 @@ const SURFACE_ROWS = SurfaceRow[
         (make, _, port) -> environment_surface(make, port), :ok),
     SurfaceRow(166, "option-file database fallback",
         (make, password, _) -> option_database_surface(make, password), "manifest"),
-    SurfaceRow(167, "default local transport does not fall back to TCP",
-        (make, _, _) -> transport_surface(make), (:ArgumentError, :ok)),
-    SurfaceRow(168, "strict TLS on a deferred local transport fails clearly",
-        (make, _, _) -> connection_outcome(make; host="localhost", ssl_mode=:required), :ArgumentError),
+    SurfaceRow(167, "localhost is dialed over TCP (with and without protocol=:tcp)",
+        (make, _, _) -> transport_surface(make), (:ok, :ok)),
+    SurfaceRow(168, "a unix_socket path is accepted and reserved; TCP is used",
+        (make, _, _) -> connection_outcome(make; host="localhost", unix_socket="/nonexistent/mysql.sock"), :ok),
     SurfaceRow(169, "multi-statements are disabled by default",
         (make, _, _) -> multi_statement_surface(make), :Error),
     SurfaceRow(170, "unknown connection keywords",

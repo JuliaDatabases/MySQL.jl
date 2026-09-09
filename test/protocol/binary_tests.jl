@@ -113,7 +113,8 @@ execute_null_bitmap(payload, nparams) = payload[10:(9 + ((nparams + 7) >> 3))]
         end
     end
     with_native(c -> serve_load(c, "`ta``ble`", "`co``l`")) do conn
-        @test_logs (:info, r"executing create table statement") (:info, r"executing insert statement") (:info, r"(?s)inserting row 1;.*secret-value") begin
+        # rows are logged as they are buffered; the batch statement when its batch is prepared
+        @test_logs (:info, r"executing create table statement") (:info, r"(?s)inserting row 1;.*secret-value") (:info, r"executing insert statement") begin
             @test MySQL.load([row], conn, "ta`ble"; debug=:values) == "`ta``ble`"
         end
     end
@@ -152,6 +153,50 @@ end
             auto_increment_primary_key_name="id")
     end
     @test only(seen) == "CREATE TABLE data (id INT AUTO_INCREMENT PRIMARY KEY, value VARCHAR(255) )"
+end
+
+@testset "MySQL.load batches rows into multi-row INSERTs" begin
+    # five rows, batchsize=2: one statement for the 2-row batches (executed twice), one for
+    # the 1-row tail; both are parked and closed before the COMMIT goes out
+    seen = String[]
+    closed = UInt32[]
+    executes = 0
+    rows = [(a=i, b="v$i") for i in 1:5]
+    with_native(c -> begin
+        push!(seen, expect_query(c)); send_ok(c, 1)
+        push!(seen, expect_query(c)); send_ok(c, 1; status=P.SERVER_STATUS_AUTOCOMMIT | P.SERVER_STATUS_IN_TRANS)
+        push!(seen, expect_prepare(c)); send_prepare_ok(c, 1, 93, paramdefs(4), P.ColumnDef[])
+        expect_execute(c); executes += 1; send_ok(c, 1; affected=2)
+        expect_execute(c); executes += 1; send_ok(c, 1; affected=2)
+        push!(seen, expect_prepare(c)); send_prepare_ok(c, 1, 94, paramdefs(2), P.ColumnDef[])
+        expect_execute(c); executes += 1; send_ok(c, 1; affected=1)
+        push!(closed, expect_stmt_close(c)); push!(closed, expect_stmt_close(c))
+        push!(seen, expect_query(c)); send_ok(c, 1)
+    end) do conn
+        @test_throws ArgumentError MySQL.load(rows, conn, "t"; batchsize=0)   # validated before any I/O
+        @test MySQL.load(rows, conn, "t"; batchsize=2) == "`t`"
+        @test conn.stmts_to_close === nothing
+    end
+    @test seen == ["CREATE TABLE IF NOT EXISTS `t` (`a` BIGINT , `b` VARCHAR(255) )", "START TRANSACTION",
+        "INSERT INTO `t` (`a`, `b`) VALUES (?, ?), (?, ?)", "INSERT INTO `t` (`a`, `b`) VALUES (?, ?)", "COMMIT"]
+    @test Set(closed) == Set(UInt32[93, 94]) && executes == 3
+    # rows that would push a batch past a quarter of max_allowed_packet start a new batch
+    seen = String[]
+    executes = 0
+    big = [(s=repeat("x", 600),) for _ in 1:3]
+    with_native(c -> begin
+        push!(seen, expect_query(c)); send_ok(c, 1)
+        push!(seen, expect_query(c)); send_ok(c, 1; status=P.SERVER_STATUS_AUTOCOMMIT | P.SERVER_STATUS_IN_TRANS)
+        push!(seen, expect_prepare(c)); send_prepare_ok(c, 1, 95, paramdefs(1), P.ColumnDef[])
+        for _ in 1:3
+            expect_execute(c); executes += 1; send_ok(c, 1; affected=1)
+        end
+        @test expect_stmt_close(c) == 95
+        push!(seen, expect_query(c)); send_ok(c, 1)
+    end; connect_kw=(; max_allowed_packet=4096)) do conn
+        @test MySQL.load(big, conn, "big"; batchsize=10) == "`big`"
+    end
+    @test seen[3] == "INSERT INTO `big` (`s`) VALUES (?)" && executes == 3
 end
 
 @testset "MySQL.load binding failure closes the statement before rollback" begin
@@ -320,7 +365,7 @@ end
     @test_throws P.ConversionError N.decode_binary(String, UInt8[0x61], 2, 1, o)
     @test_throws P.ConversionError N.decode_binary(String, UInt8[0x61], typemax(Int), 0, o)
     @test N.decode_binary(Vector{UInt8}, UInt8[0x00, 0xff], 1, 2, o) == UInt8[0x00, 0xff]
-    @test N.decode_binary(Dec64, Vector{UInt8}(codeunits("12.345")), 1, 6, o) == d64"12.345"
+    @test N.decode_binary(N.DecimalResult, Vector{UInt8}(codeunits("12.345")), 1, 6, o) == parse(N.DecimalResult, "12.345")
     @test N.decode_binary(MySQL.Bit, UInt8[0x01, 0x02], 1, 2, o) == MySQL.Bit(0x0102)
     @test N.decode_binary(MySQL.Bit, fill(0xff, 8), 1, 8, o) == MySQL.Bit(typemax(UInt64))
     @test_throws P.ConversionError N.decode_binary(MySQL.Bit, fill(0xff, 9), 1, 9, o)
@@ -384,9 +429,9 @@ end
 
 @testset "parameter signature and encoding" begin
     @test N.param_signature(Any[Int32(1), missing, "s", UInt64(2)]) == UInt16[0x0003, 0x0006, 0x00fe, UInt16(P.MYSQL_TYPE_LONGLONG) | 0x8000]
-    # Preserve the effective 1.x bind types after `val`: Bit becomes bytes, and DecFP
-    # becomes a String. Bool is the one deliberate M4 deviation and uses TINY.
-    @test N.param_signature(Any[MySQL.Bit(0x101), d64"12.3", Dec128("4.5"), true]) == UInt16[
+    # Preserve the effective 1.x bind types after `val`: Bit becomes bytes, and decimals
+    # become Strings. Bool is the one deliberate M4 deviation and uses TINY.
+    @test N.param_signature(Any[MySQL.Bit(0x101), DataDecimals.Decimal64{1}("12.3"), DataDecimals.Decimal128{1}("4.5"), true]) == UInt16[
         P.MYSQL_TYPE_BLOB,
         P.MYSQL_TYPE_STRING,
         P.MYSQL_TYPE_STRING,
@@ -893,7 +938,7 @@ end
         if x isa Union{Date, DateTime, MySQL.DateAndTime, Dates.Time}
             len = Int(buf[1])
             return N.decode_binary(T, buf, 2, len, o)
-        elseif x isa Union{AbstractString, Vector{UInt8}, MySQL.Bit, DecFP.DecimalFloatingPoint}
+        elseif x isa Union{AbstractString, Vector{UInt8}, MySQL.Bit, DataDecimals.AbstractDecimal}
             c = P.PacketCursor(buf); off, len = P.read_lenenc_window_len!(c, "v")
             return N.decode_binary(T, buf, off, len, o)
         else
@@ -915,18 +960,18 @@ end
     @test roundtrip(MySQL.Bit, MySQL.Bit(0x7f)) == MySQL.Bit(0x7f)
     @test roundtrip(MySQL.Bit, MySQL.Bit(0x0102)) == MySQL.Bit(0x0102)
     @test roundtrip(MySQL.Bit, MySQL.Bit(typemax(UInt64))) == MySQL.Bit(typemax(UInt64))
-    @test roundtrip(Dec64, d64"12.345") == d64"12.345"
+    @test roundtrip(N.DecimalResult, DataDecimals.Decimal64{3}("12.345")) == parse(N.DecimalResult, "12.345")
     @test roundtrip(Date, Date(2024, 2, 29)) == Date(2024, 2, 29)
     @test roundtrip(DateTime, DateTime(2024, 2, 29, 13, 14, 15, 250)) == DateTime(2024, 2, 29, 13, 14, 15, 250)
     @test roundtrip(MySQL.DateAndTime, MySQL.DateAndTime(Date(2024, 1, 2), Time(1, 2, 3, 456, 789))) == MySQL.DateAndTime(Date(2024, 1, 2), Time(1, 2, 3, 456, 789))
     @test roundtrip(Time, Time(13, 14, 15)) == Time(13, 14, 15)
     @test roundtrip(Time, Time(13, 14, 15, 250, 500)) == Time(13, 14, 15, 250, 500)
 
-    decimal = Dec128("12345678901234567890123456789.123456")
+    decimal = DataDecimals.Decimal128{6}("12345678901234567890123456789.123456")
     encoded_decimal = UInt8[]
     N.encode_param_value!(encoded_decimal, decimal)
     c = P.PacketCursor(encoded_decimal)
-    @test P.read_lenenc_string!(c, "Dec128 parameter") == string(decimal)
+    @test P.read_lenenc_string!(c, "Decimal128 parameter") == string(decimal) == "12345678901234567890123456789.123456"
     @test P.atend(c)
 end
 

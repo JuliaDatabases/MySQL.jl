@@ -3,9 +3,9 @@
 MySQL.jl 2.0 replaces the MariaDB Connector/C backend with a **native wire-protocol
 implementation**: the MySQL client/server protocol written in Julia on top of
 [Reseau](https://github.com/JuliaServices/Reseau.jl) transports (TCP and TLS). It is *not*
-"pure Julia" — OpenSSL underpins TLS and the RSA password exchange, and DecFP input support remains available — but every `libmariadb` `ccall`, its dynamic plugin loading, and its C handle
-lifetimes are gone, along with the crash classes they caused (issues #220, #236, #240,
-#208, #206).
+"pure Julia" — OpenSSL underpins TLS and the RSA password exchange — but every `libmariadb`
+`ccall`, its dynamic plugin loading, and its C handle lifetimes are gone, along with the
+crash classes they caused (issues #220, #236, #240, #208, #206).
 
 `MySQL.Connection` is now the native connection. Most code — `DBInterface.connect` /
 `execute` / `prepare` / `executemany` / `executemultiple` / `transaction`, Tables.jl
@@ -19,18 +19,22 @@ last Connector/C release.
    `MySQL.StmtError` (same field names/types plus a new `sqlstate`), or catch the root
    `MySQL.MySQLError`.
 2. **Value types**: replace `MySQL.API.Bit` with `MySQL.Bit`. `MySQL.DateAndTime` and
-   timestamp behavior stay unchanged. DECIMAL results now use
-   `DataDecimals.DecimalValue{DataDecimals.Int256}` to preserve all 65 digits
-   and the stored scale. Fixed-scale DataDecimals values can be bound directly.
-   `MySQL.load` infers `DECIMAL(P,S)` from a fixed-scale type; for `DecimalValue`,
-   specify the destination type with `coltypes`.
+   timestamp behavior stay unchanged. DECIMAL results decode to `MySQL.DecimalResult`
+   (`DataDecimals.DecimalValue{DataDecimals.Int256}`), which preserves all 65 digits and
+   the stored scale, instead of `DecFP.Dec64`. DataDecimals values bind directly as
+   parameters, and `MySQL.load` infers `DECIMAL(P,S)` from a fixed-scale type (for a
+   `DecimalValue` column, specify the destination type with `coltypes`). DecFP is no longer
+   a dependency: with `using DecFP`, a package extension keeps `Dec64`/`Dec128` values
+   bindable and loadable (`NUMERIC(16, 6)`/`NUMERIC(35, 6)`) as in 1.x.
 3. **Multi-statements**: pass `multi_statements=true` if you relied on 1.x accepting
    `"stmt1; stmt2"` by default (an `if/elseif` bug made 1.x enable it silently).
 4. **Enum-valued options**: pass Symbols — `ssl_mode=:required` (was
    `MySQL.API.SSL_MODE_REQUIRED`), `protocol=:tcp` (was `MySQL.API.MYSQL_PROTOCOL_TCP`).
-5. **Local servers**: the Unix-socket / named-pipe transport is not implemented yet, and an
-   empty host or `"localhost"` on Unix (`"."` on Windows) selects it, as in 1.x. Connecting
-   to a local server over TCP therefore needs `protocol=:tcp` (or `host="127.0.0.1"`).
+5. **Local servers**: every host, `"localhost"` and `""` included, is dialed over TCP (the
+   Connector/C rule that turned `localhost` into a Unix socket is gone). The socket and
+   named-pipe transports are not implemented yet: `protocol=:socket`/`:pipe` or
+   `named_pipe=true` raise a clear error, and a `unix_socket` path is accepted but unused.
+   Accounts scoped to `'user'@'localhost'` match loopback TCP connections too.
 6. **Unknown, removed, or unavailable keywords now error** with an explanation instead of
    being silently swallowed — fix the call sites the errors point at.
 
@@ -95,11 +99,13 @@ Deliberate, documented changes relative to Connector/C 1.6.0:
 | `ssl_ca` + `ssl_capath` together | both applied | `ArgumentError` (Reseau has a single trust-root source); each alone works |
 | `connect_timeout` | C socket timeout with platform-dependent meaning | one monotonic establishment deadline spanning dial, greeting, TLS, the whole auth exchange, and the charset bootstrap |
 | `read_timeout` / `write_timeout` | `MYSQL_OPT_READ_TIMEOUT`/`MYSQL_OPT_WRITE_TIMEOUT`: per socket operation | same meaning: re-armed before every transport read/write, so a slowly-consumed streaming result never expires while the server keeps answering; expiry closes the connection |
-| `reconnect` | C auto-reconnect | narrow: only before a send on a transport known closed; never mid-command, never in a transaction, never after a protocol fault; a reconnect that itself fails leaves the connection retryable, not closed |
+| `reconnect` | C auto-reconnect | the same contract, made explicit: the command that hits a dead connection reports it (`MySQL.Error` 2006/2013), and the *next* command reconnects — only before a send, never mid-command, never inside a transaction; a reconnect that itself fails leaves the connection retryable, not closed |
+| Connection loss | `API.Error` 2006 "server has gone away" / 2013 "lost connection during query" | the same `MySQL.Error` codes (2006 when the server dropped the connection instead of answering, e.g. an idle connection reaped by `wait_timeout`; 2013 mid-response); the connection is closed until `reconnect` or a new connect |
 | `executemultiple` | first-OK result yielded nothing; later results mutated one cursor (stale `lookup`, aliased metadata) | every result (DML/OK included) is a **distinct cursor** with immutable metadata and its own OK snapshot; advancing past an unconsumed streaming result drains and invalidates it |
 | `lastrowid` | read live connection/statement state (sticky) | snapshot from the cursor's own OK/terminator (a SELECT cursor reports 0) |
 | DML cursor `length` | `-1` surprises | DML cursors keep the `-1` sentinel; **buffered SELECT cursors report the row count** |
-| Sub-millisecond DATETIME | text errored; binary truncated silently | text warns then raises `ConversionError`; binary (prepared) warns then truncates to milliseconds — each preserves its 1.x protocol behavior (both mirror `MYSQL_TIME`) |
+| Sub-millisecond DATETIME → `DateTime` | text errored; binary (prepared) truncated silently | both protocols warn once and truncate to milliseconds; use `mysql_date_and_time=true` for lossless `DateAndTime` values |
+| `DateAndTime` from DATETIME(1..5) (text) | the fractional digits were read as an unscaled microsecond count (`.4` → 4 µs) | scaled by position (`.4` → 400 ms), as the binary protocol always did |
 | BIT decoding | text: first byte only; binary: little-endian | big-endian value of all bytes (≤ 8) in both protocols |
 | BIT parameters | little-endian `bitvalue` encoding | big-endian binary string (matches the decode) |
 | `Bool` parameters | fell through to the `MYSQL_TYPE_STRING` fallback (untested latent bug) | bound as `MYSQL_TYPE_TINY` |
@@ -111,7 +117,7 @@ Deliberate, documented changes relative to Connector/C 1.6.0:
 | Transactions | lock not held | the connection lock is held across `DBInterface.transaction(f, conn)`: other tasks block until commit/rollback |
 | Cleanup/finalizers | abandoned C handles depended on Connector/C lifetimes | explicit `close!` or a do-block remains the contract; a dropped connection only enqueues its transport for the timer reaper, and a dropped statement only parks its preallocated id for the next command. Finalizers do no protocol or transport I/O; explicit close, timer reaping, and parked statement close are exactly-once |
 | Concurrent use | not thread-safe | connection operations are lock-serialized. One task must consume a streaming cursor; a command from another task drains the pending response and invalidates that cursor instead of overwriting its Julia-owned row bytes. A transaction owns the connection lock until commit or rollback |
-| `MySQL.load` | embedded backticks in identifiers were not escaped; `debug=true` logged row values | doubles embedded identifier backticks; `debug=true` logs statements only; `debug=:values` logs row values |
+| `MySQL.load` | one round trip per row; embedded backticks in identifiers were not escaped; `debug=true` logged row values | rows are inserted in multi-row batches (`batchsize=1000`, bounded by the packet size and the 65535-marker limit); doubles embedded identifier backticks; `debug=true` logs statements only; `debug=:values` logs row values |
 | Value lifetime (#206) | `TextRow` values could alias freed C memory | rows decode from Julia-owned, cursor-owned buffers |
 
 ## Deprecated (accepted with a warning; no effect)
@@ -146,7 +152,8 @@ read), `max_buffered_bytes`, `max_response_bytes`, `max_columns`, `max_result_se
 `max_metadata_bytes`, `max_preauth_packet`, `max_auth_rounds`, `max_auth_bytes`,
 `max_session_state_bytes`, `attrs` (connection attributes sent in the handshake),
 `debug` (per-packet protocol debug logging), `MySQL.ping`, `MySQL.escape_identifier`,
-`MySQL.send_long_data!`, `MySQL.reset_statement!`.
+`MySQL.send_long_data!`, `MySQL.reset_statement!`, `MySQL.DecimalResult`, and the
+`batchsize` keyword of `MySQL.load`.
 
 ## Option value types (2.0)
 
@@ -198,12 +205,10 @@ either `:verify_identity` or `insecure_cleartext_auth=true`.
 Documented gaps, planned for later 2.x releases — attempting to use them raises a clear
 error rather than misbehaving:
 
-- **Unix sockets and Windows named pipes** (transport is TCP/TLS). As in 1.x, an empty
-  host or `"localhost"` on Unix (and `"."` on Windows) selects the local transport;
-  because that transport is deferred, connect raises a clear error instead of silently
-  using TCP — pass `protocol=:tcp` to force a TCP connection to a local server. A
-  `unix_socket` value supplied for a remote TCP host remains unused, as it was with
-  Connector/C; it does not select socket transport by itself.
+- **Unix sockets and Windows named pipes** (transport is TCP/TLS). Every host, including
+  `"localhost"`, is dialed over TCP; asking for the local transport explicitly
+  (`protocol=:socket`/`:pipe`, `named_pipe=true`) raises a clear error, and a `unix_socket`
+  path (keyword or option file) is accepted but unused until the transport exists.
 - **Compression** (`compress=true` is an `ArgumentError`), server cursors /
   `COM_STMT_FETCH`, query attributes, `COM_STMT_BULK_EXECUTE`
 - MariaDB `client_ed25519` / PARSEC / `dialog` (PAM) authentication (`UnsupportedAuthError`)

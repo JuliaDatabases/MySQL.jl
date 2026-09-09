@@ -78,11 +78,11 @@ function DBInterface.connect(::Type{Connection}, host::AbstractString, user::Abs
     )
 end
 
+# Status queries (`show`, `isopen`) read the handle field without the connection lock: a
+# transaction or a long command on another task must not block a REPL display.
 function Base.show(io::IO, conn::Connection)
-    lock(conn.lock) do
-        opts = conn.handle === nothing ? "disconnected" : "host=\"$(conn.host)\", user=\"$(conn.user)\", port=$(conn.port), db=\"$(conn.db)\""
-        print(io, "MySQL.Connection($opts)")
-    end
+    opts = conn.handle === nothing ? "disconnected" : "host=\"$(conn.host)\", user=\"$(conn.user)\", port=$(conn.port), db=\"$(conn.db)\""
+    print(io, "MySQL.Connection($opts)")
     return nothing
 end
 
@@ -102,9 +102,8 @@ A local check (the transport is open and the session is not closed or broken); i
 detect a peer that went away silently — use `MySQL.ping`.
 """
 function Base.isopen(conn::Connection)
-    return lock(conn.lock) do
-        conn.handle !== nothing && isopen(conn.handle)
-    end::Bool
+    h = conn.handle
+    return h !== nothing && isopen(h)
 end
 
 """
@@ -154,15 +153,16 @@ function drain_pending!(conn::Connection)
     return nothing
 end
 
-# Reconnect only before a send, only on a transport known to be closed, never from a
-# protocol fault and never inside a transaction. Statements and cursors of the old session
-# are invalidated by the generation bump. A failed reconnect keeps the (closed) handle so
-# the next command reports the connection error again and retries, instead of reporting a
-# closed connection.
+# Reconnect only before a send, once the session is known dead (closed, or broken by a
+# fault such as the server dropping an idle connection), and never inside a transaction:
+# the command that hit the failure reports it, the next one reconnects — the libmysqlclient
+# contract. Statements and cursors of the old session are invalidated by the generation
+# bump. A failed reconnect keeps the (dead) handle so the next command reports the
+# connection error again and retries, instead of reporting a closed connection.
 function ensure_live!(conn::Connection)
     h = conn.handle
     isopen(h.session) && return nothing
-    can_reconnect = conn.options.reconnect && conn.transaction_owner === nothing && h.session.phase != P.BROKEN && !P.in_transaction(h.session.status)
+    can_reconnect = conn.options.reconnect && conn.transaction_owner === nothing && !P.in_transaction(h.session.status)
     can_reconnect || throw(P.Error(P.CR_SERVER_GONE_ERROR, "MySQL server has gone away", "HY000"))
     close!(h)
     conn.handle = connect(conn.options)

@@ -181,12 +181,14 @@ function bootstrap_charset!(s::P.Session, ok::P.OKPacket)
     return true
 end
 
+# Returns the server's answer to the empty upload: an OK, or the ERR it replied with (a
+# fault while reading — the session is then terminal — propagates).
 function resync_local_infile!(s::P.Session)
     P.send_local_infile!(s, nothing)
     try
         return P.read_command_response!(s)
     catch server_err
-        server_err isa P.ServerError || rethrow()
+        (server_err isa P.ServerError && !P.is_terminal(s.phase)) || rethrow()
         return server_err
     end
 end

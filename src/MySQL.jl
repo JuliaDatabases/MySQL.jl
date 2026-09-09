@@ -1,7 +1,7 @@
 module MySQL
 
 import DataDecimals
-using Dates, DBInterface, Tables, Parsers, DecFP, Reseau
+using Dates, DBInterface, Tables, Parsers, Reseau
 import Random
 
 export DBInterface, DateAndTime

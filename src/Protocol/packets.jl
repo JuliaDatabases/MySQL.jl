@@ -41,7 +41,9 @@ command phase (`readbuf[readpos:readlim]` holds bytes already taken from the tra
 the per-operation timeouts (`read_timeout_ns`/`write_timeout_ns`, 0 = none): every transport
 read or write re-arms its deadline `timeout` from now, like Connector/C's
 `MYSQL_OPT_READ_TIMEOUT`/`MYSQL_OPT_WRITE_TIMEOUT`, so a slowly consumed streaming result
-never expires while the server keeps answering.
+never expires while the server keeps answering. `received_bytes` counts the raw bytes taken
+from the transport since the last `newcommand!` (partial packets included), so a peer EOF
+can be told apart as "no answer at all" (2006) or "answer cut short" (2013).
 """
 mutable struct PacketIO
     seq::UInt8
@@ -49,6 +51,7 @@ mutable struct PacketIO
     header::Vector{UInt8}
     outbuf::Vector{UInt8}
     response_bytes::UInt64
+    received_bytes::Int
     readbuf::Vector{UInt8}
     readpos::Int
     readlim::Int
@@ -56,7 +59,7 @@ mutable struct PacketIO
     write_timeout_ns::Int64
 end
 
-PacketIO() = return PacketIO(0x00, UInt8[], zeros(UInt8, PACKET_HEADER_LEN), UInt8[], 0x0000000000000000, Vector{UInt8}(undef, READBUF_SIZE), 1, 0, 0, 0)
+PacketIO() = return PacketIO(0x00, UInt8[], zeros(UInt8, PACKET_HEADER_LEN), UInt8[], 0x0000000000000000, 0, Vector{UInt8}(undef, READBUF_SIZE), 1, 0, 0, 0)
 
 buffered_bytes_available(io::PacketIO) = return io.readlim - io.readpos + 1
 
@@ -85,10 +88,14 @@ function fill_readbuf!(io::PacketIO, transport::Transport, needed::Int)
     while total < needed
         arm_read_deadline!(io, transport)
         got = transport_read_some!(transport, io.readbuf, total + 1, length(io.readbuf) - total)
-        got == 0 && throw(EOFError())
+        if got == 0
+            io.received_bytes += total   # a cut-short response still counts as started
+            throw(EOFError())
+        end
         total += got
     end
     io.readlim = total
+    io.received_bytes += total
     return nothing
 end
 
@@ -105,6 +112,7 @@ function packet_read!(io::PacketIO, transport::Transport, dest::Vector{UInt8}, o
     if !buffered || !supports_buffered_reads(transport)
         arm_read_deadline!(io, transport)
         transport_read!(transport, dest, offset, n)
+        io.received_bytes += n
         return nothing
     end
     avail = buffered_bytes_available(io)
@@ -119,6 +127,7 @@ function packet_read!(io::PacketIO, transport::Transport, dest::Vector{UInt8}, o
     if n >= length(io.readbuf) >> 1
         arm_read_deadline!(io, transport)
         transport_read!(transport, dest, offset, n)
+        io.received_bytes += n
         return nothing
     end
     fill_readbuf!(io, transport, n)
@@ -130,6 +139,7 @@ end
 function newcommand!(io::PacketIO)
     io.seq = 0x00
     io.response_bytes = 0
+    io.received_bytes = 0
     return nothing
 end
 

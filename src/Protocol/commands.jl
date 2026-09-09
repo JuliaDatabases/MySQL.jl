@@ -355,15 +355,16 @@ end
     drain!(s)
 
 Reads and discards everything the server still has to say about the current command (rows,
-terminators, further result sets) until the session is READY. Server errors are swallowed;
-protocol faults propagate.
+terminators, further result sets) until the session is READY. Server ERR packets are
+swallowed; faults (which leave the session BROKEN, even when reported as the classic
+client `Error` codes) propagate.
 """
 function drain!(s::Session)
     while !is_terminal(s.phase) && s.phase != READY
         try
             drain_step!(s)
         catch err
-            err isa ServerError || rethrow()
+            (err isa ServerError && !is_terminal(s.phase)) || rethrow()
         end
     end
     return nothing

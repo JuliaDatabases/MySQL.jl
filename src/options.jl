@@ -66,8 +66,8 @@ const DEPRECATED_KEYWORDS = Dict{Symbol, String}(
 )
 
 const DEFERRED_KEYWORDS = Dict{Symbol, String}(
-    :unix_socket => "Unix-domain sockets are not supported yet (TCP only)",
-    :named_pipe => "named pipes are not supported yet (TCP only)",
+    :unix_socket => "Unix-domain sockets are not supported yet (TCP only; `localhost` is dialed over TCP)",
+    :named_pipe => "named pipes are not supported yet (TCP only; `localhost` is dialed over TCP)",
 )
 
 const KNOWN_KEYWORDS = Set{Symbol}([
@@ -183,19 +183,19 @@ end
     return p
 end
 
-function select_transport(host::String, protocol; named_pipe::Bool=false)
+# Transport selection. Every host, `localhost` included, is dialed over TCP (or TLS on TCP):
+# the local transports are chosen only by an explicit request — `protocol=:socket`/`:pipe`
+# or `named_pipe=true` — and, being deferred, that request is an error that says so. (A
+# `unix_socket` path is accepted and reserved for the socket transport; Connector/C also
+# ignored it for TCP hosts.)
+function select_transport(protocol; named_pipe::Bool=false)
     kind = protocol_kind(protocol)
-    kind == :tcp && return :tcp
-    kind != :default && return kind
-    named_pipe && return :pipe
-    if Sys.iswindows()
-        return host == "." ? :pipe : :tcp
-    end
-    return host == "" || host == "localhost" ? :socket : :tcp
+    kind == :default || return kind
+    return named_pipe ? :pipe : :tcp
 end
 
-function require_tcp_transport(host::String, protocol; named_pipe::Bool=false)
-    transport = select_transport(host, protocol; named_pipe=named_pipe)
+function require_tcp_transport(protocol; named_pipe::Bool=false)
+    transport = select_transport(protocol; named_pipe=named_pipe)
     transport == :tcp && return nothing
     transport == :socket && deferred_keyword(:unix_socket)
     transport == :pipe && deferred_keyword(:named_pipe)
@@ -482,9 +482,7 @@ function ConnectOptions(host::AbstractString, user::AbstractString, password::Un
     pick(k) = return haskey(kwd, k) && kwd[k] !== nothing ? kwd[k] : get(file, k, nothing)
     host_s = String(host)
     host_s == "" && haskey(file, :host) && (host_s = file[:host])
-    protocol = protocol_kind(pick(:protocol))
-    named_pipe = option_bool_or(get(kwd, :named_pipe, nothing), "named_pipe", false)
-    require_tcp_transport(host_s, protocol; named_pipe=named_pipe)
+    require_tcp_transport(protocol_kind(pick(:protocol)); named_pipe=option_bool_or(get(kwd, :named_pipe, nothing), "named_pipe", false))
     isempty(host_s) && (host_s = "localhost")
     user_s = String(user)
     user_s == "" && haskey(file, :user) && (user_s = file[:user])

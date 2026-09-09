@@ -12,7 +12,6 @@ struct Bit
 end
 Base.string(b::Bit) = String(lstrip(bitstring(b.bits), '0'))
 Base.show(io::IO, b::Bit) = print(io, "MySQL.Bit(\"$(string(b))\")")
-Base.unsigned(::Type{Bit}) = Bit
 
 """
     MySQL.DateAndTime
@@ -39,10 +38,18 @@ Dates.microsecond(x::DateAndTime) = Dates.microsecond(Time(x))
 import Base.==
 ==(a::DateAndTime, b::DateAndTime) = ==(a.date, b.date) && ==(a.time, b.time)
 
-@noinline dateandtime_warning() = @warn """a datetime value from a column has a microsecond precision > 3,
-which cannot be represented by a `Dates.DateTime`; pass `mysql_date_and_time=true` to
-`DBInterface.execute` or `DBInterface.prepare` to get `MySQL.DateAndTime` values that
-preserve the full microsecond precision""" maxlog=1
+@noinline dateandtime_warning() = @warn """a DATETIME/TIMESTAMP value carries sub-millisecond precision, which a
+`Dates.DateTime` cannot represent; it was truncated to milliseconds. Pass
+`mysql_date_and_time=true` to `DBInterface.execute` or `DBInterface.prepare` to get
+`MySQL.DateAndTime` values that preserve the full microsecond precision""" maxlog=1
+
+"""
+    MySQL.DecimalResult
+
+The type DECIMAL/NUMERIC columns decode to: `DataDecimals.DecimalValue{DataDecimals.Int256}`,
+which holds all 65 digits and the column's scale exactly (1.x decoded to `DecFP.Dec64`).
+"""
+const DecimalResult = DataDecimals.DecimalValue{DataDecimals.Int256}
 
 # The wire type maps to a host type. DECIMAL uses an exact 256-bit coefficient.
 function juliatype(field_type)
@@ -60,7 +67,7 @@ function juliatype(field_type)
     elseif t == P.MYSQL_TYPE_FLOAT
         return Cfloat
     elseif t == P.MYSQL_TYPE_DECIMAL || t == P.MYSQL_TYPE_NEWDECIMAL
-        return DataDecimals.DecimalValue{DataDecimals.Int256}
+        return DecimalResult
     elseif t == P.MYSQL_TYPE_DOUBLE
         return Cdouble
     elseif t == P.MYSQL_TYPE_TINY_BLOB || t == P.MYSQL_TYPE_MEDIUM_BLOB ||
@@ -101,7 +108,7 @@ with exact DataDecimals values at 2.0 (unsigned integer widening, binary BLOB vs
 """
 function juliatype(field_type, notnullable, isunsigned, isbinary, date_and_time)
     T = juliatype(field_type)
-    T2 = isunsigned && !(T === Cfloat || T === Cdouble || T === Dec64) ? unsigned_type(T) : T
+    T2 = isunsigned ? unsigned_type(T) : T
     T3 = !isbinary && T2 === Vector{UInt8} ? String : T2
     T4 = date_and_time && T3 === DateTime ? DateAndTime : T3
     return notnullable ? T4 : Union{Missing, T4}
