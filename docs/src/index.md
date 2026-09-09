@@ -219,12 +219,10 @@ behaves like `String` (equality, hashing, ordering, iteration, `String(s)` to co
 `DataBytes <: AbstractVector{UInt8}` likewise (`Vector{UInt8}(b)` copies). A long value
 keeps the buffer it references alive — the whole result of a buffered cursor, or the arena
 a streaming cursor read its row into. Arenas have a 64 KiB target; a row can grow an arena
-past that size. `String(s)`/`Vector{UInt8}(b)` detaches a value. For columns returned by
-`Tables.columntable` or DataFrames, use
-`map(x -> ismissing(x) ? missing : String(x), column)` to copy every nonmissing string;
-replace `String` with `Vector{UInt8}` for a BLOB column.
-`DataStrings.materialize` applies only to DataStrings' own `StringVector`/`BytesVector`
-containers. Requesting `String`/`Vector{UInt8}` explicitly through the
+past that size. `String(s)`/`Vector{UInt8}(b)` detaches a value, and
+`DataStrings.materialize(column)` detaches a whole column (as returned by
+`Tables.columntable` or a DataFrame), copying every value out to a `String` or
+`Vector{UInt8}` and keeping `missing`s. Requesting `String`/`Vector{UInt8}` explicitly through the
 typed accessor (`Tables.getcolumn(row, String, i, name)`) still returns a copy.
 `BINARY`/`VARBINARY` keep the 1.x string mapping; their bytes need not be valid UTF-8.
 
