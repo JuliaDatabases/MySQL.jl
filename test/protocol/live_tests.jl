@@ -86,9 +86,10 @@ function run_live_lane(ref::String; soak::Bool=false, manifest::Bool=false)
                 exec!(root, "CREATE USER IF NOT EXISTS 'sha'@'%' IDENTIFIED WITH sha256_password BY 'shapw'")
                 exec!(root, "CREATE USER IF NOT EXISTS 'expired'@'%' IDENTIFIED WITH caching_sha2_password BY 'expiredpw' PASSWORD EXPIRE")
                 exec!(root, "ALTER USER 'expired'@'%' PASSWORD EXPIRE")
-                # without the flag the server refuses the login outright
+                # without the flag the server refuses the login outright (1862
+                # ER_MUST_CHANGE_PASSWORD_LOGIN under disconnect_on_expired_password=ON)
                 err = try; N.connect("127.0.0.1", "expired", "expiredpw"; port=port, ssl_mode=:required, connect_timeout=10); nothing; catch e; e; end
-                @test err isa P.Error && err.errno == P.ER_MUST_CHANGE_PASSWORD
+                @test err isa P.Error && err.errno in (1862, P.ER_MUST_CHANGE_PASSWORD)
                 # with it the connection is in sandbox mode: only a password reset is allowed,
                 # after which the session is a normal one
                 h = N.connect("127.0.0.1", "expired", "expiredpw"; port=port, ssl_mode=:required, can_handle_expired_passwords=true, connect_timeout=10)

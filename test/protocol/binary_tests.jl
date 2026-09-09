@@ -155,6 +155,19 @@ end
     @test only(seen) == "CREATE TABLE data (id INT AUTO_INCREMENT PRIMARY KEY, value VARCHAR(255) )"
 end
 
+@testset "prepare responses longer than 255 packets (sequence counter wrap)" begin
+    # 300 parameter definitions wrap the sequence id to 0 while the phase is still CMD_SENT;
+    # only the *first* packet of a fresh response may be the server's sequence-0 farewell
+    with_native(c -> begin
+        expect_prepare(c); send_prepare_ok(c, 1, 77, paramdefs(300), P.ColumnDef[])
+        expect_execute(c); send_ok(c, 1; affected=1)
+    end) do conn
+        stmt = DBInterface.prepare(conn, "INSERT INTO t VALUES (" * join(Iterators.repeated("?", 300), ", ") * ")")
+        @test stmt.nparams == 300
+        @test DBInterface.execute(stmt, fill(1, 300)).rows_affected == 1
+    end
+end
+
 @testset "MySQL.load batches rows into multi-row INSERTs" begin
     # five rows, batchsize=2: one statement for the 2-row batches (executed twice), one for
     # the 1-row tail; each old shape is closed before its replacement is prepared
