@@ -306,6 +306,16 @@ source are never read.
   query attributes / bulk execute / compression; OUT-param round trips beyond CALL result
   sets; the 60–90-day preview soak (calendar). See `docs/src/migration.md`.
 
+## Round-1 live finding still open
+
+On MySQL 8.4, `SET SESSION wait_timeout=1`, a two-second idle wait, then `SELECT 1`
+reproduces `ProtocolError("sequence id mismatch: expected 1, got 0")`. The captured
+packet has header `91 00 00 00` and payload prefix `ff bf 0f 23 48 59 30 30 30`:
+ERR 4031 / HY000, sent before the next command, when the server closes an idle connection.
+This is not the peer-EOF path covered by the 2006/2013 mapping. With `reconnect=true`, the
+following command reconnects successfully. Add a narrowly validated terminal-disconnect
+exception at the start of a command response; other sequence mismatches must still fault.
+
 ## Third-party consultations
 
 - **2026-09-08, Codex round-1 review — policy exception.** Question: does
