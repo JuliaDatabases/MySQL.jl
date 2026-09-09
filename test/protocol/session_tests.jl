@@ -852,6 +852,17 @@ end
     end
 
     @testset "FaultTransport interruption points" begin
+        # The send faults while phase is still READY; no server response was received.
+        for cut in (0, 2, 4)
+            ft = P.FaultTransport(IOBuffer(); fail_write_at=cut)
+            s = P.Session(ft)
+            s.phase = P.READY
+            s.authenticated = true
+            err = try; P.query!(s, "SELECT 1"); nothing; catch e; e; end
+            @test err isa P.Error && err.errno == P.CR_SERVER_GONE_ERROR
+            @test s.phase == P.BROKEN
+            @test ft.write_bytes == cut
+        end
         for (fail_at, label) in ((0, "before the first byte"), (2, "inside the header"), (4, "after the header"), (10, "mid-payload"))
             with_peer(conn -> (send_packet(conn, 0, greeting()); try; read_packet(conn); catch; end)) do client
                 ft = P.FaultTransport(client; fail_write_at=fail_at, write_error=InterruptException())

@@ -92,12 +92,6 @@ end
 
 # ---- uniform transport operations ----
 
-@inline function transport_read!(t::Transport, buf::Vector{UInt8}, offset::Int, n::Int)
-    n == 0 && return nothing
-    GC.@preserve buf unsafe_read(t, pointer(buf, offset), UInt(n))
-    return nothing
-end
-
 # Whether the packet reader may batch reads through its read buffer (Reseau's `unsafe_read`
 # costs one `recv` per call, so per-packet exact reads dominate large scans; §8.9). The
 # test-only `FaultTransport` stays byte-exact so fault byte offsets remain deterministic.
