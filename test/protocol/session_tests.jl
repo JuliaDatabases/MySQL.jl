@@ -1,6 +1,6 @@
 # Scenario tests: a Protocol.Session talks to the scripted FakePeer over loopback TCP.
-# Handlers run on another task, so they never call @test; they record what they saw and the
-# client side asserts after the exchange.
+# Handlers run on another task; tests can also record what they saw and assert on the
+# client side after the exchange.
 using .FakePeer: send_packet, send_raw, read_packet, read_command, read_chunk, read_exact, with_peer
 
 const CAPS_NO_DEPRECATE_EOF = P.DEFAULT_CLIENT_CAPABILITIES & ~P.CLIENT_DEPRECATE_EOF
@@ -327,7 +327,7 @@ end
             P.read_greeting!(s)
             P.send_ssl_request!(s)
             @test s.phase == P.TLS_UPGRADE && P.has_capability(s, P.CLIENT_SSL)
-            P.replace_transport!(s, client)   # stands in for the TLS.Conn (M2)
+            P.replace_transport!(s, client)   # stands in for the TLS.Conn in this framing test
             @test s.phase == P.HANDSHAKE
             P.send_handshake_response!(s, "root", zeros(UInt8, 32), "caching_sha2_password")
             @test P.read_auth_packet!(s, 1, 0).kind == :ok

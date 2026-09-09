@@ -1,4 +1,4 @@
-# Finalizer-free transport reclamation.
+# Deferred transport reclamation with no finalizer I/O.
 #
 # A handle's finalizer must not do transport I/O (`close(::Reseau.TLS.Conn)` sends
 # close_notify and takes locks). Instead the finalizer obtains a package-global queue

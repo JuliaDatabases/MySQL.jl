@@ -1,5 +1,5 @@
-# The public value types and the 1.x result-type mapping (`MySQL.Bit`, `MySQL.DateAndTime`,
-# `MySQL.juliatype`), kept byte-for-byte compatible with the Connector/C backend's mapping.
+# Public value types and result-type mapping (`MySQL.Bit`, `MySQL.DateAndTime`,
+# `MySQL.juliatype`); DECIMAL uses exact DataDecimals values in 2.0.
 
 """
     MySQL.Bit

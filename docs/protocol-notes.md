@@ -22,8 +22,8 @@ per-row performance/allocation gates (allocations per row ≤ String/Vector colu
 3. Oracle "MySQL Source Code Documentation" protocol pages
    (`https://dev.mysql.com/doc/dev/mysql-server/latest/page_protocol_*.html`, labelled
    MySQL 26.7.0) and the MariaDB KB protocol pages (CC BY-SA / GFDL).
-4. RFCs for the cryptography used in later milestones (RFC 8017 OAEP, RFC 8032 Ed25519,
-   RFC 8018 PBKDF2); TLS is delegated to Reseau.
+4. RFC 8017 for RSA-OAEP; TLS is delegated to Reseau. Ed25519 and PARSEC authentication
+   are deferred.
 
 Permissively licensed implementations (PyMySQL, MySqlConnector, mysql2, go-mysql, Vitess;
 `go-sql-driver/mysql` for behavior only) may be consulted to resolve an ambiguity; each
@@ -53,7 +53,7 @@ source are never read.
 | `0xFE` | — | AuthSwitchRequest (len > 1) / old switch (len 1, unsupported) | invalid | terminator iff first chunk < 0xFFFFFF, else row | same |
 | `0xFF` | pre-capability ERR | ERR (session closed) | ERR (session stays usable) | ERR (result ends, session usable) | same |
 
-## Framing and phase machine (M1): decisions worth remembering
+## Framing and phase machine
 
 - One shared sequence counter per session (`PacketIO.seq`); the client continues the
   server's counter during the connection phase and across STARTTLS, and resets it to 0 for
@@ -63,16 +63,18 @@ source are never read.
   reassembled packet keeps `nchunks`/`first_chunk_len` so the terminator rule can use the
   physical framing.
 - Any I/O or parse failure moves the session to `BROKEN` and closes the transport
-  (`fault!`); a server ERR never does (phase returns to `READY` or, during auth, `CLOSED`).
+  (`fault!`). Ordinary command ERRs return to `READY`; authentication ERRs close the
+  session. An unsolicited sequence-zero ERR at the start of a command response is
+  terminal (see idle disconnect announcements below).
 - `TRANSITIONS` in `phases.jl` is the contract; the test suite asserts every row is
   exercised (`uncovered_transitions()` must be empty).
 - No `Sockets` dependency: Unix sockets and named pipes are deferred; the transport union is
   `Reseau.TCP.Conn | Reseau.TLS.Conn | FaultTransport` (the last is test-only fault injection).
-- Authentication plugin exchanges, TLS orchestration, and value decoding are later
-  milestones; M1 only frames them (`read_auth_packet!`, `send_ssl_request!`,
-  `replace_transport!`, raw `PacketView` rows).
+- The session layer frames authentication and STARTTLS (`read_auth_packet!`,
+  `send_ssl_request!`, `replace_transport!`) and returns raw `PacketView` rows.
+  `auth.jl` and `tls.jl` implement the exchanges; the driver decodes row values.
 
-## TLS and authentication (M2): decisions worth remembering
+## TLS and authentication
 
 - **Transport security is a per-plugin, per-step rule** (`auth.jl` header table): the
   caching_sha2/sha256 full-auth cleartext step needs TLS (any mode); over plain TCP the RSA
@@ -96,8 +98,9 @@ source are never read.
   re-armed before every transport read and write, including `init_command`.
 - **utf8mb4 bootstrap contract**: `SET NAMES utf8mb4` is skipped only when the connect OK's
   session tracking reports `character_set_client/connection/results = utf8mb4`; otherwise it
-  is sent and must return OK. MariaDB 11 and MySQL 8.4 report the variables only when they
-  change, so the statement is usually sent once.
+  is sent and must return one final OK. With `can_handle_expired_passwords=true`, sandbox
+  error 1820 is accepted so the caller can reset the password. MariaDB 11 and MySQL 8.4
+  report the variables only when they change, so the statement is usually sent once.
 - **Finalizers never do I/O**: a dropped `MySQL.Handle` enqueues its `ReapEntry` (CAS
   `:live → :pending`); the reaper (0.5 s timer, `reap_now!`, `atexit`) removes entries under
   `REAPER_LOCK`, then closes each transport after releasing the lock. `close!` retires the
@@ -128,9 +131,10 @@ source are never read.
   file order and the last value wins (checked with MySQL 8.4 `my_print_defaults`). Missing
   explicit files fail; missing default locations are skipped.
 
-## Text protocol and cursors (M3): decisions worth remembering
+## Text protocol and cursors
 
-- **Type mapping is the 1.x mapping by construction**: the column-decode layer (`src/decode.jl`) calls
+- **Type mapping retains 1.x types except for DECIMAL and explicit decoding policies**:
+  the column-decode layer (`src/decode.jl`) calls
   `MySQL.juliatype` with the wire type and flags. One wire fact feeds it: the server never
   sends `NUM_FLAG` (libmysqlclient synthesizes it client-side for `IS_NUM` types), so
   `Protocol.is_unsigned` derives numeric-ness from the wire type — otherwise
@@ -155,7 +159,7 @@ source are never read.
 - **Snapshots**: `rows_affected` is the preserved `Int64` bitcast; `lastrowid` comes from the
   cursor's own OK/terminator (a SELECT cursor reports 0 under DEPRECATE_EOF, where 1.x
   reported the connection's sticky value); status and warning counts are retained for both
-  OK and legacy EOF terminators; a DML cursor keeps the 1.x `length == -1` sentinel.
+  OK and legacy EOF terminators; a DML cursor has `length == 0` and iterates empty.
 - **Decoding policies** (`ResultOptions`): BIT is the big-endian value of all bytes (1.x read
   the first byte only); TIME decodes to `Dates.Time` for `0 ≤ t < 24h` and raises
   `ConversionError` otherwise, `time_type=Dates.Microsecond` is lossless; `zero_dates`
@@ -173,11 +177,12 @@ source are never read.
 - **Reconnect** is narrow: only before a send, only once the session is known dead
   (closed, or `BROKEN` by a fault — the command that hit the fault reports it as the
   classic `Error` 2006/2013), never inside a transaction; it bumps the generation so
-  older cursors invalidate. `transaction` holds the connection lock across `f`.
+  older streaming cursors invalidate; buffered cursors retain their bytes.
+  `transaction` holds the connection lock across `f`.
 - Handle-level facts from the 8.4 lane: the terminator OK of a SELECT carries
   `last_insert_id = 0`; mariadb:11.4 and mysql:8.4 both serve the fixture identically.
 
-## Prepared statements (M4): decisions worth remembering
+## Prepared statements
 
 - **Prepared statements are the binary protocol**: `COM_STMT_PREPARE` → `PrepareOK` (the
   reserved byte is followed by `warning_count` only when the packet is ≥ 12 bytes; the
@@ -226,7 +231,7 @@ source are never read.
   path now does the same; 1.x failed there); BIT is the big-endian value of all bytes (Fix), TIME honours sign and days and
   applies the `Dates.Time` range policy (Fix), and zero/partial dates follow the unified
   `zero_dates` policy (Fix; 1.x binary mapped zero components to 1970).
-- **Statement reaping is finalizer-free**: `DBInterface.close!(stmt)` and a dropped
+- **Statement finalizers only park ids**: `DBInterface.close!(stmt)` and a dropped
   statement's finalizer both park a preallocated `(statement_id, generation)` entry under a
   per-connection `ReentrantLock`; the finalizer path only uses `trylock` and re-registers the
   finalizer when the lock is busy. `begin_command!` sends `COM_STMT_CLOSE` for the parked ids
@@ -234,7 +239,7 @@ source are never read.
   result is drained first). One-shot `execute(conn, sql, params)` prepares, executes and
   parks the statement the same way.
 
-## Hardening and performance (M5): decisions worth remembering
+## Hardening and performance
 
 - **Fuzzing found three real parser escapes** (all fixed with regression tests): `lowercase`
   on the untrusted server version string threw `InvalidCharError` on invalid UTF-8
@@ -308,7 +313,7 @@ source are never read.
   query attributes / bulk execute / compression; OUT-param round trips beyond CALL result
   sets; the 60–90-day preview soak (calendar). See `docs/src/migration.md`.
 
-## Idle disconnect announcements (round-1 live finding, resolved)
+## Idle disconnect announcements
 
 On MySQL 8.4, `SET SESSION wait_timeout=1`, a two-second idle wait, then `SELECT 1`
 produced `ProtocolError("sequence id mismatch: expected 1, got 0")`. The captured
@@ -316,9 +321,10 @@ packet has header `91 00 00 00` and payload prefix `ff bf 0f 23 48 59 30 30 30`:
 ERR 4031 / HY000 (`ER_CLIENT_INTERACTION_TIMEOUT`, MySQL 8.0.24+), sent *before* the
 client's next command, when the server closes an idle connection — so it arrives as the
 first packet of the next command's response, numbered 0 where 1 is expected. The packet
-reader accepts exactly that shape (`stale_err`: first packet of a fresh command response,
-sequence 0, ERR header) and the session reports it as a terminal `Error(4031)` (BROKEN,
-transport closed), so `reconnect=true` recovers on the following command. Every other
+reader accepts a valid ERR in that position (`stale_err`: first packet of a fresh command
+response, sequence 0, ERR header), regardless of its error code. The session reports the
+server's error (4031 for this idle timeout) as terminal (BROKEN, transport closed), so
+`reconnect=true` recovers on the following command. Every other
 sequence mismatch still faults. MariaDB closes idle connections silently (peer EOF → 2006).
 
 ## Third-party consultations

@@ -140,8 +140,7 @@ function decode_binary_value(::Type{DateTime}, buf::Vector{UInt8}, pos::Int, len
     kind == :partial && conversion_error(DateTime, "partial zero date in a binary DATETIME value (use zero_dates=:missing)")
     y, mo, d, h, mi, s, micros = parts
     micros < 1_000_000 || conversion_error(DateTime, buf, pos, len)
-    # Preserve 1.x prepared-statement behaviour: sub-millisecond precision warns and then
-    # truncates to milliseconds (the text path warns and fails; both mirror `MYSQL_TIME`).
+    # Both text and binary paths warn once and truncate sub-millisecond precision.
     micros % 1000 == 0 || dateandtime_warning()
     Dates.validargs(DateTime, y, mo, d, h, mi, s, micros ÷ 1000) === nothing || conversion_error(DateTime, buf, pos, len)
     return DateTime(y, mo, d, h, mi, s, micros ÷ 1000)

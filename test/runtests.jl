@@ -152,9 +152,9 @@ else
 end
 
 # §8.9 performance/allocation gates on a dedicated server. The timing report is off by
-# default on CI (shared-runner wall clock is noisy and slow). The `perf` CI job (and any
-# local run) opts back in with MYSQL_PERF_GATES=1; the correctness/limit/allocation gates
-# always run when Docker is available.
+# default on CI (shared-runner wall clock is noisy and slow). MYSQL_PERF_GATES=1 enables
+# both timing and correctness/limit/allocation gates when Docker is available. Local runs
+# enable both by default; MYSQL_PERF_GATES=0 disables both.
 perf_plan = performance_gate_plan()
 if perf_plan.correctness
     include("perf/perf_gates.jl")

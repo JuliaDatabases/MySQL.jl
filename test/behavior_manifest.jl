@@ -427,7 +427,7 @@ const TEXT_ROW_TUPLE = (
 )
 const TEXT_ROWS = collect(Row, TEXT_ROW_TUPLE)
 
-# M4: the same scenarios over the binary protocol (prepared statements). `run` uses
+# The same scenarios over the binary protocol (prepared statements). `run` uses
 # `DBInterface.prepare`/`execute(stmt, params)`/`executemany`, which both backends provide.
 const BINARY_ROW_TUPLE = (
     Row("prepared SELECT schema mirrors the text mapping", :fix,

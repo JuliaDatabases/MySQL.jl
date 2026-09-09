@@ -444,7 +444,7 @@ end
 @testset "parameter signature and encoding" begin
     @test N.param_signature(Any[Int32(1), missing, "s", UInt64(2)]) == UInt16[0x0003, 0x0006, 0x00fe, UInt16(P.MYSQL_TYPE_LONGLONG) | 0x8000]
     # Preserve the effective 1.x bind types after `val`: Bit becomes bytes, and decimals
-    # become Strings. Bool is the one deliberate M4 deviation and uses TINY.
+    # become Strings. Bool deliberately differs from 1.x and uses TINY.
     @test N.param_signature(Any[MySQL.Bit(0x101), DataDecimals.Decimal64{1}("12.3"), DataDecimals.Decimal128{1}("4.5"), true]) == UInt16[
         P.MYSQL_TYPE_BLOB,
         P.MYSQL_TYPE_STRING,

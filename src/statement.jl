@@ -1,8 +1,8 @@
 # Prepared statements: COM_STMT_PREPARE with the parameter/column definitions, parameter
 # binding and the `(type, unsigned)` signature that drives `new_params_bind_flag`,
 # COM_STMT_EXECUTE returning a binary-protocol cursor, the single `ER_NEED_REPREPARE` (1615)
-# retry, lazy re-prepare after a reconnect, retained long-data chunks, and finalizer-free
-# statement reaping.
+# retry, lazy re-prepare after a reconnect, retained long-data chunks, and statement reaping
+# with no finalizer I/O.
 
 struct LongDataChunk
     parameter_number::UInt16

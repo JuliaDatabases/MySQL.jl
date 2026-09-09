@@ -361,7 +361,7 @@ end
     end
 end
 
-@testset "reaper: exactly-once, finalizer-free reclamation" begin
+@testset "reaper: exactly-once reclamation without finalizer I/O" begin
     N.reap_now!()
     @test N.pending_reaps() == 0
     multi_accept_server() do port

@@ -1,6 +1,6 @@
-# Text-protocol value decoding: a column's wire type selects the Julia type exactly as the
-# Connector/C backend does (`MySQL.juliatype`), and each value is parsed from its window in
-# the row buffer. Policies that deliberately differ from 1.x are marked.
+# Text-protocol value decoding: `MySQL.juliatype` selects the Julia type, and each value
+# is parsed from its window in the row buffer. Changes from 1.x, including exact DECIMAL
+# values, are documented in docs/src/migration.md.
 
 """
     ResultOptions(; date_and_time=false, zero_dates=:sentinel, time_type=Dates.Time)
@@ -31,8 +31,8 @@ field_type_enum(def::P.ColumnDef) = return UInt32(def.type)
 """
     juliatype(def::Protocol.ColumnDef, opts::ResultOptions) -> Type
 
-The column's Julia type: the 1.x mapping (`MySQL.juliatype`) applied to the wire type and
-flags, then the 2.0 decoding policies: `time_type`, and `zero_dates=:missing` widening every date
+The column's Julia type: `MySQL.juliatype` applied to the wire type and flags, then
+the decoding policies: `time_type`, and `zero_dates=:missing` widening every date
 column to `Union{Missing, T}` regardless of `NOT NULL`.
 """
 function juliatype(def::P.ColumnDef, opts::ResultOptions)

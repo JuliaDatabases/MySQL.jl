@@ -17,8 +17,8 @@ end
 A MySQL connection. Obtain one with
 `DBInterface.connect(MySQL.Connection, host, user, password; kw...)`; see
 `MySQL.ConnectOptions` for the accepted keywords (removed 1.x ones explain why they fail).
-Operations are serialized by the connection lock; a streaming cursor and a transaction are
-owned by the task that created them.
+Operations are serialized by the connection lock. The first task to consume a streaming
+cursor owns it; a transaction is owned by the task that starts it.
 """
 mutable struct Connection <: DBInterface.Connection
     handle::Union{Nothing, Handle}

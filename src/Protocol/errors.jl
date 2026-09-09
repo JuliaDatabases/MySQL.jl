@@ -3,8 +3,8 @@
 
 Root of the native backend's exception hierarchy.
 
-- `ServerError` (`Error`, `StmtError`): an ERR packet sent by the server
-- `ProtocolError`: the byte stream violated the protocol (or a limit); the connection is closed
+- `ServerError` (`Error`, `StmtError`): a server ERR or a client connection-loss error
+- `ProtocolError`: invalid protocol state, bytes, or a resource limit; wire faults close the connection
 - `AuthError` / `UnsupportedAuthError`: authentication policy or plugin problems
 - `TimeoutError`: a deadline expired
 - `ConversionError`: a wire value cannot be represented by the requested Julia type
@@ -18,7 +18,7 @@ abstract type ServerError <: MySQLError end
 """
     Error(errno, msg, sqlstate="")
 
-Server ERR packet raised by connection-level operations. `errno::Cuint` and `msg` keep the
+Server ERR or client connection-loss error. `errno::Cuint` and `msg` keep the
 field names and types of the Connector/C-backed `MySQL.API.Error`; `sqlstate` is new.
 """
 struct Error <: ServerError
