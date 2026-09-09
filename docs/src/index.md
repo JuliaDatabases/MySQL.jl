@@ -18,7 +18,7 @@ Connect through the [DBInterface.jl](https://github.com/JuliaDatabases/DBInterfa
 which the rest of this page uses:
 
 ```julia
-using MySQL, DBInterface
+using MySQL, DBInterface, Dates
 
 conn = DBInterface.connect(MySQL.Connection, "localhost", "user", "password"; db="mydb")
 ```

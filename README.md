@@ -24,7 +24,7 @@ client library. 1.x used the MariaDB Connector/C library; see the
 ## Usage
 
 ```julia
-using MySQL, DBInterface, Tables
+using MySQL, DBInterface, Tables, Dates
 
 conn = DBInterface.connect(MySQL.Connection, "localhost", "user", "password"; db="mydb", port=3306)
 
@@ -33,7 +33,8 @@ cursor = DBInterface.execute(conn, "SELECT id, name FROM users WHERE active = 1"
 for row in cursor
     println(row.id, " ", row.name)   # a row is valid only while it is the cursor's current row
 end
-df = DataFrame(DBInterface.execute(conn, "SELECT * FROM users"))   # or Tables.columntable, CSV.write, …
+table = Tables.columntable(DBInterface.execute(conn, "SELECT * FROM users"))
+# With DataFrames or CSV loaded, DataFrame(cursor) and CSV.write("out.csv", cursor) also work.
 
 # prepared statements (binary protocol) with bound parameters
 stmt = DBInterface.prepare(conn, "INSERT INTO users (name, joined) VALUES (?, ?)")
@@ -51,7 +52,7 @@ end
 for row in DBInterface.execute(conn, "SELECT * FROM big_table"; mysql_store_result=false)   # stream rows
     # ...
 end
-MySQL.load(df, conn, "users_copy")   # CREATE TABLE from the schema, then batched INSERTs
+MySQL.load(table, conn, "users_copy")   # CREATE TABLE from the schema, then batched INSERTs
 
 DBInterface.close!(conn)
 ```
