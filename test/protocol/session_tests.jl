@@ -852,6 +852,27 @@ end
         # MySQL 8.0.24+ announces an idle disconnect with ERR 4031 numbered 0, sent before the
         # client's next command: reported as that error, and the session is dead
         farewell = vcat(UInt8[0xFF, 0xBF, 0x0F, UInt8('#')], codeunits("HY000"), codeunits("The client was disconnected by the server because of inactivity."))
+        # Sequence-zero ERR is terminal regardless of its code. It is never a normal
+        # command error, and a truncated ERR must still fail parsing and close the session.
+        generic_err = vcat(UInt8[0xff, 0x15, 0x04, UInt8('#')], codeunits("HY000"), codeunits("server closing"))
+        for payload in (generic_err, UInt8[0xff])
+            s = P.Session(P.FaultTransport(IOBuffer(framed(0x00, payload))); capabilities=P.DEFAULT_CLIENT_CAPABILITIES)
+            s.authenticated = true
+            s.phase = P.CMD_SENT
+            s.io.seq = 0x01
+            err = try; P.read_command_response!(s); nothing; catch e; e; end
+            @test err isa (length(payload) == 1 ? P.ProtocolError : P.Error)
+            @test s.phase == P.BROKEN && !isopen(s)
+        end
+        # CMD_SENT can persist through metadata or recur for later result sets. Even
+        # when the counter wraps to 1, an ERR numbered 0 is no longer a stale farewell.
+        s = P.Session(P.FaultTransport(IOBuffer(framed(0x00, farewell))))
+        s.authenticated = true
+        s.phase = P.CMD_SENT
+        s.io.seq = 0x01
+        s.io.response_bytes = 1000
+        @test_throws P.ProtocolError P.read_command_response!(s)
+        @test s.phase == P.BROKEN
         with_peer(conn -> (server_handshake!(conn); send_packet(conn, 0, farewell); read_command(conn))) do client
             s = P.Session(client)
             client_handshake!(s)

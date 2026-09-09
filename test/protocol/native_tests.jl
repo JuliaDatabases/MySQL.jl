@@ -147,7 +147,7 @@ end
         @test N.ConnectOptions("", ""; db="explicit", option_file=path).db == "explicit"
         @test o.tls.ca_file == "/etc/ca.pem" && o.tls.mode == P.SSL_VERIFY_CA
         @test o.tls.min_version == Reseau.TLS.TLS1_3_VERSION == o.tls.max_version
-        # explicit keywords beat the file; a requested group overrides [client]
+        # Explicit keywords beat the file; selected groups are read in file order.
         @test N.ConnectOptions("h", "u"; option_file=path, port=1).port == 1
         @test N.ConnectOptions("h", "u"; option_file=path, option_group="extra").port == 3308
         @test N.ConnectOptions("h", "u"; option_file=path, ssl_mode=:disabled).tls.mode == P.SSL_DISABLED
@@ -179,11 +179,23 @@ end
         @test parsed[:password] == "sëcret"
         reversed = joinpath(dir, "reversed.cnf")
         write(reversed, "[extra]\nport=3308\n[client]\nport=3307\n")
-        @test N.ConnectOptions("h", "u"; option_file=reversed, option_group="extra").port == 3308
+        @test N.ConnectOptions("h", "u"; option_file=reversed, option_group="extra").port == 3307
+        write(reversed, "[CLIENT] # defaults\nport=3307\n[ExTrA] # overrides\nport=3308\n[client]\nuser=last\n")
+        @test N.ConnectOptions("h", "u"; option_file=reversed, option_group="EXTRA").port == 3308
+        @test N.read_option_file(reversed; group="extra")[:user] == "last"
+        @test N.parse_option_value(raw"x\#comment") == "x\\"
+        @test N.parse_option_value(raw"\"x\#quoted\"") == "x\\#quoted"
+        @test N.ConnectOptions("", "", ""; option_file=path).password == ""
+        withenv("MYSQL_TCP_PORT" => "3399") do
+            @test N.ConnectOptions("", ""; option_file=path, read_env=true).port == 3307
+            @test N.ConnectOptions("", ""; option_file=path, read_env=true, port=0).port == 3306
+        end
         inc = joinpath(dir, "inc.cnf")
         write(inc, "!include /etc/other.cnf\n")
         @test_throws ArgumentError N.ConnectOptions("h", "u"; option_file=inc)
         write(inc, "?includedir /etc/mysql/conf.d\n")
+        @test_throws ArgumentError N.ConnectOptions("h", "u"; option_file=inc)
+        write(inc, "[mysqld]\n!includedir /etc/mysql/conf.d\n")
         @test_throws ArgumentError N.ConnectOptions("h", "u"; option_file=inc)
         unavailable = joinpath(dir, "unavailable.cnf")
         for option in ("compress", "ssl-cipher=AES256", "ssl-crl=/etc/mysql/crl.pem",
@@ -194,6 +206,10 @@ end
         end
         write(unavailable, "[client]\ncompress\n")
         @test N.ConnectOptions("h", "u"; option_file=unavailable, compress=false).host == "h"
+        for value in ("0", "off", "FALSE")
+            write(unavailable, "[client]\ncompress=$value\n")
+            @test N.ConnectOptions("h", "u"; option_file=unavailable).host == "h"
+        end
         bad = joinpath(dir, "bad.cnf")
         write(bad, "[client\nhost=x\n")
         @test_throws ArgumentError N.ConnectOptions("h", "u"; option_file=bad)
@@ -206,8 +222,8 @@ end
         write(socket_path, "[client]\nhost=localhost\nsocket=/tmp/mysql-option.sock\n")
         @test N.ConnectOptions("", "u"; option_file=socket_path).host == "localhost"
         @test N.ConnectOptions("", "u"; option_file=socket_path, protocol=:tcp).host == "localhost"
-        # missing file is skipped; .mylogin.cnf is skipped with a warning
-        @test N.ConnectOptions("h", "u"; option_file=joinpath(dir, "missing.cnf")).host == "h"
+        # A missing explicitly requested file is an error; default locations may be absent.
+        @test_throws ArgumentError N.ConnectOptions("h", "u"; option_file=joinpath(dir, "missing.cnf"))
         login = joinpath(dir, ".mylogin.cnf")
         write(login, "binary")
         @test_logs (:warn, r"mylogin") N.ConnectOptions("h", "u"; option_file=login)

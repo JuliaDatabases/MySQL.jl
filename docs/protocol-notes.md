@@ -124,7 +124,9 @@ source are never read.
 - Option files: `[client]` plus `option_group`, `!include`/`!includedir`/`?includedir` rejected (explicit
   error), world-writable files skipped with a warning, `.mylogin.cnf` skipped with a warning
   (obfuscated format; out of scope); `read_env=true` reads `MYSQL_TCP_PORT` only
-  (`MYSQL_PWD` is deliberately ignored). Keywords beat files; a named group beats `[client]`.
+  (`MYSQL_PWD` is deliberately ignored). Keywords beat files; selected groups are read in
+  file order and the last value wins (checked with MySQL 8.4 `my_print_defaults`). Missing
+  explicit files fail; missing default locations are skipped.
 
 ## Text protocol and cursors (M3): decisions worth remembering
 

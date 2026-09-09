@@ -3,6 +3,42 @@ function run_user_workflow(conn)
     @testset "DBInterface and Tables user workflow" begin
         DBInterface.execute(conn, "CREATE DATABASE IF NOT EXISTS workflow_review")
         DBInterface.execute(conn, "USE workflow_review")
+        # #236: exercise the old 33-parameter crash and the native sequence wrap.
+        for n in (33, 260)
+            stmt = DBInterface.prepare(conn, "SELECT " * join(fill("?", n), ","))
+            try
+                @test Tuple(first(DBInterface.execute(stmt, fill(UInt64(7), n)))) == Tuple(fill(UInt64(7), n))
+            finally
+                DBInterface.close!(stmt)
+            end
+        end
+        stmt = DBInterface.prepare(conn, "SELECT ?, ?")
+        try
+            for params in ((7, "test"), (id=7, uname="test"), Any[7, "test"],
+                    first(Tables.rows((id=[7], uname=["test"]))), Tables.Row((id=7, uname="test")))
+                # NamedTuple and Tables rows bind by field order. #208 also needs
+                # nonnumeric strings to remain strings on MariaDB 11.
+                @test Tuple(first(DBInterface.execute(stmt, params))) == (7, "test")
+            end
+        finally
+            DBInterface.close!(stmt)
+        end
+        # A fresh statement per type: MySQL can retain inferred parameter types.
+        for param in (17, "test", missing, nothing, Date(2026, 1, 1), DateTime(2026, 1, 1), Time(1, 2, 3))
+            @test isequal(first(DBInterface.execute(conn, "SELECT ?", param))[1], param === nothing ? missing : param)
+        end
+        # #206: a buffered row owns its bytes across later commands.
+        retained = first(DBInterface.execute(conn, "SELECT 'Street 1' AS description"))
+        DBInterface.execute(conn, "SELECT 'Roni' AS name")
+        @test retained.description == "Street 1"
+        # #209: the INSERT column list must follow the source names.
+        DBInterface.execute(conn, "DROP TABLE IF EXISTS named_load")
+        MySQL.load((x=[1], y=[2]), conn, "named_load")
+        MySQL.load((y=[3], x=[4]), conn, "named_load")
+        @test Tables.columntable(DBInterface.execute(conn, "SELECT * FROM named_load ORDER BY x")) == (x=[1, 4], y=[2, 3])
+        @test_throws MySQL.StmtError MySQL.load((foo=[5], bar=[6]), conn, "named_load")
+        DBInterface.executemany(conn, "INSERT INTO named_load (x, y) VALUES (?, ?)", (x=[7, 9], y=[8, 10]))
+        @test Tables.columntable(DBInterface.execute(conn, "SELECT * FROM named_load WHERE x > 4 ORDER BY x")) == (x=[7, 9], y=[8, 10])
         DBInterface.execute(conn, "DROP TABLE IF EXISTS items")
         DBInterface.execute(conn, "CREATE TABLE items (id BIGINT PRIMARY KEY, label VARCHAR(100), amount DECIMAL(30,6), stamp DATETIME(6), data BLOB)")
         stmt = DBInterface.prepare(conn, "INSERT INTO items VALUES (?, ?, ?, ?, ?)")

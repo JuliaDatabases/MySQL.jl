@@ -109,8 +109,8 @@ end
 """
     DBInterface.close!(conn)
 
-Sends COM_QUIT (best effort) and closes the transport. Idempotent; every cursor of the
-connection becomes invalid.
+Sends COM_QUIT (best effort) and closes the transport. Idempotent; unfinished streaming
+cursors become invalid. Buffered cursors retain their own bytes and remain readable.
 """
 function DBInterface.close!(conn::Connection)
     lock(conn.lock) do

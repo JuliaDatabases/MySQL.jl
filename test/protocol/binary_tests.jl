@@ -498,6 +498,20 @@ end
     @test N.decode(MySQL.Bit, bitbuf, off, len, N.ResultOptions()) == bit
 end
 
+@testset "prepare metadata sequence wraps without becoming a stale ERR" begin
+    with_native(c -> begin
+        expect_prepare(c)
+        send_prepare_ok(c, 1, 7, paramdefs(260), paramdefs(260))
+        expect_execute(c)
+        send_ok(c, 1)
+    end) do conn
+        stmt = DBInterface.prepare(conn, "SELECT " * join(fill("?", 260), ","))
+        @test stmt.nparams == 260 && length(stmt.columns) == 260
+        @test isempty(collect(DBInterface.execute(stmt, fill(1, 260))))
+        DBInterface.close!(stmt)
+    end
+end
+
 @testset "prepare then execute: binary result set round trip" begin
     cols = [coldef("i"; type=P.MYSQL_TYPE_LONG, flags=NOT_NULL), coldef("s"; type=P.MYSQL_TYPE_VAR_STRING)]
     with_native(c -> begin

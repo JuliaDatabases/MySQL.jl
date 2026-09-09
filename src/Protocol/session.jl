@@ -131,15 +131,15 @@ function readpacket!(s::Session; packet_limit::Int=max_payload(s), dest::Vector{
     try
         # buffered reads only after authentication: the connection phase stays byte-exact
         # so STARTTLS never has bytes stranded in the reader
-        # The first packet of a fresh command's response (nothing of it read yet; later
-        # packets of a long response may legitimately wrap the sequence counter to 0).
-        fresh = s.phase == CMD_SENT && s.io.response_bytes == 0
-        p = readpacket!(s.io, s.transport, min(packet_limit, max_payload(s)); max_response=s.authenticated ? s.limits.max_response_bytes : nothing, dest=dest, buffered=s.authenticated, stale_err=fresh)
+        # CMD_SENT also covers prepare metadata and later result headers. Sequence ids
+        # wrap every 256 packets, so phase/sequence alone cannot identify response start.
+        stale_err = s.phase == CMD_SENT && s.io.response_bytes == 0 && s.io.seq == 0x01
+        p = readpacket!(s.io, s.transport, min(packet_limit, max_payload(s)); max_response=s.authenticated ? s.limits.max_response_bytes : nothing, dest=dest, buffered=s.authenticated, stale_err=stale_err)
         s.debug && @debug "MySQL.Protocol read" phase=s.phase length=payload_length(p) header=first_byte(p) seq=p.seq chunks=p.nchunks
         # An ERR numbered 0 in place of a command response is the server's farewell before it
         # closes an idle connection (MySQL 8.0.24+: 4031 ER_CLIENT_INTERACTION_TIMEOUT): the
         # session is dead, and the error is the reason.
-        (fresh && p.seq == 0x00) && throw(Error(parse_err(p, s.capabilities)))
+        (stale_err && p.seq == 0x00) && throw(Error(parse_err(p, s.capabilities)))
         return p
     catch err
         throw(fault!(s, err))

@@ -294,7 +294,10 @@ normalize_params(p::Union{Number, AbstractString, Missing, Nothing, Dates.TimeTy
     DBInterface.execute(stmt::MySQL.Statement, params=(); mysql_store_result=true, mysql_date_and_time=false) -> BinaryCursor
 
 Executes the prepared statement with `params` bound as the `?` markers and returns a
-binary-protocol cursor. `mysql_store_result=false` streams rows (the connection is busy until
+binary-protocol cursor. A tuple, named tuple, vector, or `Tables.AbstractRow` supplies values
+in iteration order; names do not select SQL parameters. A bare scalar binds one parameter.
+Wrap a binary byte vector as `(bytes,)` to bind it as one value. Named SQL markers such as
+`:name` are not supported. `mysql_store_result=false` streams rows (the connection is busy until
 the cursor is exhausted or closed). `mysql_date_and_time` applies only to statements whose
 column metadata is determined at execute time (the prepare-time keyword wins otherwise).
 """
