@@ -362,9 +362,9 @@ ct225 = (
 )
 MySQL.load(ct225, conn, "test225"; coltypes=Dict(:data => "LONGBLOB"), debug=true)
 col_info = DBInterface.execute(conn, "SHOW COLUMNS FROM test225 WHERE Field = 'data'") |> columntable
-# Type column may be returned as Vector{UInt8} or String depending on MySQL version
+# the Type column is a text (DataString) or binary (DataBytes) value depending on the server
 col_type = col_info.Type[1]
-col_type_str = col_type isa Vector{UInt8} ? String(col_type) : col_type
+col_type_str = String(col_type)
 @test lowercase(col_type_str) == "longblob"
 # Also verify data roundtrips correctly
 ct225_roundtrip = DBInterface.execute(conn, "SELECT * FROM test225") |> columntable
@@ -471,7 +471,7 @@ stmt = DBInterface.prepare(conn, "INSERT INTO text_field (id, t) VALUES (?, ?);"
 DBInterface.execute(stmt, [-1, "hey there sailor"])
 res = DBInterface.execute(conn, "select id, t from text_field") |> columntable
 @test length(res) == 2
-@test res[2][1] === "hey there sailor"
+@test res[2][1] == "hey there sailor"   # a DataString, equal to (not identical with) the literal
 
 
 DBInterface.execute(conn, "DROP TABLE if exists blob_field")
