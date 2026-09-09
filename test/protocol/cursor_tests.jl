@@ -473,6 +473,30 @@ end
     end
 end
 
+@testset "explicit streaming views retain a numeric row buffer" begin
+    cols = [coldef("x"; type=P.MYSQL_TYPE_LONGLONG, flags=NOT_NULL)]
+    values = ["123456789012345678", "223456789012345678", "323456789012345678", "423456789012345678"]
+    for T in (DataString, DataBytes)
+        with_native(c -> begin
+            expect_query(c); send_resultset(c, 1, cols, [text_row(x) for x in values])
+            expect_query(c); send_ok(c, 1)
+        end) do conn
+            cur = DBInterface.execute(conn, "select"; mysql_store_result=false)
+            @test !cur.retain_rows
+            row, state = iterate(cur)
+            value = Tables.getcolumn(row, T, 1, :x)
+            expected = T === DataString ? values[1] : codeunits(values[1])
+            @test value == expected
+            @test cur.retain_rows
+            row, state = iterate(cur, state)
+            row, state = iterate(cur, state)
+            @test value == expected
+            DBInterface.execute(conn, "after") # drains the fourth row through the spare buffer
+            @test value == expected
+        end
+    end
+end
+
 @testset "cursor close is local and idempotent" begin
     cols = [coldef("x"; type=P.MYSQL_TYPE_LONG, flags=NOT_NULL)]
     with_native(c -> begin

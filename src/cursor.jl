@@ -120,7 +120,19 @@ function Tables.getcolumn(r::Row, ::Type{T}, i::Int, nm::Symbol) where {T}
     c = getcursor(r)
     getepoch(r) == (@atomic c.epoch) || wrongrow(getrownumber(r))
     check_active(c)
+    retain_view_buffer!(c, T)
     return decode_column(c, T, i)
+end
+
+retain_view_buffer!(::Cursor, ::Type) = return nothing
+function retain_view_buffer!(c::Cursor{B, false}, ::Type{T}) where {B, T}
+    # Typed access can request a view even when the schema has only numeric columns.
+    # Keep the current row and append subsequent rows before exposing such a value.
+    if !c.retain_rows && is_view_type(T)
+        c.retain_rows = true
+        c.arena_pos = c.scratch.stop + 1
+    end
+    return nothing
 end
 
 Tables.getcolumn(r::Row, i::Int) = return Tables.getcolumn(r, getcursor(r).types[i], i, getcursor(r).names[i])
