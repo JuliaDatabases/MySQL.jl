@@ -313,14 +313,25 @@ end
         expect_query(c); send_ok(c, 1; affected=3, insert_id=41)
         expect_query(c); send_ok(c, 1; affected=0xFFFF_FFFF_FFFF_FFFF, insert_id=0)
         expect_query(c); send_resultset(c, 1, [coldef("x"; type=P.MYSQL_TYPE_LONG)], [text_row("1")]; terminator=ok_payload(; header=0xFE, insert_id=41))
+        expect_query(c); send_resultset(c, 1, [coldef("x"; type=P.MYSQL_TYPE_LONG)], [text_row("1")])
     end) do conn
         cur = DBInterface.execute(conn, "insert")
         @test cur.rows_affected == 3 && DBInterface.lastrowid(cur) == 41 && length(cur) == -1 && isempty(Tables.columntable(cur))
         @test Tables.schema(cur) == Tables.Schema(Symbol[], Type[])
+        @test sprint(show, cur) == "MySQL.TextCursor(rows_affected=3)"
         cur = DBInterface.execute(conn, "update")
         @test cur.rows_affected == -1                                          # preserved Int64 bitcast of UInt64
         cur = DBInterface.execute(conn, "select")
         @test DBInterface.lastrowid(cur) == 41                                  # from this cursor's own terminator OK
+        @test sprint(show, cur) == "MySQL.TextCursor(1 rows × 1 columns)"
+        cur = DBInterface.execute(conn, "select"; mysql_store_result=false)
+        @test sprint(show, cur) == "MySQL.TextCursor(streaming, 1 columns)"
+        DBInterface.close!(cur)
+        @test sprint(show, cur) == "MySQL.TextCursor(streaming, 1 columns, closed)"
+        # server facts from the greeting (the fake peer announces connection id 7, 8.4.3)
+        @test MySQL.connection_id(conn) == 7
+        @test MySQL.server_version(conn) == v"8.4.3"
+        @test MySQL.server_kind(conn) == :mysql
     end
 end
 

@@ -60,6 +60,10 @@ end
     @test_throws ArgumentError N.ConnectOptions("h", "u"; max_local_infile_bytes=0)
     @test !N.ConnectOptions("h", "u"; reconnect=nothing).reconnect
     @test N.ConnectOptions("h", "u"; reconnect=true).reconnect
+    # printing options never reveals the password
+    @test sprint(show, N.ConnectOptions("h", "u", "s3cret"; db="app")) == "MySQL.ConnectOptions(host=\"h\", port=3306, user=\"u\", password=\"…\", db=\"app\", ssl_mode=SSL_PREFERRED)"
+    @test !occursin("s3cret", sprint(show, N.ConnectOptions("h", "u", "s3cret")))
+    @test occursin("password=nothing", sprint(show, N.ConnectOptions("h", "u")))
     @test N.ConnectOptions("h", "u"; max_allowed_packet=nothing).limits.max_packet == P.DEFAULT_MAX_PACKET
     @test N.ConnectOptions("h", "u"; max_allowed_packet=1024 * 1024).limits.max_packet == 1024 * 1024
     @test N.ConnectOptions("h", "u"; max_response_bytes=nothing).limits.max_response_bytes === nothing

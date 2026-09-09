@@ -34,5 +34,6 @@ include("connection.jl")
 include("cursor.jl")
 include("statement.jl")
 include("load.jl")
+include("precompile.jl")
 
 end # module

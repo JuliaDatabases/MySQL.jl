@@ -289,6 +289,29 @@ function ping(conn::Connection)
     end
 end
 
+"""
+    MySQL.connection_id(conn) -> Int
+
+The server-side id of this connection (what `CONNECTION_ID()` returns), e.g. to cancel a
+long-running statement with `KILL QUERY <id>` from another connection.
+"""
+connection_id(conn::Connection) = return Int((session(conn).server::P.ServerInfo).connection_id)
+
+"""
+    MySQL.server_version(conn) -> VersionNumber
+
+The server version announced in the greeting (a MariaDB `5.5.5-` prefix is stripped), for
+gating on server features; `MySQL.server_kind(conn)` tells `:mysql` from `:mariadb`.
+"""
+server_version(conn::Connection) = return (session(conn).server::P.ServerInfo).version
+
+"""
+    MySQL.server_kind(conn) -> Symbol
+
+`:mysql`, `:mariadb`, `:tidb`, or `:vitess`, detected from the greeting.
+"""
+server_kind(conn::Connection) = return (session(conn).server::P.ServerInfo).kind
+
 # ---- transactions ----
 
 """

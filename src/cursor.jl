@@ -50,6 +50,20 @@ end
 const TextCursor = Cursor{false}
 const BinaryCursor = Cursor{true}
 
+# The default struct printer would dump the row buffer; show the result's shape instead.
+function Base.show(io::IO, c::Cursor{binary, buffered}) where {binary, buffered}
+    print(io, binary ? "MySQL.BinaryCursor(" : "MySQL.TextCursor(")
+    if c.nfields == 0
+        print(io, "rows_affected=", c.rows_affected)
+    elseif buffered
+        print(io, c.nrows, " rows × ", c.nfields, " columns")
+    else
+        print(io, "streaming, ", c.nfields, " columns")
+    end
+    c.closed && print(io, ", closed")
+    return print(io, ")")
+end
+
 struct Row{binary, buffered} <: Tables.AbstractRow
     cursor::Cursor{binary, buffered}
     rownumber::Int
@@ -408,6 +422,7 @@ end
 
 const TextCursors = Cursors{false}
 
+Base.show(io::IO, tc::Cursors) = return print(io, "MySQL.Cursors(", repr(tc.sql), ")")
 Base.eltype(::Cursors{binary, buffered}) where {binary, buffered} = return Cursor{binary, buffered}
 Base.IteratorSize(::Type{<:Cursors}) = return Base.SizeUnknown()
 

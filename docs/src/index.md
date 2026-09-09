@@ -206,6 +206,9 @@ DBInterface.lastrowid
 
 ```@docs
 MySQL.ping
+MySQL.connection_id
+MySQL.server_version
+MySQL.server_kind
 MySQL.escape
 MySQL.escape_identifier
 MySQL.send_long_data!

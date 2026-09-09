@@ -151,7 +151,8 @@ Deliberate, documented changes relative to Connector/C 1.6.0:
 read), `max_buffered_bytes`, `max_response_bytes`, `max_columns`, `max_result_sets`,
 `max_metadata_bytes`, `max_preauth_packet`, `max_auth_rounds`, `max_auth_bytes`,
 `max_session_state_bytes`, `attrs` (connection attributes sent in the handshake),
-`debug` (per-packet protocol debug logging), `MySQL.ping`, `MySQL.escape_identifier`,
+`debug` (per-packet protocol debug logging), `MySQL.ping`, `MySQL.connection_id`,
+`MySQL.server_version`, `MySQL.server_kind`, `MySQL.escape_identifier`,
 `MySQL.send_long_data!`, `MySQL.reset_statement!`, `MySQL.DecimalResult`, and the
 `batchsize` keyword of `MySQL.load`.
 

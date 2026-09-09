@@ -42,6 +42,13 @@ struct ConnectOptions
     time_type::Type
 end
 
+# Never print the password (options end up in logs and stack traces).
+function Base.show(io::IO, o::ConnectOptions)
+    print(io, "MySQL.ConnectOptions(host=", repr(o.host), ", port=", o.port, ", user=", repr(o.user),
+        ", password=", o.password === nothing ? "nothing" : "\"…\"", ", db=", repr(o.db), ", ssl_mode=", o.tls.mode, ")")
+    return nothing
+end
+
 const REMOVED_KEYWORDS = Dict{Symbol, String}(
     :charset_dir => "the native backend has no character-set files",
     :connection_handler => "the native backend has no dynamic plugins",
