@@ -31,9 +31,6 @@ mutable struct Statement <: DBInterface.Statement
     last_signature::Vector{UInt16}
     sig_scratch::Vector{UInt16}
     long_data::Vector{LongDataChunk}
-    date_and_time::Bool
-    dynamic_metadata::Bool
-    metadata_date_and_time::Bool
     closed::Bool
     reap::StatementReapEntry
 end
@@ -41,8 +38,8 @@ end
 DBInterface.getconnection(stmt::Statement) = return stmt.conn
 Base.show(io::IO, stmt::Statement) = return print(io, "MySQL.Statement(", repr(stmt.sql), ")")
 
-function statement_schema(conn::Connection, columns::Vector{P.ColumnDef}, date_and_time::Bool)
-    opts = ResultOptions(; date_and_time=date_and_time, zero_dates=conn.results.zero_dates, time_type=conn.results.time_type)
+function statement_schema(conn::Connection, columns::Vector{P.ColumnDef})
+    opts = conn.results
     names = [Symbol(col.name) for col in columns]
     types = Type[juliatype(col, opts) for col in columns]
     lookup = Dict{Symbol, Int}(nm => i for (i, nm) in enumerate(names))
@@ -50,9 +47,7 @@ function statement_schema(conn::Connection, columns::Vector{P.ColumnDef}, date_a
     return names, types, lookup, coltypes
 end
 
-function statement_schema(conn::Connection, ok::P.PrepareOK, date_and_time::Bool)
-    return statement_schema(conn, ok.columns, date_and_time)
-end
+statement_schema(conn::Connection, ok::P.PrepareOK) = return statement_schema(conn, ok.columns)
 
 function same_column_definition(a::P.ColumnDef, b::P.ColumnDef)
     return a.catalog == b.catalog && a.schema == b.schema && a.table == b.table &&
@@ -70,17 +65,16 @@ function same_column_definitions(a::Vector{P.ColumnDef}, b::Vector{P.ColumnDef})
 end
 
 """
-    DBInterface.prepare(conn::MySQL.Connection, sql; mysql_date_and_time=false) -> Statement
+    DBInterface.prepare(conn::MySQL.Connection, sql) -> Statement
 
-Prepares `sql` on the server and returns a `Statement`. `mysql_date_and_time=true` maps
-DATETIME/TIMESTAMP result columns to `DateAndTime` (microsecond precision).
+Prepares `sql` on the server and returns a `Statement`.
 """
-function DBInterface.prepare(conn::Connection, sql::AbstractString; mysql_date_and_time::Bool=false)
+function DBInterface.prepare(conn::Connection, sql::AbstractString)
     lock(conn.lock) do
         s = begin_command!(conn)
         P.stmt_prepare!(s, sql)
         ok = P.read_prepare_response!(s)
-        names, types, lookup, coltypes = statement_schema(conn, ok, mysql_date_and_time)
+        names, types, lookup, coltypes = statement_schema(conn, ok)
         generation = @atomic conn.generation
         stmt = Statement(
             conn,
@@ -97,9 +91,6 @@ function DBInterface.prepare(conn::Connection, sql::AbstractString; mysql_date_a
             UInt16[],
             UInt16[],
             LongDataChunk[],
-            mysql_date_and_time,
-            isempty(ok.columns),
-            mysql_date_and_time,
             false,
             StatementReapEntry(ok.statement_id, generation, nothing, false),
         )
@@ -129,9 +120,7 @@ function reprepare!(conn::Connection, s::P.Session, stmt::Statement; close_previ
     stmt.nparams = P.num_params(ok)
     stmt.params = ok.params
     stmt.columns = ok.columns
-    stmt.names, stmt.types, stmt.lookup, stmt.coltypes = statement_schema(conn, ok, stmt.date_and_time)
-    stmt.dynamic_metadata = isempty(ok.columns)
-    stmt.metadata_date_and_time = stmt.date_and_time
+    stmt.names, stmt.types, stmt.lookup, stmt.coltypes = statement_schema(conn, ok)
     empty!(stmt.last_signature)
     if replay_long_data
         validate_long_data_ids(stmt)
@@ -291,17 +280,16 @@ normalize_params(params) = return params
 normalize_params(p::Union{Number, AbstractString, Missing, Nothing, Dates.TimeType, Dates.Period, Bit}) = return (p,)
 
 """
-    DBInterface.execute(stmt::MySQL.Statement, params=(); mysql_store_result=true, mysql_date_and_time=false) -> BinaryCursor
+    DBInterface.execute(stmt::MySQL.Statement, params=(); mysql_store_result=true) -> BinaryCursor
 
 Executes the prepared statement with `params` bound as the `?` markers and returns a
 binary-protocol cursor. A tuple, named tuple, vector, or `Tables.AbstractRow` supplies values
 in iteration order; names do not select SQL parameters. A bare scalar binds one parameter.
 Wrap a binary byte vector as `(bytes,)` to bind it as one value. Named SQL markers such as
 `:name` are not supported. `mysql_store_result=false` streams rows (the connection is busy until
-the cursor is exhausted or closed). `mysql_date_and_time` applies only to statements whose
-column metadata is determined at execute time (the prepare-time keyword wins otherwise).
+the cursor is exhausted or closed).
 """
-function DBInterface.execute(stmt::Statement, params=(); mysql_store_result::Bool=true, mysql_date_and_time::Bool=false)
+function DBInterface.execute(stmt::Statement, params=(); mysql_store_result::Bool=true)
     conn = stmt.conn
     params = normalize_params(params)
     lock(conn.lock) do
@@ -326,12 +314,9 @@ function DBInterface.execute(stmt::Statement, params=(); mysql_store_result::Boo
             send_execute!(s, stmt, params)
             read_execute_response!(s, stmt; retain_need_reprepare=false)
         end
-        date_and_time = stmt.dynamic_metadata ? mysql_date_and_time : stmt.date_and_time
-        opts = date_and_time ?
-            ResultOptions(; date_and_time=true, zero_dates=conn.results.zero_dates, time_type=conn.results.time_type) :
-            conn.results
+        opts = conn.results
         if resp isa P.ResultHeader
-            if same_column_definitions(stmt.columns, resp.columns) && stmt.metadata_date_and_time == date_and_time
+            if same_column_definitions(stmt.columns, resp.columns)
                 # Repeated execute with unchanged metadata (the overwhelmingly common case):
                 # reuse the statement's cached schema containers. They are aliased, never
                 # mutated in place — a re-prepare or execute-time schema change *replaces*
@@ -344,11 +329,9 @@ function DBInterface.execute(stmt::Statement, params=(); mysql_store_result::Boo
                 make_cursor(conn, stmt.sql, token, resp, Val(true), Val(true), opts, 1) :
                 make_cursor(conn, stmt.sql, token, resp, Val(true), Val(false), opts, 1)
             # Execute-time definitions are authoritative; the changed schema replaces the
-            # statement's cache. `dynamic_metadata` retains the keyword-dispatch contract.
+            # statement's cache.
             stmt.columns = resp.columns
-            stmt.names, stmt.types, stmt.lookup, stmt.coltypes =
-                statement_schema(conn, resp.columns, date_and_time)
-            stmt.metadata_date_and_time = date_and_time
+            stmt.names, stmt.types, stmt.lookup, stmt.coltypes = statement_schema(conn, resp.columns)
             return cursor
         end
         return mysql_store_result ?
@@ -363,8 +346,8 @@ end
 Iterates every result set of a prepared CALL (or multi-result statement) as a distinct
 binary cursor, like the connection-level `executemultiple`.
 """
-function DBInterface.executemultiple(stmt::Statement, params=(); mysql_store_result::Bool=true, mysql_date_and_time::Bool=false)
-    first = DBInterface.execute(stmt, params; mysql_store_result=mysql_store_result, mysql_date_and_time=mysql_date_and_time)
+function DBInterface.executemultiple(stmt::Statement, params=(); mysql_store_result::Bool=true)
+    first = DBInterface.execute(stmt, params; mysql_store_result=mysql_store_result)
     return Cursors(stmt.conn, stmt.sql, first.opts, first)
 end
 
@@ -397,15 +380,10 @@ end
 
 # One-shot `DBInterface.execute(conn, sql, params)`: prepare, execute, and park the statement
 # so its COM_STMT_CLOSE goes out on the next command (after the cursor's stream is drained).
-function execute_params(conn::Connection, sql::AbstractString, params; mysql_store_result::Bool, mysql_date_and_time::Bool)
-    stmt = DBInterface.prepare(conn, sql; mysql_date_and_time=mysql_date_and_time)
+function execute_params(conn::Connection, sql::AbstractString, params; mysql_store_result::Bool)
+    stmt = DBInterface.prepare(conn, sql)
     cursor = try
-        DBInterface.execute(
-            stmt,
-            params;
-            mysql_store_result=mysql_store_result,
-            mysql_date_and_time=mysql_date_and_time,
-        )
+        DBInterface.execute(stmt, params; mysql_store_result=mysql_store_result)
     catch
         DBInterface.close!(stmt)
         rethrow()

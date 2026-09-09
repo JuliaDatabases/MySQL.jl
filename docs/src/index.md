@@ -18,7 +18,7 @@ Connect through the [DBInterface.jl](https://github.com/JuliaDatabases/DBInterfa
 which the rest of this page uses:
 
 ```julia
-using MySQL, DBInterface, Dates
+using MySQL, DBInterface, Dates   # MySQL re-exports Durations.Timestamp
 
 conn = DBInterface.connect(MySQL.Connection, "localhost", "user", "password"; db="mydb")
 ```
@@ -54,9 +54,10 @@ they are iterated, which keeps memory flat for large results but keeps the conne
 until the cursor is exhausted or closed. `cursor.rows_affected` and
 `DBInterface.lastrowid(cursor)` report a DML statement's outcome.
 
-Parameters are bound by their Julia type: integers, floats, `String`s, `Vector{UInt8}`
-(binary), `Date`/`DateTime`/`Time`/`MySQL.DateAndTime`, `MySQL.Bit`, DataDecimals
-decimals, `Bool`, and `missing`/`nothing` for NULL.
+Parameters are bound by their Julia type: integers, floats, strings (`String`,
+`DataString`, any `AbstractString`), bytes (`Vector{UInt8}`, `DataBytes`),
+`Date`/`Time`/`Timestamp`/`DateTime`, `MySQL.Bit`, DataDecimals decimals, `Bool`, and
+`missing`/`nothing` for NULL.
 
 Pass a tuple, named tuple, vector, or `Tables.AbstractRow` for multiple parameters.
 Values bind to `?` markers in iteration order; names do not change that order. Named SQL
@@ -141,11 +142,8 @@ raise `ArgumentError` unless their value is `nothing` or `false`.
 
 | keyword | default | meaning |
 |---|---|---|
-| `zero_dates` | `:sentinel` | `0000-00-00` values: `:sentinel` (`Date(0)`/`DateTime(0)`), `:missing` (dates become `Union{Missing, T}`), `:error` |
+| `zero_dates` | `:sentinel` | `0000-00-00` values: `:sentinel` (`Date(0)` / `Timestamp{P}(0, 1, 1)`), `:missing` (dates become `Union{Missing, T}`), `:error` |
 | `time_type` | `Dates.Time` | `TIME` columns as `Dates.Time` (`0 ≤ t < 24h`) or `Dates.Microsecond` (signed, up to ±838 h) |
-
-`mysql_date_and_time=true` on `execute`/`prepare` decodes DATETIME/TIMESTAMP to
-`MySQL.DateAndTime` with microsecond precision.
 
 **Limits** (received lengths are checked before growing their payload buffers; outgoing
 commands are checked after encoding and before sending)
@@ -207,13 +205,30 @@ Result columns decode to the Julia types below (`Union{Missing, T}` unless the c
 | `FLOAT`, `DOUBLE` | `Float32`, `Float64` |
 | `DECIMAL`/`NUMERIC` | `MySQL.DecimalResult` (exact, all 65 digits) |
 | `BIT(n)` | `MySQL.Bit` |
-| `DATE`, `TIME`, `DATETIME`/`TIMESTAMP` | `Date`, `Time` (or `Microsecond`), `DateTime` (or `MySQL.DateAndTime`) |
+| `DATE`, `TIME` | `Date`, `Time` (or `Microsecond` with `time_type`) |
+| `DATETIME`/`TIMESTAMP` | `Timestamp{Second}`; with `fsp` 1–3 `Timestamp{Millisecond}`, 4–6 `Timestamp{Microsecond}` |
 | `YEAR` | `Clong` (unsigned) |
-| `CHAR`/`VARCHAR`/`TEXT`, `BINARY`/`VARBINARY`, `ENUM`, `SET`, `JSON` | `String` |
-| `BLOB`, `GEOMETRY` | `Vector{UInt8}` |
+| `CHAR`/`VARCHAR`/`TEXT`, `BINARY`/`VARBINARY`, `ENUM`, `SET`, `JSON` | `DataString` |
+| `BLOB`, `GEOMETRY` | `DataBytes` |
 
-`BINARY`/`VARBINARY` retain the 1.x `String` mapping. Use `codeunits(value)` to access
-their raw bytes, which need not be valid UTF-8.
+`DataString` and `DataBytes` are [DataStrings.jl](https://github.com/JuliaData/DataStrings.jl)'s
+compact string and byte values (the Arrow Utf8View/BinaryView layout): a value of up to
+12 bytes is stored inline, a longer one references the cursor's row buffer, so decoding a
+result copies no bytes and allocates nothing per value. `DataString <: AbstractString`
+behaves like `String` (equality, hashing, ordering, iteration, `String(s)` to copy out);
+`DataBytes <: AbstractVector{UInt8}` likewise (`Vector{UInt8}(b)` copies). A long value
+keeps the buffer it references alive — the whole result of a buffered cursor, or the arena
+(64 KiB of rows) a streaming cursor read its row into; `String(s)`/`Vector{UInt8}(b)` (or
+`DataStrings.materialize` on a column) detaches it. Requesting `String`/`Vector{UInt8}` explicitly through the
+typed accessor (`Tables.getcolumn(row, String, i, name)`) still returns a copy.
+`BINARY`/`VARBINARY` keep the 1.x string mapping; their bytes need not be valid UTF-8.
+
+`Timestamp{P}` is [Durations.jl](https://github.com/JuliaData/Durations.jl)'s `Int64`
+count since the Unix epoch at resolution `P` (the type proposed for the Julia 1.14 Dates
+stdlib, which it becomes automatically there); `MySQL` re-exports it. It is an
+`AbstractDateTime`: `Dates.year(ts)`, `DateTime(ts)`, `Date(ts)`, `Time(ts)`, arithmetic
+with periods, and comparisons with `DateTime`/`Date` all work, and every MySQL value is
+represented exactly. Construct one with `Timestamp{Microsecond}(2024, 2, 29, 13, 14, 15, 250, 500)`.
 
 `MySQL.juliatype` computes the mapping for a wire type and its flags.
 
@@ -267,8 +282,8 @@ MySQL.juliatype
 
 ```@docs
 MySQL.Bit
-MySQL.DateAndTime
 MySQL.DecimalResult
+MySQL.timestamp_type
 ```
 
 ### Errors

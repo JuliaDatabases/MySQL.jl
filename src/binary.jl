@@ -53,6 +53,8 @@ end
 
 # String, bytes, decimal and BIT are the same content bytes on both protocols (BIT is the
 # big-endian value of all bytes; DECIMAL is the ASCII form), so the text decoders apply.
+decode_binary_value(::Type{DataString}, buf::Vector{UInt8}, pos::Int, len::Int, opts::ResultOptions) = return decode_value(DataString, buf, pos, len, opts)
+decode_binary_value(::Type{DataBytes}, buf::Vector{UInt8}, pos::Int, len::Int, opts::ResultOptions) = return decode_value(DataBytes, buf, pos, len, opts)
 decode_binary_value(::Type{String}, buf::Vector{UInt8}, pos::Int, len::Int, opts::ResultOptions) = return decode_value(String, buf, pos, len, opts)
 decode_binary_value(::Type{Vector{UInt8}}, buf::Vector{UInt8}, pos::Int, len::Int, opts::ResultOptions) = return decode_value(Vector{UInt8}, buf, pos, len, opts)
 decode_binary_value(::Type{DecimalResult}, buf::Vector{UInt8}, pos::Int, len::Int, opts::ResultOptions) = return decode_value(DecimalResult, buf, pos, len, opts)
@@ -117,7 +119,7 @@ function binary_time_micros(buf::Vector{UInt8}, pos::Int, len::Int)
 end
 
 # Shared with the `zero_dates=:missing` widening check.
-binary_temporal_parts(::Type{T}, buf, pos, len) where {T <: Union{Date, DateTime, DateAndTime}} = return binary_date_parts(buf, pos, len)
+binary_temporal_parts(::Type{T}, buf, pos, len) where {T <: Union{Date, Timestamp}} = return binary_date_parts(buf, pos, len)
 binary_temporal_parts(::Type, buf, pos, len) = return nothing
 
 function decode_binary_value(::Type{Date}, buf::Vector{UInt8}, pos::Int, len::Int, opts::ResultOptions)
@@ -132,31 +134,16 @@ function decode_binary_value(::Type{Date}, buf::Vector{UInt8}, pos::Int, len::In
     return Date(y, mo, d)
 end
 
-function decode_binary_value(::Type{DateTime}, buf::Vector{UInt8}, pos::Int, len::Int, opts::ResultOptions)
+function decode_binary_value(::Type{Timestamp{P}}, buf::Vector{UInt8}, pos::Int, len::Int, opts::ResultOptions) where {P}
     parts = binary_date_parts(buf, pos, len)
-    parts === nothing && conversion_error(DateTime, buf, pos, len)
+    parts === nothing && conversion_error(Timestamp{P}, buf, pos, len)
     kind = zero_date_kind(parts)
-    kind == :zero && return zero_date_value(DateTime, buf, pos, len, opts)
-    kind == :partial && conversion_error(DateTime, "partial zero date in a binary DATETIME value (use zero_dates=:missing)")
+    kind == :zero && return zero_date_value(Timestamp{P}, buf, pos, len, opts)
+    kind == :partial && conversion_error(Timestamp{P}, "partial zero date in a binary DATETIME value (use zero_dates=:missing)")
     y, mo, d, h, mi, s, micros = parts
-    micros < 1_000_000 || conversion_error(DateTime, buf, pos, len)
-    # Both text and binary paths warn once and truncate sub-millisecond precision.
-    micros % 1000 == 0 || dateandtime_warning()
-    Dates.validargs(DateTime, y, mo, d, h, mi, s, micros ÷ 1000) === nothing || conversion_error(DateTime, buf, pos, len)
-    return DateTime(y, mo, d, h, mi, s, micros ÷ 1000)
-end
-
-function decode_binary_value(::Type{DateAndTime}, buf::Vector{UInt8}, pos::Int, len::Int, opts::ResultOptions)
-    parts = binary_date_parts(buf, pos, len)
-    parts === nothing && conversion_error(DateAndTime, buf, pos, len)
-    kind = zero_date_kind(parts)
-    kind == :zero && return zero_date_value(DateAndTime, buf, pos, len, opts)
-    kind == :partial && conversion_error(DateAndTime, "partial zero date in a binary DATETIME value (use zero_dates=:missing)")
-    y, mo, d, h, mi, s, micros = parts
-    Dates.validargs(Date, y, mo, d) === nothing || conversion_error(DateAndTime, buf, pos, len)
-    (h < 24 && mi < 60 && s < 60 && micros < 1_000_000) || conversion_error(DateAndTime, buf, pos, len)
-    millis, micro = divrem(micros, 1000)
-    return DateAndTime(Date(y, mo, d), Time(h, mi, s, millis, micro))
+    Dates.validargs(Date, y, mo, d) === nothing || conversion_error(Timestamp{P}, buf, pos, len)
+    micros % timestamp_micros_unit(P) == 0 || conversion_error(Timestamp{P}, buf, pos, len)
+    return timestamp_from_parts(Timestamp{P}, y, mo, d, h, mi, s, micros)
 end
 
 function decode_binary_value(::Type{Dates.Time}, buf::Vector{UInt8}, pos::Int, len::Int, ::ResultOptions)
@@ -191,7 +178,8 @@ param_type(::Float64) = return (P.MYSQL_TYPE_DOUBLE, false)
 param_type(::DataDecimals.AbstractDecimal) = return (P.MYSQL_TYPE_STRING, false)
 param_type(::Bit) = return (P.MYSQL_TYPE_BLOB, false)
 param_type(::Vector{UInt8}) = return (P.MYSQL_TYPE_BLOB, false)
-param_type(::DateAndTime) = return (P.MYSQL_TYPE_DATETIME, false)
+param_type(::DataBytes) = return (P.MYSQL_TYPE_BLOB, false)
+param_type(::Timestamp) = return (P.MYSQL_TYPE_DATETIME, false)
 param_type(::DateTime) = return (P.MYSQL_TYPE_TIMESTAMP, false)
 param_type(::Date) = return (P.MYSQL_TYPE_DATE, false)
 param_type(::Dates.Time) = return (P.MYSQL_TYPE_TIME, false)
@@ -228,6 +216,26 @@ encode_param_value!(buf::Vector{UInt8}, x::Float32) = return (P.write_u32!(buf, 
 encode_param_value!(buf::Vector{UInt8}, x::Float64) = return (P.write_u64!(buf, Core.bitcast(UInt64, x)); nothing)
 encode_param_value!(buf::Vector{UInt8}, x::AbstractString) = return (P.write_lenenc_string!(buf, x); nothing)
 encode_param_value!(buf::Vector{UInt8}, x::Vector{UInt8}) = return (P.write_lenenc_bytes!(buf, x); nothing)
+# DataStrings values append their inline or viewed bytes directly (no per-byte `codeunit` walk).
+encode_param_value!(buf::Vector{UInt8}, x::DataString) = return (P.write_lenenc!(buf, ncodeunits(x)); append_payload!(buf, x.p, x.data); nothing)
+encode_param_value!(buf::Vector{UInt8}, x::DataBytes) = return (P.write_lenenc!(buf, length(x)); append_payload!(buf, x.p, x.data); nothing)
+
+function append_payload!(buf::Vector{UInt8}, p::DataStrings.StringPayload, data::Vector{UInt8})
+    n = Int(DataStrings.payloadlength(p))
+    if n <= DataStrings.INLINE_MAX
+        a, b = p.a, p.b
+        for i in 1:min(n, 4)
+            push!(buf, (a >> (32 + 8 * (i - 1))) % UInt8)
+        end
+        for i in 5:n
+            push!(buf, (b >> (8 * (i - 5))) % UInt8)
+        end
+    else
+        pos = DataStrings.payloadpos(p)
+        append!(buf, view(data, pos:(pos + n - 1)))
+    end
+    return nothing
+end
 # Decimals travel as their exact ASCII form (a MYSQL_TYPE_STRING parameter).
 encode_param_value!(buf::Vector{UInt8}, x::DataDecimals.AbstractDecimal) = return (P.write_lenenc_string!(buf, string(x)); nothing)
 # A BIT parameter is the big-endian binary string of its value (no leading zero bytes, at
@@ -270,8 +278,11 @@ function encode_param_value!(buf::Vector{UInt8}, x::DateTime)
     return encode_datetime_value!(buf, Dates.year(x), Dates.month(x), Dates.day(x), Dates.hour(x), Dates.minute(x), Dates.second(x), Dates.millisecond(x) * 1000)
 end
 
-function encode_param_value!(buf::Vector{UInt8}, x::DateAndTime)
-    return encode_datetime_value!(buf, Dates.year(x), Dates.month(x), Dates.day(x), Dates.hour(x), Dates.minute(x), Dates.second(x), Dates.millisecond(x) * 1000 + Dates.microsecond(x))
+# The wire carries microseconds: a `Timestamp{Nanosecond}` with a sub-microsecond part
+# raises `InexactError` (round it first) rather than losing digits silently.
+function encode_param_value!(buf::Vector{UInt8}, x::Timestamp)
+    t = Timestamp{Microsecond}(x)
+    return encode_datetime_value!(buf, Dates.year(t), Dates.month(t), Dates.day(t), Dates.hour(t), Dates.minute(t), Dates.second(t), Dates.millisecond(t) * 1000 + Dates.microsecond(t))
 end
 
 function encode_param_value!(buf::Vector{UInt8}, x::Dates.Time)

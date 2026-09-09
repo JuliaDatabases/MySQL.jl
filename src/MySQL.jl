@@ -1,10 +1,15 @@
 module MySQL
 
 import DataDecimals
+import DataStrings
+using DataStrings: DataString, DataBytes
 using Dates, DBInterface, Tables, Parsers, Reseau
+using Durations: Timestamp
 import Random
 
-export DBInterface, DateAndTime
+# `Timestamp` is re-exported from Durations.jl (the `Dates.Timestamp` proposed for Julia
+# 1.14): every DATETIME/TIMESTAMP column decodes to it.
+export DBInterface, Timestamp
 
 # For errors raised by MySQL.jl itself (not the server or the wire protocol)
 struct MySQLInterfaceError

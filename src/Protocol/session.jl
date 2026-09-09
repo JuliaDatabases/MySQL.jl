@@ -120,21 +120,21 @@ function guarded(f::F, s::Session) where {F}
 end
 
 """
-    readpacket!(s; packet_limit=max_payload(s), dest=s.io.inbuf) -> PacketView
+    readpacket!(s; packet_limit=max_payload(s), dest=s.io.inbuf, pos=1) -> PacketView
 
 Reads one logical packet under the phase-dependent size bound; any failure faults the
 session. `packet_limit` can impose a smaller state-specific bound; `dest` is the buffer the
-payload is read into (a cursor passes its own). The view is valid until the next read into
-the same buffer.
+payload is read into (a cursor passes its own) and `pos` where in it the payload starts. The
+view is valid until the next read into the same region of the buffer.
 """
-function readpacket!(s::Session; packet_limit::Int=max_payload(s), dest::Vector{UInt8}=s.io.inbuf)
+function readpacket!(s::Session; packet_limit::Int=max_payload(s), dest::Vector{UInt8}=s.io.inbuf, pos::Int=1)
     try
         # buffered reads only after authentication: the connection phase stays byte-exact
         # so STARTTLS never has bytes stranded in the reader
         # CMD_SENT also covers prepare metadata and later result headers. Sequence ids
         # wrap every 256 packets, so phase/sequence alone cannot identify response start.
         stale_err = s.phase == CMD_SENT && s.io.response_bytes == 0 && s.io.seq == 0x01
-        p = readpacket!(s.io, s.transport, min(packet_limit, max_payload(s)); max_response=s.authenticated ? s.limits.max_response_bytes : nothing, dest=dest, buffered=s.authenticated, stale_err=stale_err)
+        p = readpacket!(s.io, s.transport, min(packet_limit, max_payload(s)); max_response=s.authenticated ? s.limits.max_response_bytes : nothing, dest=dest, pos=pos, buffered=s.authenticated, stale_err=stale_err)
         s.debug && @debug "MySQL.Protocol read" phase=s.phase length=payload_length(p) header=first_byte(p) seq=p.seq chunks=p.nchunks
         # An ERR numbered 0 in place of a command response is the server's farewell before it
         # closes an idle connection (MySQL 8.0.24+: 4031 ER_CLIENT_INTERACTION_TIMEOUT): the

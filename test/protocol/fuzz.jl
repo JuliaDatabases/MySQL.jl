@@ -188,7 +188,8 @@ const TYPED_TEXT_VALUES = Union{Nothing, String}[
 ]
 
 function typed_coldefs()
-    return [coldef_payload(name; type=t, flags=f) for (name, t, f) in TYPED_COLUMNS]
+    # the DATETIME column carries six fractional digits, so it must declare them (fsp)
+    return [coldef_payload(name; type=t, flags=f, decimals=(t == P.MYSQL_TYPE_DATETIME ? 6 : 0)) for (name, t, f) in TYPED_COLUMNS]
 end
 
 function text_resultset_stream(; deprecate_eof::Bool, more::Bool=false, terminator_state::Bool=false)
@@ -570,7 +571,9 @@ const BINARY_TYPE_POOL = UInt8[
 # must be a MySQLError.
 function scan_definition(type::UInt8, flags::UInt16)
     charset = (flags & P.BINARY_FLAG) == 0 ? P.CHARSET_UTF8MB4_GENERAL_CI : P.CHARSET_BINARY
-    return P.ColumnDef("def", "db", "t", "t", "v", "v", UInt16(charset), UInt32(255), type, flags, 0x00)
+    # temporal columns declare six fractional digits: the corpus values carry them
+    decimals = (type == P.MYSQL_TYPE_DATETIME || type == P.MYSQL_TYPE_TIMESTAMP) ? 0x06 : 0x00
+    return P.ColumnDef("def", "db", "t", "t", "v", "v", UInt16(charset), UInt32(255), type, flags, decimals)
 end
 
 function scan_schema(rng::Rng, randomized::Bool)

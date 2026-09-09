@@ -1,5 +1,9 @@
-# Public value types and result-type mapping (`MySQL.Bit`, `MySQL.DateAndTime`,
-# `MySQL.juliatype`); DECIMAL uses exact DataDecimals values in 2.0.
+# Public value types and result-type mapping (`MySQL.Bit`, `MySQL.DecimalResult`,
+# `MySQL.juliatype`). Text and binary string columns decode to DataStrings.jl's
+# `DataString`/`DataBytes` — zero-copy views of the cursor's row buffer (Arrow Utf8View /
+# BinaryView layout) — DATETIME/TIMESTAMP to `Timestamp{P}` (Durations.jl's Unix-epoch
+# instant, the type proposed for the Dates stdlib) at the column's declared fractional
+# precision, and DECIMAL to exact DataDecimals values.
 
 """
     MySQL.Bit
@@ -14,44 +18,24 @@ Base.string(b::Bit) = String(lstrip(bitstring(b.bits), '0'))
 Base.show(io::IO, b::Bit) = print(io, "MySQL.Bit(\"$(string(b))\")")
 
 """
-    MySQL.DateAndTime
-
-A DATETIME/TIMESTAMP value with microsecond precision, as produced by
-`mysql_date_and_time=true` (`Dates.DateTime` only carries milliseconds).
-"""
-struct DateAndTime <: Dates.AbstractDateTime
-    date::Date
-    time::Time
-end
-
-Dates.Date(x::DateAndTime) = x.date
-Dates.Time(x::DateAndTime) = x.time
-Dates.year(x::DateAndTime) = Dates.year(Date(x))
-Dates.month(x::DateAndTime) = Dates.month(Date(x))
-Dates.day(x::DateAndTime) = Dates.day(Date(x))
-Dates.hour(x::DateAndTime) = Dates.hour(Time(x))
-Dates.minute(x::DateAndTime) = Dates.minute(Time(x))
-Dates.second(x::DateAndTime) = Dates.second(Time(x))
-Dates.millisecond(x::DateAndTime) = Dates.millisecond(Time(x))
-Dates.microsecond(x::DateAndTime) = Dates.microsecond(Time(x))
-
-import Base.==
-==(a::DateAndTime, b::DateAndTime) = ==(a.date, b.date) && ==(a.time, b.time)
-
-@noinline dateandtime_warning() = @warn """a DATETIME/TIMESTAMP value carries sub-millisecond precision, which a
-`Dates.DateTime` cannot represent; it was truncated to milliseconds. Pass
-`mysql_date_and_time=true` to `DBInterface.execute` or `DBInterface.prepare` to get
-`MySQL.DateAndTime` values that preserve the full microsecond precision""" maxlog=1
-
-"""
     MySQL.DecimalResult
 
 The type DECIMAL/NUMERIC columns decode to: `DataDecimals.DecimalValue{DataDecimals.Int256}`,
-which holds all 65 digits and the column's scale exactly (1.x decoded to `DecFP.Dec64`).
+which holds all 65 digits and the column's scale exactly.
 """
 const DecimalResult = DataDecimals.DecimalValue{DataDecimals.Int256}
 
-# The wire type maps to a host type. DECIMAL uses an exact 256-bit coefficient.
+"""
+    MySQL.timestamp_type(decimals) -> Type{<:Timestamp}
+
+The `Timestamp{P}` a DATETIME/TIMESTAMP column with `decimals` fractional-second digits
+(its `fsp`, 0–6) decodes to: `Timestamp{Second}` for 0, `Timestamp{Millisecond}` for 1–3,
+`Timestamp{Microsecond}` for 4–6. Every MySQL value is represented exactly.
+"""
+timestamp_type(decimals::Integer) = return decimals == 0 ? Timestamp{Second} : decimals <= 3 ? Timestamp{Millisecond} : Timestamp{Microsecond}
+
+# The wire type maps to a host type. DATETIME/TIMESTAMP is given at full precision here;
+# the column-aware overload narrows it to the declared fractional precision.
 function juliatype(field_type)
     t = UInt32(field_type)
     if t == P.MYSQL_TYPE_BIT
@@ -73,17 +57,17 @@ function juliatype(field_type)
     elseif t == P.MYSQL_TYPE_TINY_BLOB || t == P.MYSQL_TYPE_MEDIUM_BLOB ||
            t == P.MYSQL_TYPE_LONG_BLOB || t == P.MYSQL_TYPE_BLOB ||
            t == P.MYSQL_TYPE_GEOMETRY
-        return Vector{UInt8}
+        return DataBytes
     elseif t == P.MYSQL_TYPE_YEAR
         return Clong
     elseif t == P.MYSQL_TYPE_TIMESTAMP || t == P.MYSQL_TYPE_DATETIME
-        return DateTime
+        return Timestamp{Microsecond}
     elseif t == P.MYSQL_TYPE_DATE
         return Date
     elseif t == P.MYSQL_TYPE_TIME
         return Dates.Time
     else
-        return String
+        return DataString
     end
 end
 
@@ -100,16 +84,17 @@ end
 end
 
 """
-    MySQL.juliatype(field_type, notnullable, isunsigned, isbinary, date_and_time) -> Type
+    MySQL.juliatype(field_type, notnullable, isunsigned, isbinary, decimals=6) -> Type
 
-The Julia type a result column decodes to, given its wire type and flags: the 1.x mapping,
-with exact DataDecimals values at 2.0 (unsigned integer widening, binary BLOB vs `String`, `DateAndTime` under
-`mysql_date_and_time=true`, `Union{Missing, T}` for nullable columns).
+The Julia type a result column decodes to, given its wire type, flags, and fractional
+precision: unsigned integer widening, binary BLOB (`DataBytes`) vs text (`DataString`), DATETIME/TIMESTAMP as
+`Timestamp{P}` per `decimals` (see `MySQL.timestamp_type`), exact DataDecimals values for
+DECIMAL, and `Union{Missing, T}` for nullable columns.
 """
-function juliatype(field_type, notnullable, isunsigned, isbinary, date_and_time)
+function juliatype(field_type, notnullable, isunsigned, isbinary, decimals=6)
     T = juliatype(field_type)
     T2 = isunsigned ? unsigned_type(T) : T
-    T3 = !isbinary && T2 === Vector{UInt8} ? String : T2
-    T4 = date_and_time && T3 === DateTime ? DateAndTime : T3
+    T3 = !isbinary && T2 === DataBytes ? DataString : T2
+    T4 = T3 === Timestamp{Microsecond} ? timestamp_type(decimals) : T3
     return notnullable ? T4 : Union{Missing, T4}
 end

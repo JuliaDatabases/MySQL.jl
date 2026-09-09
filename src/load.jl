@@ -27,11 +27,16 @@ const SQLTYPES = Dict{Type, String}(
     Float64 => "DOUBLE",
     Bool => "BOOL",
     Vector{UInt8} => "BLOB",
+    DataBytes => "BLOB",
     String => "VARCHAR(255)",
+    DataString => "VARCHAR(255)",
     Date => "DATE",
     Time => "TIME",
-    DateTime => "DATETIME",
-    DateAndTime => "DATETIME(6)",
+    DateTime => "DATETIME(3)",
+    Timestamp{Second} => "DATETIME",
+    Timestamp{Millisecond} => "DATETIME(3)",
+    Timestamp{Microsecond} => "DATETIME(6)",
+    Timestamp{Nanosecond} => "DATETIME(6)",
 )
 
 # The column type `MySQL.load` generates for a Julia element type (`Missing` is stripped

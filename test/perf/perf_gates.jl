@@ -5,7 +5,8 @@
 # Gates (asserted, not merely reported):
 #   - 1M-row scans decode identically on the text, binary (prepared), and streaming paths,
 #     and match a Julia-side reimplementation of the fixture formula
-#   - allocations per row ≤ (String/Vector columns + 1) on the native scans
+#   - no allocation per row on the native scans (a fixed slack covers cursors, metadata,
+#     and the arenas of a streaming cursor with string/bytes columns)
 #   - a streaming result > 256 MiB succeeds under default limits; the same result buffered
 #     fails with `ProtocolError`; buffered multi-results jointly above `max_buffered_bytes`
 #     fail with `ProtocolError`; tiny rows charge their offsets to the budget
@@ -128,9 +129,11 @@ function report!(name::String, native_s::Float64)
     return nothing
 end
 
-function alloc_gate!(name::String, allocs::Real, nrows::Int, per_row::Int)
-    @info @sprintf("§8.9 %-28s %.3f allocs/row (gate ≤ %d)", name, allocs / nrows, per_row)
-    @test allocs <= per_row * nrows + 50_000
+const ALLOC_SLACK = 50_000
+
+function alloc_gate!(name::String, allocs::Real, nrows::Int)
+    @info @sprintf("§8.9 %-28s %.4f allocs/row (gate: %d in total)", name, allocs / nrows, ALLOC_SLACK)
+    @test allocs <= ALLOC_SLACK
     return nothing
 end
 
@@ -190,18 +193,18 @@ function run_correctness_gates(plain_port, tls_port)
             @test run_text(native) == expected
             @test run_text_streaming(native) == expected
             bn = @b run_text(native) samples = 1 evals = 1
-            alloc_gate!("text scan 1M rows", bn.allocs, 1_000_000, 2)
+            alloc_gate!("text scan 1M rows", bn.allocs, 1_000_000)
             stmt_n = DBInterface.prepare(native, "SELECT i, f, s, n FROM perf1m")
             try
                 @test run_binary(stmt_n) == expected
                 bn = @b run_binary(stmt_n) samples = 1 evals = 1
-                alloc_gate!("binary scan 1M rows", bn.allocs, 1_000_000, 2)
+                alloc_gate!("binary scan 1M rows", bn.allocs, 1_000_000)
             finally
                 DBInterface.close!(stmt_n)
             end
             @test run_nulls(native) == (1_000_000, 4_500_000)
             bn = @b run_nulls(native) samples = 1 evals = 1
-            alloc_gate!("tiny/NULL scan 1M rows", bn.allocs, 1_000_000, 1)
+            alloc_gate!("tiny/NULL scan 1M rows", bn.allocs, 1_000_000)
         end
         @testset "round-trip correctness (plain, TLS)" begin
             @test run_roundtrips(native, 10) == 10

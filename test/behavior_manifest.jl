@@ -12,7 +12,9 @@
 # option, security, lifecycle, and API contracts. A coverage assertion maps every manifest row.
 module BehaviorManifest
 
-using Test, MySQL, DBInterface, Tables, Dates, DecFP, Logging
+using Test, MySQL, DBInterface, Tables, Dates, Logging
+using DataStrings: DataString, DataBytes
+const DataDecimals = MySQL.DataDecimals
 const DecimalResult = MySQL.DataDecimals.DecimalValue{MySQL.DataDecimals.Int256}
 
 struct Row
@@ -105,11 +107,11 @@ function prepared_parameter_roundtrip(conn)
         DBInterface.execute(stmt, (
             typemin(Int8), typemax(UInt8), typemin(Int16), typemax(UInt16),
             typemin(Int32), typemax(UInt32), typemin(Int64), typemax(UInt64),
-            1.5f0, -2.5, d64"12.345678",
-            Dec128("12345678901234567890123456789.123456"),
+            1.5f0, -2.5, DataDecimals.Decimal64{6}("12.345678"),
+            DataDecimals.Decimal128{6}("12345678901234567890123456789.123456"),
             "héllo", UInt8[0x00, 0xff], MySQL.Bit(0x0102),
             Date(2024, 2, 29), DateTime(2024, 2, 29, 13, 14, 15, 250),
-            MySQL.DateAndTime(Date(2024, 2, 29), Time(13, 14, 15, 250, 500)),
+            Timestamp{Microsecond}(2024, 2, 29, 13, 14, 15, 250, 500),
             Time(13, 14, 15, 250, 500), missing, nothing,
         ))
     finally
@@ -384,11 +386,11 @@ const TEXT_ROW_TUPLE = (
         end),
     Row("executemultiple over CALL: every result as a cursor; DML/OK results are cursors too (1.x skipped them)", :fix,
         conn -> [Tables.columntable(c) for c in DBInterface.executemultiple(conn, "CALL manifest_proc()")];
-        expected=[(ID = Int32[1, 2, 3],), (Name = Union{Missing, String}["John", "Tom", missing],), NamedTuple()],
+        expected=[(ID = Int32[1, 2, 3],), (Name = Union{Missing, DataString}["John", "Tom", missing],), NamedTuple()],
         skip_legacy="1.6.0 calls mysql_num_rows(NULL) on the CALL's final OK result and segfaults"),
     Row("escape honours the connection", :preserve,
         conn -> MySQL.escape(conn, "a'b\\c\n")),
-    Row("zero DATETIME under SQL_MODE='' decodes to the DateTime(0) sentinel", :preserve,
+    Row("zero DATETIME under SQL_MODE='' decodes to the 0000-01-01T00:00:00 sentinel", :preserve,
         conn -> begin
             DBInterface.execute(conn, "SET SESSION SQL_MODE=''")
             Tables.columntable(DBInterface.execute(conn, "SELECT CAST('0000-00-00' AS DATETIME) AS dt")).dt
@@ -398,14 +400,12 @@ const TEXT_ROW_TUPLE = (
             DBInterface.execute(conn, "SET SESSION SQL_MODE=''")
             try; Tables.columntable(DBInterface.execute(conn, "SELECT CAST('0000-00-00' AS DATE) AS d")).d; catch e; :error; end
         end; expected=Union{Missing, Date}[Date(0)], legacy=:error),
-    Row("DATETIME with sub-millisecond precision warns and truncates to ms (1.x text failed)", :fix,
+    Row("DATETIME(6) decodes to Timestamp{Microsecond} with every digit (1.x DateTime failed)", :fix,
         conn -> try; Tables.columntable(DBInterface.execute(conn, "SELECT CAST('2021-01-02 01:02:03.456789' AS DATETIME(6)) AS dt")).dt; catch; :error; end;
         legacy=:error),
-    Row("mysql_date_and_time=true maps DATETIME(6) to DateAndTime", :preserve,
-        conn -> Tables.columntable(DBInterface.execute(conn, "SELECT CAST('2021-01-02 01:02:03.456789' AS DATETIME(6)) AS dt"; mysql_date_and_time=true)).dt),
-    Row("DateAndTime scales a short DATETIME(1) fraction (1.x read it as an unscaled microsecond count)", :fix,
-        conn -> Tables.columntable(DBInterface.execute(conn, "SELECT CAST('2021-01-02 01:02:03.4' AS DATETIME(1)) AS dt"; mysql_date_and_time=true)).dt;
-        legacy=Union{Missing, DateAndTime}[DateAndTime(Dates.Date("2021-01-02"), Dates.Time(1, 2, 3, 0, 4))]),
+    Row("DATETIME(1) decodes to Timestamp{Millisecond} (1.x DateAndTime read the fraction as an unscaled microsecond count)", :fix,
+        conn -> Tables.columntable(DBInterface.execute(conn, "SELECT CAST('2021-01-02 01:02:03.4' AS DATETIME(1)) AS dt")).dt;
+        legacy="DateAndTime(2021-01-02, 01:02:03.000004)"),
     Row("transaction returns f()'s value and commits", :preserve,
         conn -> begin
             v = DBInterface.transaction(conn) do
@@ -473,7 +473,7 @@ const BINARY_ROW_TUPLE = (
         legacy=(:value, Time(1, 2, 3, 0, 4))),
     Row("prepared zero DATETIME follows the unified zero-date sentinel policy", :fix,
         prepared_zero_datetime;
-        expected=DateTime(0),
+        expected=Timestamp{Second}(0, 1, 1),
         legacy=DateTime(1970, 1, 1)),
     Row("executemany bulk-inserts each parameter row in a transaction", :preserve,
         conn -> begin
@@ -487,26 +487,20 @@ const BINARY_ROW_TUPLE = (
         end),
     Row("prepared executemultiple over CALL returns each result and the final OK", :fix,
         prepared_call_results;
-        expected=[(ID = Int32[1, 2, 3],), (Name = Union{Missing, String}["John", "Tom", missing],), NamedTuple()],
+        expected=[(ID = Int32[1, 2, 3],), (Name = Union{Missing, DataString}["John", "Tom", missing],), NamedTuple()],
         skip_legacy="1.6.0 does not provide the prepared multi-result contract and can call mysql_num_rows(NULL) on CALL's final OK"),
-    Row("prepared DATETIME(6) → DateTime warns and truncates to ms", :preserve,
+    Row("prepared DATETIME(6) decodes to Timestamp{Microsecond} with every digit (1.x truncated to ms)", :fix,
         conn -> let stmt = DBInterface.prepare(conn, "SELECT CAST('2021-01-02 01:02:03.456789' AS DATETIME(6)) AS dt")
-            v = try; Tables.columntable(DBInterface.execute(stmt)).dt; catch; :error; end
-            DBInterface.close!(stmt)
-            v
-        end),
-    Row("prepared mysql_date_and_time=true maps DATETIME(6) to DateAndTime", :preserve,
-        conn -> let stmt = DBInterface.prepare(conn, "SELECT CAST('2021-01-02 01:02:03.456789' AS DATETIME(6)) AS dt"; mysql_date_and_time=true)
             v = Tables.columntable(DBInterface.execute(stmt)).dt
             DBInterface.close!(stmt)
             v
-        end),
-    Row("prepared execute-time mysql_date_and_time cannot override static prepare metadata", :preserve,
+        end; legacy=Union{Missing, DateTime}[DateTime(2021, 1, 2, 1, 2, 3, 456)]),
+    Row("prepared DATETIME (fsp 0) decodes to Timestamp{Second}", :fix,
         conn -> let stmt = DBInterface.prepare(conn, "SELECT CAST('2021-01-02 01:02:03' AS DATETIME) AS dt")
-            T = only(Tables.schema(DBInterface.execute(stmt; mysql_date_and_time=true)).types)
+            T = only(Tables.schema(DBInterface.execute(stmt)).types)
             DBInterface.close!(stmt)
             T
-        end),
+        end; legacy=Union{Missing, DateTime}),
     Row("prepared BIT(12): big-endian value of all bytes (1.x prepared read a shifted subset)", :fix,
         conn -> let stmt = DBInterface.prepare(conn, "SELECT Flags FROM manifest_employee ORDER BY ID")
             v = Tables.columntable(DBInterface.execute(stmt)).Flags
@@ -523,9 +517,9 @@ const ALL_ROWS = vcat(TEXT_ROWS, BINARY_ROWS)
 # mysql:8.4 with `capture!`; `run!` asserts `row.expected`, falling back to this table.
 const GOLDENS = Dict{String, Any}(
     "select *: Tables.schema (type mapping incl. BIGINT UNSIGNED, YEAR, BIT, TEXT, VARBINARY)" =>
-        Tuple{Symbol, Type}[(:ID, Int32), (:OfficeNo, Union{Missing, Int8}), (:DeptNo, Union{Missing, Int16}), (:EmpNo, Union{Missing, UInt64}), (:Wage, Union{Missing, Float32}), (:Salary, Union{Missing, Float64}), (:Rate, Union{Missing, DecimalResult}), (:LunchTime, Union{Missing, Dates.Time}), (:JoinDate, Union{Missing, Dates.Date}), (:LastLogin, Union{Missing, Dates.DateTime}), (:LastLogin2, Dates.DateTime), (:Initial, Union{Missing, String}), (:Name, Union{Missing, String}), (:Photo, Union{Missing, Vector{UInt8}}), (:JobType, Union{Missing, String}), (:Senior, Union{Missing, MySQL.Bit}), (:Born, Union{Missing, UInt64}), (:Flags, Union{Missing, MySQL.Bit}), (:Note, Union{Missing, String}), (:Raw, Union{Missing, String})],
+        Tuple{Symbol, Type}[(:ID, Int32), (:OfficeNo, Union{Missing, Int8}), (:DeptNo, Union{Missing, Int16}), (:EmpNo, Union{Missing, UInt64}), (:Wage, Union{Missing, Float32}), (:Salary, Union{Missing, Float64}), (:Rate, Union{Missing, DecimalResult}), (:LunchTime, Union{Missing, Dates.Time}), (:JoinDate, Union{Missing, Dates.Date}), (:LastLogin, Union{Missing, Timestamp{Second}}), (:LastLogin2, Timestamp{Second}), (:Initial, Union{Missing, DataString}), (:Name, Union{Missing, DataString}), (:Photo, Union{Missing, DataBytes}), (:JobType, Union{Missing, DataString}), (:Senior, Union{Missing, MySQL.Bit}), (:Born, Union{Missing, UInt64}), (:Flags, Union{Missing, MySQL.Bit}), (:Note, Union{Missing, DataString}), (:Raw, Union{Missing, DataString})],
     "select *: columntable values (NULLs, exact decimals, Time, Date, DateTime, blob, enum, single-byte BIT, utf8mb4 text)" =>
-        (ID = Int32[1, 2, 3], OfficeNo = Union{Missing, Int8}[1, 1, missing], DeptNo = Union{Missing, Int16}[2, 2, missing], EmpNo = Union{Missing, UInt64}[0x0000000000000515, 0xffffffffffffffff, missing], Wage = Union{Missing, Float32}[3.14f0, 3.14f0, missing], Salary = Union{Missing, Float64}[10000.5, 20000.25, missing], Rate = Union{Missing, DecimalResult}[DecimalResult("1.001"), DecimalResult("2.002"), missing], LunchTime = Union{Missing, Dates.Time}[Dates.Time(12), Dates.Time(13), missing], JoinDate = Union{Missing, Dates.Date}[Dates.Date("2015-08-03"), Dates.Date("2015-08-04"), missing], LastLogin = Union{Missing, Dates.DateTime}[Dates.DateTime("2015-09-05T12:31:30"), Dates.DateTime("2015-10-12T13:12:14"), missing], LastLogin2 = Dates.DateTime[Dates.DateTime("2015-09-05T12:31:30"), Dates.DateTime("2015-10-12T13:12:14"), Dates.DateTime("2015-09-05T10:05:10")], Initial = Union{Missing, String}["A", "B", missing], Name = Union{Missing, String}["John", "Tom", missing], Photo = Union{Missing, Vector{UInt8}}[UInt8[0x61, 0x62, 0x63], UInt8[0x64, 0x65, 0x66], missing], JobType = Union{Missing, String}["HR", "HR", missing], Senior = Union{Missing, MySQL.Bit}[MySQL.Bit(0x0000000000000001), MySQL.Bit(0x0000000000000001), missing], Born = Union{Missing, UInt64}[0x00000000000007cf, 0x00000000000007e8, missing], Note = Union{Missing, String}["héllo wörld 🐘", "", missing], Raw = Union{Missing, String}["\x01\x02", "", missing]),
+        (ID = Int32[1, 2, 3], OfficeNo = Union{Missing, Int8}[1, 1, missing], DeptNo = Union{Missing, Int16}[2, 2, missing], EmpNo = Union{Missing, UInt64}[0x0000000000000515, 0xffffffffffffffff, missing], Wage = Union{Missing, Float32}[3.14f0, 3.14f0, missing], Salary = Union{Missing, Float64}[10000.5, 20000.25, missing], Rate = Union{Missing, DecimalResult}[DecimalResult("1.001"), DecimalResult("2.002"), missing], LunchTime = Union{Missing, Dates.Time}[Dates.Time(12), Dates.Time(13), missing], JoinDate = Union{Missing, Dates.Date}[Dates.Date("2015-08-03"), Dates.Date("2015-08-04"), missing], LastLogin = Union{Missing, Timestamp{Second}}[Timestamp{Second}(2015, 9, 5, 12, 31, 30), Timestamp{Second}(2015, 10, 12, 13, 12, 14), missing], LastLogin2 = Timestamp{Second}[Timestamp{Second}(2015, 9, 5, 12, 31, 30), Timestamp{Second}(2015, 10, 12, 13, 12, 14), Timestamp{Second}(2015, 9, 5, 10, 5, 10)], Initial = Union{Missing, DataString}["A", "B", missing], Name = Union{Missing, DataString}["John", "Tom", missing], Photo = Union{Missing, DataBytes}[DataBytes(UInt8[0x61, 0x62, 0x63]), DataBytes(UInt8[0x64, 0x65, 0x66]), missing], JobType = Union{Missing, DataString}["HR", "HR", missing], Senior = Union{Missing, MySQL.Bit}[MySQL.Bit(0x0000000000000001), MySQL.Bit(0x0000000000000001), missing], Born = Union{Missing, UInt64}[0x00000000000007cf, 0x00000000000007e8, missing], Note = Union{Missing, DataString}["héllo wörld 🐘", "", missing], Raw = Union{Missing, DataString}["\x01\x02", "", missing]),
     "streaming (mysql_store_result=false) yields the same rows" =>
         Tuple{Int32, Any}[(1, "John"), (2, "Tom"), (3, missing)],
     "row is valid only while current: ArgumentError text" =>
@@ -538,14 +532,12 @@ const GOLDENS = Dict{String, Any}(
         ((ID = Int32[1, 2, 3],), (two = Int64[2],)),
     "escape honours the connection" =>
         "a\\'b\\\\c\\n",
-    "zero DATETIME under SQL_MODE='' decodes to the DateTime(0) sentinel" =>
-        Union{Missing, Dates.DateTime}[Dates.DateTime("0000-01-01T00:00:00")],
-    "DATETIME with sub-millisecond precision warns and truncates to ms (1.x text failed)" =>
-        Union{Missing, Dates.DateTime}[Dates.DateTime("2021-01-02T01:02:03.456")],
-    "mysql_date_and_time=true maps DATETIME(6) to DateAndTime" =>
-        Union{Missing, DateAndTime}[DateAndTime(Dates.Date("2021-01-02"), Dates.Time(1, 2, 3, 456, 789))],
-    "DateAndTime scales a short DATETIME(1) fraction (1.x read it as an unscaled microsecond count)" =>
-        Union{Missing, DateAndTime}[DateAndTime(Dates.Date("2021-01-02"), Dates.Time(1, 2, 3, 400, 0))],
+    "zero DATETIME under SQL_MODE='' decodes to the 0000-01-01T00:00:00 sentinel" =>
+        Union{Missing, Timestamp{Second}}[Timestamp{Second}(0, 1, 1)],
+    "DATETIME(6) decodes to Timestamp{Microsecond} with every digit (1.x DateTime failed)" =>
+        Union{Missing, Timestamp{Microsecond}}[Timestamp{Microsecond}(2021, 1, 2, 1, 2, 3, 456, 789)],
+    "DATETIME(1) decodes to Timestamp{Millisecond} (1.x DateAndTime read the fraction as an unscaled microsecond count)" =>
+        Union{Missing, Timestamp{Millisecond}}[Timestamp{Millisecond}(2021, 1, 2, 1, 2, 3, 400)],
     "transaction returns f()'s value and commits" =>
         (7, 1),
     "cursor close is idempotent and a closed cursor iterates empty" =>
@@ -553,25 +545,23 @@ const GOLDENS = Dict{String, Any}(
     "show format" =>
         true,
     "prepared SELECT schema mirrors the text mapping" =>
-        Tuple{Symbol, Type}[(:ID, Int32), (:EmpNo, Union{Missing, UInt64}), (:Salary, Union{Missing, Float64}), (:Rate, Union{Missing, DecimalResult}), (:Name, Union{Missing, String}), (:JoinDate, Union{Missing, Dates.Date}), (:LastLogin, Union{Missing, Dates.DateTime}), (:LunchTime, Union{Missing, Dates.Time}), (:Photo, Union{Missing, Vector{UInt8}}), (:JobType, Union{Missing, String}), (:Senior, Union{Missing, MySQL.Bit}), (:Born, Union{Missing, UInt64})],
+        Tuple{Symbol, Type}[(:ID, Int32), (:EmpNo, Union{Missing, UInt64}), (:Salary, Union{Missing, Float64}), (:Rate, Union{Missing, DecimalResult}), (:Name, Union{Missing, DataString}), (:JoinDate, Union{Missing, Dates.Date}), (:LastLogin, Union{Missing, Timestamp{Second}}), (:LunchTime, Union{Missing, Dates.Time}), (:Photo, Union{Missing, DataBytes}), (:JobType, Union{Missing, DataString}), (:Senior, Union{Missing, MySQL.Bit}), (:Born, Union{Missing, UInt64})],
     "prepared SELECT decodes values (ints, DOUBLE, exact decimals, Date, DateTime, Time, blob, enum, single-byte BIT, YEAR)" =>
-        (OfficeNo = Union{Missing, Int8}[1, 1, missing], EmpNo = Union{Missing, UInt64}[0x0000000000000515, 0xffffffffffffffff, missing], Salary = Union{Missing, Float64}[10000.5, 20000.25, missing], Rate = Union{Missing, DecimalResult}[DecimalResult("1.001"), DecimalResult("2.002"), missing], JoinDate = Union{Missing, Dates.Date}[Dates.Date("2015-08-03"), Dates.Date("2015-08-04"), missing], LastLogin = Union{Missing, Dates.DateTime}[Dates.DateTime("2015-09-05T12:31:30"), Dates.DateTime("2015-10-12T13:12:14"), missing], LunchTime = Union{Missing, Dates.Time}[Dates.Time(12), Dates.Time(13), missing], Photo = Union{Missing, Vector{UInt8}}[UInt8[0x61, 0x62, 0x63], UInt8[0x64, 0x65, 0x66], missing], JobType = Union{Missing, String}["HR", "HR", missing], Senior = Union{Missing, MySQL.Bit}[MySQL.Bit(0x0000000000000001), MySQL.Bit(0x0000000000000001), missing], Born = Union{Missing, UInt64}[0x00000000000007cf, 0x00000000000007e8, missing]),
+        (OfficeNo = Union{Missing, Int8}[1, 1, missing], EmpNo = Union{Missing, UInt64}[0x0000000000000515, 0xffffffffffffffff, missing], Salary = Union{Missing, Float64}[10000.5, 20000.25, missing], Rate = Union{Missing, DecimalResult}[DecimalResult("1.001"), DecimalResult("2.002"), missing], JoinDate = Union{Missing, Dates.Date}[Dates.Date("2015-08-03"), Dates.Date("2015-08-04"), missing], LastLogin = Union{Missing, Timestamp{Second}}[Timestamp{Second}(2015, 9, 5, 12, 31, 30), Timestamp{Second}(2015, 10, 12, 13, 12, 14), missing], LunchTime = Union{Missing, Dates.Time}[Dates.Time(12), Dates.Time(13), missing], Photo = Union{Missing, DataBytes}[DataBytes(UInt8[0x61, 0x62, 0x63]), DataBytes(UInt8[0x64, 0x65, 0x66]), missing], JobType = Union{Missing, DataString}["HR", "HR", missing], Senior = Union{Missing, MySQL.Bit}[MySQL.Bit(0x0000000000000001), MySQL.Bit(0x0000000000000001), missing], Born = Union{Missing, UInt64}[0x00000000000007cf, 0x00000000000007e8, missing]),
     "prepared WHERE with a bound parameter filters rows" =>
         Int32[1],
     "prepared row is valid only while current: ArgumentError text" =>
         (true, "ArgumentError: row 1 is no longer valid; mysql results are forward-only iterators where each row is only valid when iterated"),
     "prepared INSERT/SELECT round-trips bound parameters (int, float, string, date, time, blob)" =>
-        (OfficeNo = Union{Missing, Int8}[7], Wage = Union{Missing, Float32}[1.5f0], Name = Union{Missing, String}["prep"], JoinDate = Union{Missing, Dates.Date}[Dates.Date("2020-01-02")], LunchTime = Union{Missing, Dates.Time}[Dates.Time(9, 30)], Photo = Union{Missing, Vector{UInt8}}[UInt8[0x01, 0x02]]),
+        (OfficeNo = Union{Missing, Int8}[7], Wage = Union{Missing, Float32}[1.5f0], Name = Union{Missing, DataString}["prep"], JoinDate = Union{Missing, Dates.Date}[Dates.Date("2020-01-02")], LunchTime = Union{Missing, Dates.Time}[Dates.Time(9, 30)], Photo = Union{Missing, DataBytes}[DataBytes(UInt8[0x01, 0x02])]),
     "prepared parameters round-trip every supported non-Bool family" =>
-        (i8 = Int8[-128], u8 = UInt8[0xff], i16 = Int16[-32768], u16 = UInt16[0xffff], i32 = Int32[-2147483648], u32 = UInt32[0xffffffff], i64 = Int64[-9223372036854775808], u64 = UInt64[0xffffffffffffffff], f32 = Float32[1.5f0], f64 = Float64[-2.5], d64 = Union{Missing, String}["12.345678"], d128 = Union{Missing, String}["12345678901234567890123456789.123460"], s = String["héllo"], bytes = Union{Missing, String}["00FF"], d = Union{Missing, String}["2024-02-29"], dt = Union{Missing, String}["2024-02-29 13:14:15.250000"], dat = Union{Missing, String}["2024-02-29 13:14:15.250500"], tm = Union{Missing, String}["13:14:15.250500"], m_null = Int64[1], n_null = Int64[1]),
+        (i8 = Int8[-128], u8 = UInt8[0xff], i16 = Int16[-32768], u16 = UInt16[0xffff], i32 = Int32[-2147483648], u32 = UInt32[0xffffffff], i64 = Int64[-9223372036854775808], u64 = UInt64[0xffffffffffffffff], f32 = Float32[1.5f0], f64 = Float64[-2.5], d64 = Union{Missing, DataString}["12.345678"], d128 = Union{Missing, DataString}["12345678901234567890123456789.123456"], s = DataString["héllo"], bytes = Union{Missing, DataString}["00FF"], d = Union{Missing, DataString}["2024-02-29"], dt = Union{Missing, DataString}["2024-02-29 13:14:15.250000"], dat = Union{Missing, DataString}["2024-02-29 13:14:15.250500"], tm = Union{Missing, DataString}["13:14:15.250500"], m_null = Int64[1], n_null = Int64[1]),
     "executemany bulk-inserts each parameter row in a transaction" =>
-        (a = Union{Missing, Int32}[1, 2, 3], b = Union{Missing, String}["x", "y", "z"]),
-    "prepared DATETIME(6) → DateTime warns and truncates to ms" =>
-        Union{Missing, Dates.DateTime}[Dates.DateTime("2021-01-02T01:02:03.456")],
-    "prepared mysql_date_and_time=true maps DATETIME(6) to DateAndTime" =>
-        Union{Missing, DateAndTime}[DateAndTime(Dates.Date("2021-01-02"), Dates.Time(1, 2, 3, 456, 789))],
-    "prepared execute-time mysql_date_and_time cannot override static prepare metadata" =>
-        Union{Missing, Dates.DateTime},
+        (a = Union{Missing, Int32}[1, 2, 3], b = Union{Missing, DataString}["x", "y", "z"]),
+    "prepared DATETIME(6) decodes to Timestamp{Microsecond} with every digit (1.x truncated to ms)" =>
+        Union{Missing, Timestamp{Microsecond}}[Timestamp{Microsecond}(2021, 1, 2, 1, 2, 3, 456, 789)],
+    "prepared DATETIME (fsp 0) decodes to Timestamp{Second}" =>
+        Union{Missing, Timestamp{Second}},
 )
 
 const SURFACE_ROWS = SurfaceRow[
@@ -713,11 +703,10 @@ function run!(make::Function; password::AbstractString, port::Integer)
     return nothing
 end
 
-# `repr` that survives an eval round trip for every value the rows produce (`MySQL.Bit`
-# and `Dec64` print forms that do not).
+# `repr` that survives an eval round trip for every value the rows produce (`MySQL.Bit`'s
+# print form does not).
 golden_repr(x) = repr(x)
 golden_repr(x::MySQL.Bit) = "MySQL.Bit(" * repr(x.bits) * ")"
-golden_repr(x::Dec64) = "d64\"" * string(x) * "\""
 golden_repr(x::Missing) = "missing"
 golden_repr(v::AbstractVector{UInt8}) = repr(v)
 golden_repr(v::AbstractVector) = string(eltype(v)) * "[" * join(map(golden_repr, v), ", ") * "]"

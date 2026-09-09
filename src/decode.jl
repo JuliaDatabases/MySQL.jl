@@ -3,25 +3,23 @@
 # values, are documented in docs/src/migration.md.
 
 """
-    ResultOptions(; date_and_time=false, zero_dates=:sentinel, time_type=Dates.Time)
+    ResultOptions(; zero_dates=:sentinel, time_type=Dates.Time)
 
-Per-result decoding policy. `date_and_time` maps DATETIME/TIMESTAMP to `DateAndTime`
-(`mysql_date_and_time=true`); `zero_dates` decides what `0000-00-00` values become
-(`:sentinel` → `Date(0)`/`DateTime(0)`, `:missing` → `missing` and every date column is
-typed `Union{Missing, T}`, `:error` → `ConversionError`); `time_type` is `Dates.Time`
-(values outside `0 ≤ t < 24h` raise `ConversionError`) or `Dates.Microsecond` (lossless,
-signed, up to ±838 h).
+Per-result decoding policy. `zero_dates` decides what `0000-00-00` values become
+(`:sentinel` → `Date(0)` / `Timestamp{P}(0, 1, 1)`, `:missing` → `missing` and every date
+column is typed `Union{Missing, T}`, `:error` → `ConversionError`); `time_type` is
+`Dates.Time` (values outside `0 ≤ t < 24h` raise `ConversionError`) or `Dates.Microsecond`
+(lossless, signed, up to ±838 h).
 """
 struct ResultOptions
-    date_and_time::Bool
     zero_dates::Symbol
     time_type::Type
 end
 
-function ResultOptions(; date_and_time::Bool=false, zero_dates::Symbol=:sentinel, time_type::Type=Dates.Time)
+function ResultOptions(; zero_dates::Symbol=:sentinel, time_type::Type=Dates.Time)
     zero_dates in (:sentinel, :missing, :error) || throw(ArgumentError("zero_dates must be :sentinel, :missing or :error"))
     (time_type === Dates.Time || time_type === Dates.Microsecond) || throw(ArgumentError("time_type must be Dates.Time or Dates.Microsecond"))
-    return ResultOptions(date_and_time, zero_dates, time_type)
+    return ResultOptions(zero_dates, time_type)
 end
 
 const DEFAULT_RESULT_OPTIONS = ResultOptions()
@@ -31,19 +29,19 @@ field_type_enum(def::P.ColumnDef) = return UInt32(def.type)
 """
     juliatype(def::Protocol.ColumnDef, opts::ResultOptions) -> Type
 
-The column's Julia type: `MySQL.juliatype` applied to the wire type and flags, then
-the decoding policies: `time_type`, and `zero_dates=:missing` widening every date
-column to `Union{Missing, T}` regardless of `NOT NULL`.
+The column's Julia type: `MySQL.juliatype` applied to the wire type, flags, and fractional
+precision (`decimals`), then the decoding policies: `time_type`, and `zero_dates=:missing`
+widening every date column to `Union{Missing, T}` regardless of `NOT NULL`.
 """
 function juliatype(def::P.ColumnDef, opts::ResultOptions)
-    T = juliatype(field_type_enum(def), P.is_not_null(def), P.is_unsigned(def), P.is_binary(def), opts.date_and_time)
+    T = juliatype(field_type_enum(def), P.is_not_null(def), P.is_unsigned(def), P.is_binary(def), Int(def.decimals))
     base = nonmissingtype(T)
     base === Dates.Time && opts.time_type !== Dates.Time && (T = T === base ? opts.time_type : Union{Missing, opts.time_type})
     is_date_type(base) && opts.zero_dates == :missing && (T = Union{Missing, base})
     return T
 end
 
-is_date_type(T) = return T === Date || T === DateTime || T === DateAndTime
+is_date_type(T) = return T === Date || T <: Timestamp
 
 @noinline conversion_error(T, buf::Vector{UInt8}, pos::Int, len::Int) = return throw(P.ConversionError("cannot convert \"$(String(buf[pos:(pos + len - 1)]))\" to $T"))
 @noinline conversion_error(T, msg::AbstractString) = return throw(P.ConversionError("cannot convert to $T: $msg"))
@@ -76,6 +74,23 @@ function decode_missing_aware(::Type{T}, buf::Vector{UInt8}, pos::Int, len::Int,
 end
 
 # ---- strings, bytes, decimals ----
+
+# Strings and bytes decode to DataStrings views: values of up to 12 bytes are stored inline,
+# longer ones reference the cursor's buffer (which a buffered cursor never mutates and a
+# streaming cursor allocates per row), so no bytes are copied and nothing is allocated.
+# Requesting `String`/`Vector{UInt8}` explicitly (`Tables.getcolumn(row, String, i, name)`)
+# still yields a copy.
+function decode_value(::Type{DataString}, buf::Vector{UInt8}, pos::Int, len::Int, ::ResultOptions)
+    len <= DataStrings.INLINE_MAX && return DataString(DataStrings.inline_payload(buf, pos, len), NO_BYTES)
+    return DataString(DataStrings.view_payload(buf, pos, len, 0, pos - 1), buf)
+end
+
+function decode_value(::Type{DataBytes}, buf::Vector{UInt8}, pos::Int, len::Int, ::ResultOptions)
+    len <= DataStrings.INLINE_MAX && return DataBytes(DataStrings.inline_payload(buf, pos, len), NO_BYTES)
+    return DataBytes(DataStrings.view_payload(buf, pos, len, 0, pos - 1), buf)
+end
+
+const NO_BYTES = UInt8[]
 
 function decode_value(::Type{String}, buf::Vector{UInt8}, pos::Int, len::Int, ::ResultOptions)
     return GC.@preserve buf unsafe_string(pointer(buf, pos), len)
@@ -173,7 +188,7 @@ function parse_date_parts(::Type{Date}, buf::Vector{UInt8}, pos::Int, len::Int)
     return parse_datetime_parts(buf, pos, len)
 end
 
-function parse_date_parts(::Type{T}, buf::Vector{UInt8}, pos::Int, len::Int) where {T <: Union{DateTime, DateAndTime}}
+function parse_date_parts(::Type{<:Timestamp}, buf::Vector{UInt8}, pos::Int, len::Int)
     len >= 19 || return nothing
     return parse_datetime_parts(buf, pos, len)
 end
@@ -186,11 +201,29 @@ function zero_date_kind(parts)
     return mo == 0 || d == 0 ? :partial : :none
 end
 
+# The `:sentinel` for `0000-00-00`: `Date(0)` / `0000-01-01T00:00:00`, as 1.x produced.
 function zero_date_value(::Type{T}, buf::Vector{UInt8}, pos::Int, len::Int, opts::ResultOptions) where {T}
     opts.zero_dates == :error && conversion_error(T, "zero dates are rejected (zero_dates=:error)")
     T === Date && return Date(0)
-    T === DateTime && return DateTime(0)
-    return DateAndTime(Date(0), Time(0))
+    return timestamp_from_parts(T, 0, 1, 1, 0, 0, 0, 0)
+end
+
+const UNIX_EPOCH_DAYS = Dates.value(Date(1970, 1, 1))   # rata die of the Unix epoch
+
+timestamp_ticks_per_second(::Type{Second}) = return Int64(1)
+timestamp_ticks_per_second(::Type{Millisecond}) = return Int64(1_000)
+timestamp_ticks_per_second(::Type{Microsecond}) = return Int64(1_000_000)
+timestamp_ticks_per_second(::Type{Nanosecond}) = return Int64(1_000_000_000)
+
+# Already-validated (year, month, day, hour, minute, second, micros) parts as `Timestamp{P}`:
+# the Unix tick count is computed here and wrapped in its `UTInstant`, which skips the
+# parts constructor's second validation (and its error-message formatting, which is not
+# resolvable under `--trim=safe`).
+@inline function timestamp_from_parts(::Type{Timestamp{P}}, y, mo, d, h, mi, s, micros) where {P}
+    per_second = timestamp_ticks_per_second(P)
+    seconds = (Int64(Dates.totaldays(y, mo, d)) - UNIX_EPOCH_DAYS) * Int64(86_400) + Int64(h) * 3600 + Int64(mi) * 60 + Int64(s)
+    fraction = per_second >= 1_000_000 ? Int64(micros) * (per_second ÷ 1_000_000) : Int64(micros) ÷ (1_000_000 ÷ per_second)
+    return Timestamp{P}(Dates.UTInstant(P(seconds * per_second + fraction)))
 end
 
 function decode_value(::Type{Date}, buf::Vector{UInt8}, pos::Int, len::Int, opts::ResultOptions)
@@ -204,32 +237,25 @@ function decode_value(::Type{Date}, buf::Vector{UInt8}, pos::Int, len::Int, opts
     return Date(y, mo, d)
 end
 
-function decode_value(::Type{DateTime}, buf::Vector{UInt8}, pos::Int, len::Int, opts::ResultOptions)
-    parts = parse_date_parts(DateTime, buf, pos, len)
-    parts === nothing && conversion_error(DateTime, buf, pos, len)
+# DATETIME/TIMESTAMP → `Timestamp{P}`: every digit the server sent is kept (a value finer
+# than the column's declared precision, which servers never send, is a `ConversionError`).
+function decode_value(::Type{Timestamp{P}}, buf::Vector{UInt8}, pos::Int, len::Int, opts::ResultOptions) where {P}
+    parts = parse_date_parts(Timestamp{P}, buf, pos, len)
+    parts === nothing && conversion_error(Timestamp{P}, buf, pos, len)
     kind = zero_date_kind(parts)
-    kind == :zero && return zero_date_value(DateTime, buf, pos, len, opts)
-    kind == :partial && conversion_error(DateTime, "partial zero date \"$(String(buf[pos:(pos + len - 1)]))\" (use zero_dates=:missing)")
+    kind == :zero && return zero_date_value(Timestamp{P}, buf, pos, len, opts)
+    kind == :partial && conversion_error(Timestamp{P}, "partial zero date \"$(String(buf[pos:(pos + len - 1)]))\" (use zero_dates=:missing)")
     y, mo, d, h, mi, s, micros = parts
-    # `DateTime` carries milliseconds: finer precision warns once and is truncated (the same
-    # policy on both protocols; 1.x failed on the text path and truncated on the binary one).
-    micros % 1000 == 0 || dateandtime_warning()
-    Dates.validargs(DateTime, y, mo, d, h, mi, s, micros ÷ 1000) === nothing || conversion_error(DateTime, buf, pos, len)
-    return DateTime(y, mo, d, h, mi, s, micros ÷ 1000)
+    Dates.validargs(Date, y, mo, d) === nothing || conversion_error(Timestamp{P}, buf, pos, len)
+    (h < 24 && mi < 60 && s < 60 && micros % timestamp_micros_unit(P) == 0) || conversion_error(Timestamp{P}, buf, pos, len)
+    return timestamp_from_parts(Timestamp{P}, y, mo, d, h, mi, s, micros)
 end
 
-function decode_value(::Type{DateAndTime}, buf::Vector{UInt8}, pos::Int, len::Int, opts::ResultOptions)
-    parts = parse_date_parts(DateAndTime, buf, pos, len)
-    parts === nothing && conversion_error(DateAndTime, buf, pos, len)
-    kind = zero_date_kind(parts)
-    kind == :zero && return zero_date_value(DateAndTime, buf, pos, len, opts)
-    kind == :partial && conversion_error(DateAndTime, "partial zero date \"$(String(buf[pos:(pos + len - 1)]))\" (use zero_dates=:missing)")
-    y, mo, d, h, mi, s, micros = parts
-    Dates.validargs(Date, y, mo, d) === nothing || conversion_error(DateAndTime, buf, pos, len)
-    (h < 24 && mi < 60 && s < 60) || conversion_error(DateAndTime, buf, pos, len)
-    millis, micro = divrem(micros, 1000)
-    return DateAndTime(Date(y, mo, d), Time(h, mi, s, millis, micro))
-end
+# Microseconds per tick of a `Timestamp{P}` resolution (a value must be a whole number of ticks).
+timestamp_micros_unit(::Type{Second}) = return 1_000_000
+timestamp_micros_unit(::Type{Millisecond}) = return 1_000
+timestamp_micros_unit(::Type{Microsecond}) = return 1
+timestamp_micros_unit(::Type{Nanosecond}) = return 1
 
 # TIME: [-]H+:MM:SS[.ffffff], hours up to 838. Returns the signed total in microseconds.
 function parse_time_micros(buf::Vector{UInt8}, pos::Int, len::Int)

@@ -10,7 +10,7 @@ crash classes they caused (issues #220, #236, #240, #208, #206).
 `MySQL.Connection` is now the native connection. Most code — `DBInterface.connect` /
 `execute` / `prepare` / `executemany` / `executemultiple` / `transaction`, Tables.jl
 cursors, `MySQL.load`, buffered (`mysql_store_result=true`, the default) and streaming
-result sets, `mysql_date_and_time` — works unchanged. Pin `MySQL = "1"` to stay on the
+result sets — works unchanged. Pin `MySQL = "1"` to stay on the
 last Connector/C release.
 
 ## Upgrade checklist
@@ -20,14 +20,26 @@ MySQL.jl 2.0 requires **Julia 1.10 or later**.
 1. **Errors**: replace `MySQL.API.Error` / `MySQL.API.StmtError` with `MySQL.Error` /
    `MySQL.StmtError` (same field names/types plus a new `sqlstate`), or catch the root
    `MySQL.MySQLError`.
-2. **Value types**: replace `MySQL.API.Bit` with `MySQL.Bit`. The `MySQL.DateAndTime` type
-   stays unchanged; temporal decoding corrections are listed below. DECIMAL results decode
-   to `MySQL.DecimalResult` (`DataDecimals.DecimalValue{DataDecimals.Int256}`), which preserves all 65 digits and
-   the stored scale, instead of `DecFP.Dec64`. DataDecimals values bind directly as
+2. **Value types**: replace `MySQL.API.Bit` with `MySQL.Bit`. Text columns decode to
+   `DataString` and BLOB columns to `DataBytes`
+   ([DataStrings.jl](https://github.com/JuliaData/DataStrings.jl)): zero-copy views of the
+   result buffer that compare, hash, sort, and print like `String`/`Vector{UInt8}`; copy
+   out with `String(s)`/`Vector{UInt8}(b)`, or ask the typed accessor for `String`
+   explicitly. Code that dispatches on `::String` needs `::AbstractString`. DATETIME/TIMESTAMP
+   columns decode to `Timestamp{P}` — [Durations.jl](https://github.com/JuliaData/Durations.jl)'s
+   `Int64` Unix-epoch instant, the type proposed for the Julia 1.14 Dates stdlib, which
+   `MySQL` re-exports — at the column's declared fractional precision: `DATETIME` is
+   `Timestamp{Second}`, `DATETIME(1..3)` `Timestamp{Millisecond}`, `DATETIME(4..6)`
+   `Timestamp{Microsecond}`. Every value is exact, so `MySQL.DateAndTime` and the
+   `mysql_date_and_time` keyword are gone. `DateTime(ts)`, `Date(ts)`, and `Time(ts)`
+   convert; comparisons with `DateTime` work directly; `DateTime` values still bind as
+   parameters. DECIMAL results decode to `MySQL.DecimalResult`
+   (`DataDecimals.DecimalValue{DataDecimals.Int256}`), which preserves all 65 digits and
+   the stored scale, instead of `DecFP.Dec64`; DataDecimals values bind directly as
    parameters, and `MySQL.load` infers `DECIMAL(P,S)` from a fixed-scale type (for a
-   `DecimalValue` column, specify the destination type with `coltypes`). DecFP is no longer
-   a dependency: with `using DecFP`, a package extension keeps `Dec64`/`Dec128` values
-   bindable and loadable (`NUMERIC(16, 6)`/`NUMERIC(35, 6)`) as in 1.x.
+   `DecimalValue` column, specify the destination type with `coltypes`). DecFP is not
+   supported anymore: convert `Dec64`/`Dec128` values to DataDecimals (or strings) before
+   binding them.
 3. **Multi-statements**: pass `multi_statements=true` if you relied on 1.x accepting
    `"stmt1; stmt2"` by default (an `if/elseif` bug made 1.x enable it silently).
 4. **Enum-valued options**: pass Symbols — `ssl_mode=:required` (was
@@ -52,8 +64,8 @@ MySQL.jl 2.0 requires **Julia 1.10 or later**.
 |---|---|
 | `MySQL.API.Error`, `MySQL.API.StmtError` | `MySQL.Error`, `MySQL.StmtError` (aliases of `MySQL.Protocol.Error`/`StmtError`; same `errno::Cuint`/`msg` fields and `showerror` text, plus `sqlstate`); root type `MySQL.MySQLError` |
 | `MySQL.API.Bit` | `MySQL.Bit` (same `bits::UInt64` field) |
-| `MySQL.DateAndTime` (`MySQL.API.DateAndTime`) | `MySQL.DateAndTime` (unchanged) |
-| `MySQL.API.juliatype` / `MySQL.juliatype` | `MySQL.juliatype` (DECIMAL now uses DataDecimals) |
+| `MySQL.DateAndTime` (`MySQL.API.DateAndTime`), `mysql_date_and_time=true` | removed: DATETIME/TIMESTAMP decode to `Timestamp{P}` (re-exported from Durations.jl) with every digit the column carries |
+| `MySQL.API.juliatype` / `MySQL.juliatype` | `MySQL.juliatype` (strings → `DataString`, blobs → `DataBytes`, DATETIME/TIMESTAMP → `Timestamp{P}`, DECIMAL → DataDecimals) |
 | `MySQL.API.MYSQL_TYPE_*` constants | `MySQL.Protocol.MYSQL_TYPE_*` (wire-value `UInt8`s) |
 | `MySQL.API.SSL_MODE_*`, `MySQL.API.MYSQL_PROTOCOL_*` enums | Symbols: `ssl_mode=:disabled/:preferred/:required/:verify_ca/:verify_identity`, `protocol=:default/:tcp/:socket/:pipe` |
 | `MySQL.API.mysqltype` | removed (parameter types are inferred from Julia values when binding) |
@@ -73,7 +85,9 @@ row types `MySQL.TextRow` and `MySQL.BinaryRow` (1.x: `MySQL.TextRow` and `MySQL
 - **`conn.port`** is an `Int` (was a `String`), and `Base.show` prints it unquoted.
 - **`MySQL.load`** `debug` keyword accepts `false`/`true`/`:values`; `debug=true` logs
   generated statements only, `debug=:values` also logs row values (1.x `debug=true`
-  logged values).
+  logged values). A `DateTime` column is created as `DATETIME(3)` (1.x: `DATETIME`,
+  which dropped the milliseconds); `Timestamp{Second}`/`{Millisecond}`/`{Microsecond}`
+  columns become `DATETIME`/`DATETIME(3)`/`DATETIME(6)`.
 
 ## Unchanged (Preserve)
 
@@ -110,13 +124,13 @@ Deliberate, documented changes relative to Connector/C 1.6.0:
 | `executemultiple` | first-OK result yielded nothing; later results mutated one cursor (stale `lookup`, aliased metadata) | every result (DML/OK included) is a **distinct cursor** with immutable metadata and its own OK snapshot; advancing past an unconsumed streaming result drains and invalidates it |
 | `lastrowid` | read live connection/statement state (sticky) | snapshot from the cursor's own OK/terminator (a SELECT cursor reports 0) |
 | DML cursor `length` | `-1` (the C client's sentinel; `collect` threw) | a result-less cursor has `length` 0 and iterates empty; **buffered SELECT cursors report the row count**; the outcome is in `rows_affected`/`lastrowid` |
-| Sub-millisecond DATETIME → `DateTime` | text errored; binary (prepared) truncated silently | both protocols warn once and truncate to milliseconds; use `mysql_date_and_time=true` for lossless `DateAndTime` values |
-| `DateAndTime` from DATETIME(1..5) (text) | the fractional digits were read as an unscaled microsecond count (`.4` → 4 µs) | scaled by position (`.4` → 400 ms), as the binary protocol always did |
+| DATETIME/TIMESTAMP result type | `DateTime` (milliseconds): sub-millisecond values errored on the text protocol and were silently truncated on the binary one; `mysql_date_and_time=true` gave `DateAndTime`, whose text path read `DATETIME(1..5)` fractions as an unscaled microsecond count (`.4` → 4 µs) | `Timestamp{Second}` / `Timestamp{Millisecond}` / `Timestamp{Microsecond}` by the column's `fsp`; every digit is kept, nothing is truncated; `DateTime` parameters still bind, a `Timestamp{Nanosecond}` parameter with a sub-microsecond part raises `InexactError` |
+| String and BLOB result types | `String` / `Vector{UInt8}` copies (one allocation per value; `TextRow` values could alias freed C memory, #206) | `DataString` / `DataBytes` views of the Julia-owned result buffer: no copy, no allocation per value, and the values stay valid after the row is gone; explicit `String`/`Vector{UInt8}` requests still copy |
 | BIT decoding | text: first byte only; binary: little-endian | big-endian value of all bytes (≤ 8) in both protocols |
 | BIT parameters | little-endian `bitvalue` encoding | big-endian binary string (matches the decode) |
 | `Bool` parameters | fell through to the `MYSQL_TYPE_STRING` fallback (untested latent bug) | bound as `MYSQL_TYPE_TINY` |
 | TIME decoding | text parse errored on negative/≥24 h; binary ignored sign and days | `Dates.Time` for `0 ≤ t < 24h`, `ConversionError` otherwise; `time_type=Dates.Microsecond` opt-in is lossless and signed |
-| Zero dates | text special-cased only zero DATETIME; text zero DATE failed; binary mapped zero components to 1970 | unified `zero_dates` policy: `:sentinel` (default, `Date(0)`/`DateTime(0)`), `:missing` (widens column types to `Union{Missing, T}`), `:error`; partial zero dates (`2024-00-05`) are `ConversionError` unless `:missing` |
+| Zero dates | text special-cased only zero DATETIME; text zero DATE failed; binary mapped zero components to 1970 | unified `zero_dates` policy: `:sentinel` (default, `Date(0)` / `Timestamp{P}(0, 1, 1)`), `:missing` (widens column types to `Union{Missing, T}`), `:error`; partial zero dates (`2024-00-05`) are `ConversionError` unless `:missing` |
 | `Base.isopen` | `mysql_ping` round trip | local check only; use `MySQL.ping(conn)` for a round trip |
 | Errors | `API.Error`/`API.StmtError` with pointer-only constructors | `MySQL.Error`/`MySQL.StmtError` keep the same names, field names and types (`errno::Cuint`, `msg`) and `showerror` text, in a real hierarchy (`MySQLError` → `ServerError` → `Error`/`StmtError`, plus `ProtocolError`, `AuthError`, `TimeoutError`, `ConversionError`, …), with public constructors and a new `sqlstate` field |
 | Buffered memory | unbounded | buffered results are bounded by `max_buffered_bytes` (default 256 MiB, per command across all retained result sets incl. row offsets/NULL masks/metadata); exceeding it is a `ProtocolError`. Streaming stays unbounded by default (`max_response_bytes=nothing`) |
@@ -124,7 +138,6 @@ Deliberate, documented changes relative to Connector/C 1.6.0:
 | Cleanup/finalizers | abandoned C handles depended on Connector/C lifetimes | explicit `close!` or a do-block remains the contract; a dropped connection only enqueues its transport for the timer reaper, and a dropped statement only parks its preallocated id for the next command. Finalizers do no protocol or transport I/O; explicit close, timer reaping, and parked statement close are exactly-once |
 | Concurrent use | not thread-safe | connection operations are lock-serialized. One task must consume a streaming cursor; a command from another task drains the pending response and invalidates that cursor instead of overwriting its Julia-owned row bytes. A transaction owns the connection lock until commit or rollback |
 | `MySQL.load` | one round trip per row; embedded backticks in identifiers were not escaped; `debug=true` logged row values | rows are inserted in multi-row batches (`batchsize=1000`, bounded by the packet size, `max_columns`, and the 65535-marker limit); doubles embedded identifier backticks; `debug=true` logs statements only; `debug=:values` logs row values |
-| Value lifetime (#206) | `TextRow` values could alias freed C memory | rows decode from Julia-owned, cursor-owned buffers |
 
 ## Deprecated (accepted with a warning; no effect)
 
@@ -159,8 +172,9 @@ read), `max_buffered_bytes`, `max_response_bytes`, `max_columns`, `max_result_se
 `max_session_state_bytes`, `attrs` (connection attributes sent in the handshake),
 `debug` (per-packet protocol debug logging), `MySQL.ping`, `MySQL.connection_id`,
 `MySQL.server_version`, `MySQL.server_kind`, `MySQL.escape_identifier`,
-`MySQL.send_long_data!`, `MySQL.reset_statement!`, `MySQL.DecimalResult`, and the
-`batchsize` keyword of `MySQL.load`.
+`MySQL.send_long_data!`, `MySQL.reset_statement!`, `MySQL.DecimalResult`,
+`MySQL.timestamp_type`, the re-exported `Timestamp`, and the `batchsize` keyword of
+`MySQL.load`.
 
 ## Option value types (2.0)
 

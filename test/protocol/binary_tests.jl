@@ -387,13 +387,14 @@ end
     date4 = UInt8[0xe8, 0x07, 0x02, 0x1d]                                   # 2024-02-29
     @test N.decode_binary(Date, date4, 1, 4, o) == Date(2024, 2, 29)
     dt7 = UInt8[0xe8, 0x07, 0x02, 0x1d, 0x0d, 0x0e, 0x0f]                   # 2024-02-29 13:14:15
-    @test N.decode_binary(DateTime, dt7, 1, 7, o) == DateTime(2024, 2, 29, 13, 14, 15)
+    @test N.decode_binary(Timestamp{Second}, dt7, 1, 7, o) === Timestamp{Second}(2024, 2, 29, 13, 14, 15)
+    @test N.decode_binary(Timestamp{Microsecond}, dt7, 1, 7, o) === Timestamp{Microsecond}(2024, 2, 29, 13, 14, 15)
     dt11 = vcat(dt7, reinterpret(UInt8, UInt32[250000]))                    # .250000 → 250 ms exactly
-    @test N.decode_binary(DateTime, dt11, 1, 11, o) == DateTime(2024, 2, 29, 13, 14, 15, 250)
-    # sub-millisecond precision: 1.x prepared-statement behaviour warns then truncates to ms
+    @test N.decode_binary(Timestamp{Millisecond}, dt11, 1, 11, o) === Timestamp{Millisecond}(2024, 2, 29, 13, 14, 15, 250)
+    @test_throws P.ConversionError N.decode_binary(Timestamp{Second}, dt11, 1, 11, o)   # finer than the declared precision
     dtsub = vcat(dt7, reinterpret(UInt8, UInt32[250500]))
-    @test (@test_logs (:warn, r"microsecond") N.decode_binary(DateTime, dtsub, 1, 11, o)) == DateTime(2024, 2, 29, 13, 14, 15, 250)
-    @test N.decode_binary(MySQL.DateAndTime, dtsub, 1, 11, o) == MySQL.DateAndTime(Date(2024, 2, 29), Time(13, 14, 15, 250, 500))
+    @test N.decode_binary(Timestamp{Microsecond}, dtsub, 1, 11, o) === Timestamp{Microsecond}(2024, 2, 29, 13, 14, 15, 250, 500)
+    @test_throws P.ConversionError N.decode_binary(Timestamp{Millisecond}, dtsub, 1, 11, o)
     # TIME len 0 (zero), 8 (no micros) and 12 (with micros and days), and the negative/day Fix
     @test N.decode_binary(Time, UInt8[], 1, 0, o) == Time(0)
     time8 = UInt8[0x00, 0x00, 0x00, 0x00, 0x00, 0x0d, 0x0e, 0x0f]           # +0d 13:14:15
@@ -414,27 +415,28 @@ end
     bad_micros = vcat(time8, reinterpret(UInt8, UInt32[1_000_000]))
     @test_throws P.ConversionError N.decode_binary(Dates.Microsecond, bad_micros, 1, 12, o)
     bad_clock = vcat(UInt8[0xe8, 0x07, 0x02, 0x1d, 0x18, 0x00, 0x00], reinterpret(UInt8, UInt32[0]))
-    @test_throws P.ConversionError N.decode_binary(MySQL.DateAndTime, bad_clock, 1, 11, o)
+    @test_throws P.ConversionError N.decode_binary(Timestamp{Microsecond}, bad_clock, 1, 11, o)
     @test_throws P.ConversionError N.decode_binary(Date, bad_clock, 1, 11, o)
     bad_date_micros = vcat(date4, UInt8[0x00, 0x00, 0x00], reinterpret(UInt8, UInt32[1_000_000]))
     @test_throws P.ConversionError N.decode_binary(Date, bad_date_micros, 1, 11, o)
     # invalid length is a conversion error, not an out-of-bounds read
-    @test_throws P.ConversionError N.decode_binary(DateTime, UInt8[0x00, 0x00, 0x00], 1, 3, o)
+    @test_throws P.ConversionError N.decode_binary(Timestamp{Second}, UInt8[0x00, 0x00, 0x00], 1, 3, o)
 end
 
 @testset "binary zero-date policy matches the text path" begin
     zero = UInt8[]
-    @test N.decode_binary(DateTime, zero, 1, 0, N.DEFAULT_RESULT_OPTIONS) == DateTime(0)   # :sentinel
+    @test N.decode_binary(Timestamp{Second}, zero, 1, 0, N.DEFAULT_RESULT_OPTIONS) === Timestamp{Second}(0, 1, 1)   # :sentinel
+    @test N.decode_binary(Timestamp{Microsecond}, zero, 1, 0, N.DEFAULT_RESULT_OPTIONS) === Timestamp{Microsecond}(0, 1, 1)
     @test N.decode_binary(Date, zero, 1, 0, N.DEFAULT_RESULT_OPTIONS) == Date(0)
     @test N.decode_binary(Union{Missing, Date}, zero, 1, 0, N.ResultOptions(; zero_dates=:missing)) === missing
-    @test_throws P.ConversionError N.decode_binary(DateTime, zero, 1, 0, N.ResultOptions(; zero_dates=:error))
+    @test_throws P.ConversionError N.decode_binary(Timestamp{Second}, zero, 1, 0, N.ResultOptions(; zero_dates=:error))
     partial = UInt8[0xE8, 0x07, 0x00, 0x01]   # 2024-00-01
     @test_throws P.ConversionError N.decode_binary(Date, partial, 1, 4, N.DEFAULT_RESULT_OPTIONS)
     @test N.decode_binary(Union{Missing, Date}, partial, 1, 4, N.ResultOptions(; zero_dates=:missing)) === missing
     year0 = UInt8[0x00, 0x00, 0x01, 0x01]   # 0000-01-01: a legal date, not a partial zero
     @test N.decode_binary(Date, year0, 1, 4, N.DEFAULT_RESULT_OPTIONS) == Date(0, 1, 1)
     @test N.decode_binary(Union{Missing, Date}, year0, 1, 4, N.ResultOptions(; zero_dates=:missing)) == Date(0, 1, 1)
-    @test N.decode_binary(DateTime, vcat(year0, UInt8[0x17, 0x3B, 0x3B]), 1, 7, N.ResultOptions(; zero_dates=:error)) == DateTime(0, 1, 1, 23, 59, 59)
+    @test N.decode_binary(Timestamp{Second}, vcat(year0, UInt8[0x17, 0x3B, 0x3B]), 1, 7, N.ResultOptions(; zero_dates=:error)) === Timestamp{Second}(0, 1, 1, 23, 59, 59)
     malformed_partial = vcat(partial, UInt8[0x18, 0x00, 0x00])
     @test_throws P.ConversionError N.decode_binary(Union{Missing, Date}, malformed_partial, 1, 7, N.ResultOptions(; zero_dates=:missing))
     @test N.decode_binary(Union{Missing, Int32}, UInt8[], 1, -1, N.DEFAULT_RESULT_OPTIONS) === missing
@@ -526,10 +528,10 @@ end
     end) do conn
         stmt = DBInterface.prepare(conn, "SELECT i, s FROM t WHERE i > ?")
         @test stmt isa N.Statement && stmt.nparams == 1
-        @test stmt.names == [:i, :s] && stmt.types == Type[Int32, Union{Missing, String}]
+        @test stmt.names == [:i, :s] && stmt.types == Type[Int32, Union{Missing, DataString}]
         cur = DBInterface.execute(stmt, (5,))
         @test cur isa N.BinaryCursor && eltype(cur) == N.BinaryRow
-        @test Tables.schema(cur) == Tables.Schema([:i, :s], [Int32, Union{Missing, String}])
+        @test Tables.schema(cur) == Tables.Schema([:i, :s], [Int32, Union{Missing, DataString}])
         seen = [(r.i, r.s) for r in cur]     # fields read while each row is current
         @test isequal(seen, [(Int32(7), "abc"), (Int32(9), missing)])
         @test Tables.columntable(DBInterface.execute(stmt, (5,))).i == Int32[7]
@@ -590,20 +592,19 @@ end
         send_resultset(c, 1, [dtcol], Vector{UInt8}[])
     end) do conn
         static_stmt = DBInterface.prepare(conn, "SELECT CAST(NOW() AS DATETIME) AS dt")
-        static_cur = DBInterface.execute(static_stmt; mysql_date_and_time=true)
-        @test Tables.schema(static_cur) == Tables.Schema((:changed,), (String,))
-        @test static_stmt.names == [:changed] && static_stmt.types == Type[String]
+        static_cur = DBInterface.execute(static_stmt)
+        @test Tables.schema(static_cur) == Tables.Schema((:changed,), (DataString,))
+        @test static_stmt.names == [:changed] && static_stmt.types == Type[DataString]
         @test static_stmt.names !== static_cur.names
         @test static_stmt.types !== static_cur.types
         @test static_stmt.lookup !== static_cur.lookup
 
         dynamic_stmt = DBInterface.prepare(conn, "CALL dynamic_metadata()")
-        dynamic_cur = DBInterface.execute(dynamic_stmt; mysql_date_and_time=true)
-        @test Tables.schema(dynamic_cur).types == (MySQL.DateAndTime,)
-        @test dynamic_stmt.names == [:dt] && dynamic_stmt.types == Type[MySQL.DateAndTime]
-        # Caching the execute-time definitions must not turn a dynamic statement into a
-        # static one: each execute still honours its own mysql_date_and_time keyword.
-        @test Tables.schema(DBInterface.execute(dynamic_stmt)).types == (DateTime,)
+        dynamic_cur = DBInterface.execute(dynamic_stmt)
+        @test Tables.schema(dynamic_cur).types == (Timestamp{Second},)
+        @test dynamic_stmt.names == [:dt] && dynamic_stmt.types == Type[Timestamp{Second}]
+        # the cached execute-time definitions are reused by the next execute
+        @test Tables.schema(DBInterface.execute(dynamic_stmt)).types == (Timestamp{Second},)
         DBInterface.close!(static_stmt)
         DBInterface.close!(dynamic_stmt)
     end
@@ -614,13 +615,8 @@ end
         expect_execute(c)
         send_resultset(c, 1, [dtcol], Vector{UInt8}[])
     end) do conn
-        cur = DBInterface.execute(
-            conn,
-            "CALL dynamic_metadata(?)",
-            (1,);
-            mysql_date_and_time=true,
-        )
-        @test Tables.schema(cur).types == (MySQL.DateAndTime,)
+        cur = DBInterface.execute(conn, "CALL dynamic_metadata(?)", (1,))
+        @test Tables.schema(cur).types == (Timestamp{Second},)
     end
 
     with_native(c -> begin
@@ -693,7 +689,7 @@ end
     end; connect_kw=(; zero_dates=:missing)) do conn
         stmt = DBInterface.prepare(conn, "SELECT d, dt FROM t")
         cur = DBInterface.execute(stmt)
-        @test Tables.schema(cur).types == (Union{Missing, Date}, Union{Missing, DateTime})
+        @test Tables.schema(cur).types == (Union{Missing, Date}, Union{Missing, Timestamp{Second}})
         row = only(cur)
         @test row.d === missing && row.dt === missing
         DBInterface.close!(stmt)
@@ -769,8 +765,8 @@ end
     end) do conn
         stmt = DBInterface.prepare(conn, "CALL metadata_after_reconnect()")
         stmt.generation -= 1
-        cur = DBInterface.execute(stmt; mysql_date_and_time=true)
-        @test Tables.schema(cur).types == (DateTime,)
+        cur = DBInterface.execute(stmt)
+        @test Tables.schema(cur).types == (Timestamp{Second},)
         DBInterface.close!(stmt)
     end
 end
@@ -963,10 +959,10 @@ end
         buf = UInt8[]
         N.encode_param_value!(buf, x)
         # strip the length prefix the temporal encoders write, mirroring scan_binary_row!
-        if x isa Union{Date, DateTime, MySQL.DateAndTime, Dates.Time}
+        if x isa Union{Date, DateTime, Timestamp, Dates.Time}
             len = Int(buf[1])
             return N.decode_binary(T, buf, 2, len, o)
-        elseif x isa Union{AbstractString, Vector{UInt8}, MySQL.Bit, DataDecimals.AbstractDecimal}
+        elseif x isa Union{AbstractString, AbstractVector{UInt8}, MySQL.Bit, DataDecimals.AbstractDecimal}
             c = P.PacketCursor(buf); off, len = P.read_lenenc_window_len!(c, "v")
             return N.decode_binary(T, buf, off, len, o)
         else
@@ -985,13 +981,22 @@ end
     @test roundtrip(Float64, -2.5) === -2.5
     @test roundtrip(String, "héllo") == "héllo"
     @test roundtrip(Vector{UInt8}, UInt8[1, 2, 3]) == UInt8[1, 2, 3]
+    @test roundtrip(DataString, DataString("héllo")) == "héllo"
+    @test roundtrip(DataString, DataString("a string longer than twelve bytes")) == "a string longer than twelve bytes"
+    @test roundtrip(DataBytes, DataBytes(UInt8[1, 2, 3])) == UInt8[1, 2, 3]
+    @test roundtrip(DataBytes, DataBytes(collect(0x00:0x20))) == collect(0x00:0x20)
     @test roundtrip(MySQL.Bit, MySQL.Bit(0x7f)) == MySQL.Bit(0x7f)
     @test roundtrip(MySQL.Bit, MySQL.Bit(0x0102)) == MySQL.Bit(0x0102)
     @test roundtrip(MySQL.Bit, MySQL.Bit(typemax(UInt64))) == MySQL.Bit(typemax(UInt64))
     @test roundtrip(N.DecimalResult, DataDecimals.Decimal64{3}("12.345")) == parse(N.DecimalResult, "12.345")
     @test roundtrip(Date, Date(2024, 2, 29)) == Date(2024, 2, 29)
-    @test roundtrip(DateTime, DateTime(2024, 2, 29, 13, 14, 15, 250)) == DateTime(2024, 2, 29, 13, 14, 15, 250)
-    @test roundtrip(MySQL.DateAndTime, MySQL.DateAndTime(Date(2024, 1, 2), Time(1, 2, 3, 456, 789))) == MySQL.DateAndTime(Date(2024, 1, 2), Time(1, 2, 3, 456, 789))
+    @test roundtrip(Timestamp{Millisecond}, DateTime(2024, 2, 29, 13, 14, 15, 250)) === Timestamp{Millisecond}(2024, 2, 29, 13, 14, 15, 250)
+    @test roundtrip(Timestamp{Microsecond}, Timestamp{Microsecond}(2024, 1, 2, 1, 2, 3, 456, 789)) === Timestamp{Microsecond}(2024, 1, 2, 1, 2, 3, 456, 789)
+    @test roundtrip(Timestamp{Second}, Timestamp{Second}(2024, 1, 2, 1, 2, 3)) === Timestamp{Second}(2024, 1, 2, 1, 2, 3)
+    @test roundtrip(Timestamp{Microsecond}, Timestamp{Nanosecond}(2024, 1, 2, 1, 2, 3, 456, 789)) === Timestamp{Microsecond}(2024, 1, 2, 1, 2, 3, 456, 789)
+    # the wire carries microseconds: a sub-microsecond Timestamp{Nanosecond} is refused, never truncated
+    @test_throws InexactError N.encode_param_value!(UInt8[], Timestamp{Nanosecond}(2024, 1, 2, 1, 2, 3, 456, 789, 1))
+    @test N.param_signature(Any[Timestamp{Second}(2024, 1, 1), DateTime(2024, 1, 1)]) == UInt16[P.MYSQL_TYPE_DATETIME, P.MYSQL_TYPE_TIMESTAMP]
     @test roundtrip(Time, Time(13, 14, 15)) == Time(13, 14, 15)
     @test roundtrip(Time, Time(13, 14, 15, 250, 500)) == Time(13, 14, 15, 250, 500)
 

@@ -197,7 +197,7 @@ end
         Tables.columntable(cur)
         Tables.columntable(DBInterface.execute(stmt, (2,); mysql_store_result=false))
         DBInterface.close!(stmt)
-        DBInterface.execute(conn, "INSERT INTO t (s, i) VALUES (?, ?)", ("x", 1)).rows_affected
+        DBInterface.execute(conn, "INSERT INTO t (s, dt) VALUES (?, ?)", ("x", Timestamp{Microsecond}(2024, 2, 29, 13, 14, 15, 250, 500))).rows_affected
         ping(conn)
         DBInterface.transaction(conn) do
             DBInterface.execute(conn, "INSERT INTO t (s) VALUES ('tx')")

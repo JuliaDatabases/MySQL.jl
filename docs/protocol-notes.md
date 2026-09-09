@@ -4,7 +4,7 @@ This file accompanies `src/Protocol/`. It records where every byte-level fact ca
 the places where the vendor documents disagree, and every consultation of a third-party
 implementation (including the review-policy exception logged below). Section numbers of the form §N.M refer to the internal
 design plan that drove the rewrite; the ones that gate CI are: §8.4 = fuzzing, §8.9 =
-per-row performance/allocation gates (allocations per row ≤ String/Vector columns + 1),
+per-row performance/allocation gates (no allocation per row),
 §8.10 = leak/lifecycle soak, §4.2 = the 1.x behavior table now in
 `docs/src/migration.md` and `test/behavior_manifest.jl`.
 
@@ -163,12 +163,14 @@ source are never read.
 - **Decoding policies** (`ResultOptions`): BIT is the big-endian value of all bytes (1.x read
   the first byte only); TIME decodes to `Dates.Time` for `0 ≤ t < 24h` and raises
   `ConversionError` otherwise, `time_type=Dates.Microsecond` is lossless; `zero_dates`
-  (`:sentinel` default → `Date(0)`/`DateTime(0)`, `:missing` → `missing` and every date
-  column typed `Union{Missing,T}`, `:error`); partial zero dates are errors unless
-  `:missing`; a DATETIME value with sub-millisecond digits decoded to `DateTime` warns
-  once and truncates to milliseconds on both protocols (1.x failed on the text path);
-  `DateAndTime` scales the fractional digits by position (1.x's text path read them as an
-  unscaled microsecond count, correct only at precision 6).
+  (`:sentinel` default → `Date(0)` / `Timestamp{P}(0, 1, 1)`, `:missing` → `missing` and
+  every date column typed `Union{Missing,T}`, `:error`); partial zero dates are errors
+  unless `:missing`; DATETIME/TIMESTAMP decode to `Timestamp{P}` (Durations.jl) at the
+  column's declared `fsp` (`decimals` in the column definition: 0 → Second, 1–3 →
+  Millisecond, 4–6 → Microsecond), keeping every digit; a value finer than the declared
+  precision is a `ConversionError` (servers never send one). 1.x's `DateTime` mapping
+  truncated or failed, and its `DateAndTime` text path read `DATETIME(1..5)` fractions as
+  an unscaled microsecond count.
 - **LOCAL INFILE** follows the plan's state table: refusal (`nothing`) always raises
   `LocalInfileRefused` even when the server accepts the empty upload; a handler error before
   any data (including the source's first read) is re-raised after resynchronizing; an error,
@@ -204,7 +206,7 @@ source are never read.
   when the signature changes (a NULL parameter's slot is `MYSQL_TYPE_NULL`, so a value that
   flips NULL↔non-NULL forces a resend). Parameter type/encoding mirrors the effective 1.x
   `mysqltype`/`bind!` mapping: `Bit` is converted to bytes and sent as `BLOB`, while decimal
-  values (DataDecimals; DecFP through the package extension) are converted to strings and
+  values (DataDecimals) are converted to strings and
   sent as `STRING`. `Bool` maps to `TINY` (1.x left it
   at the `MYSQL_TYPE_STRING` fallback, an untested latent bug, so this is the sole deliberate
   deviation).
@@ -224,11 +226,10 @@ source are never read.
   `StmtError`. A statement whose generation predates a reconnect is re-prepared lazily on
   its next execute; its old id belongs to the dead session and is not closed on the new one.
   Execute-time column definitions are authoritative and refresh the statement's cached
-  metadata; a statement prepared without static metadata still honours the per-execute
-  `mysql_date_and_time` keyword after that refresh.
+  metadata.
 - **Binary temporal decoding preserves the 1.x prepared-statement behaviour** except the
-  shared Fixes: a sub-millisecond DATETIME **warns and truncates to milliseconds** (the text
-  path now does the same; 1.x failed there); BIT is the big-endian value of all bytes (Fix), TIME honours sign and days and
+  shared Fixes: DATETIME/TIMESTAMP decode to `Timestamp{P}` exactly (1.x truncated to
+  `DateTime` milliseconds); BIT is the big-endian value of all bytes (Fix), TIME honours sign and days and
   applies the `Dates.Time` range policy (Fix), and zero/partial dates follow the unified
   `zero_dates` policy (Fix; 1.x binary mapped zero components to 1970).
 - **Statement finalizers only park ids**: `DBInterface.close!(stmt)` and a dropped
@@ -259,15 +260,21 @@ source are never read.
   Failed batches are split recursively inside the total run budget. An isolated failure
   saves its entry, seed, and exact mutated input; a cumulative or nondeterministic failure
   saves the smallest unresolved seed range.
-- **The per-row hot path is allocation-free** (§8.9 gate: allocations per row ≤
-  String/Vector columns + 1, asserted serverless in `test/protocol/perf_tests.jl` and
-  against live servers in `test/perf/perf_gates.jl`). Four per-row allocations were
-  eliminated: the closure passed to `guarded` per scanned row; the `lock(l) do` closure
-  and the `Union{Nothing, Tuple}` iteration-protocol return of the streaming `iterate`
-  (now a thin `@inline` wrapper over a `Bool`-returning `stream_advance!`); the mutable
-  `PacketCursor` per scan (cursors own a scratch one, rebound per row); and the
-  `Union{PacketView, ResultEnd}` return box of `read_row!` (`@inline` + no internal `try`
-  so the union splits at the caller).
+- **The per-row hot path is allocation-free** (§8.9 gate: no allocation per row — a fixed
+  slack for cursors, metadata, and arenas — asserted serverless in
+  `test/protocol/perf_tests.jl` and against live servers in `test/perf/perf_gates.jl`).
+  Five per-row allocations were eliminated: the closure passed to `guarded` per scanned
+  row; the `lock(l) do` closure and the `Union{Nothing, Tuple}` iteration-protocol return
+  of the streaming `iterate` (now a thin `@inline` wrapper over a `Bool`-returning
+  `stream_advance!`); the mutable `PacketCursor` per scan (cursors own a scratch one,
+  rebound per row); the `String`/`Vector{UInt8}` copy per string or blob value
+  (`DataString`/`DataBytes` views of the row buffer); and the box of the
+  `Union{PacketView, ResultEnd}` value `read_row!` returns — inlining does not split it, so
+  cursors read through `read_row_packet!`, which returns `(PacketView, isrow::Bool)`, and
+  call `finish_result!` on the terminator themselves. A streaming cursor with view-typed
+  columns keeps its rows in 64 KiB arenas (`RETAIN_ARENA_BYTES`) instead of the reused
+  buffer pair: two allocations per arena, never per row, and a retained view keeps at
+  most one arena alive.
 - **Command-phase reads are batched through a 64 KiB read buffer** (`PacketIO.readbuf`).
   Reseau's `unsafe_read` costs one `recv` per call, so per-packet exact reads dominated
   large scans (native was 0.3–0.5× Connector/C; with batching ≥ 0.9×). Reads stay

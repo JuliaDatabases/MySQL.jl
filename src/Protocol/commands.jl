@@ -286,12 +286,19 @@ function read_result_header!(s::Session, p::PacketView, binary::Bool)
 end
 
 """
-    read_row!(s; binary=false, dest=s.io.inbuf) -> PacketView | ResultEnd
+    read_row_packet!(s; binary=false, dest=s.io.inbuf, pos=1) -> (PacketView, isrow::Bool)
 
-Reads the next row packet (returned as a view over `dest`, valid until the next read into
-that buffer) or the result-set terminator. A server ERR in row state ends the result set and
-returns the session to READY. It is thrown as `StmtError` for a binary prepared response and
-as `Error` for a text response.
+Reads the next packet of a result set as a view over `dest` from `pos` (valid until the next
+read into that region of the buffer): a row (`isrow`), or the terminator, which the caller
+passes to `finish_result!` to end the result set. A server ERR in row state ends the result
+set, returns the session to READY, and is thrown as `StmtError` for a binary prepared
+response and as `Error` for a text response. Cursors read rows through this pair rather than
+`read_row!` so that no `Union{PacketView, ResultEnd}` value exists per row: such a value is
+boxed on every row (§8.9).
+
+    read_row!(s; binary=false, dest=s.io.inbuf, pos=1) -> PacketView | ResultEnd
+
+The same as one call: the row, or the parsed terminator.
 """
 # Function-call guard: a closure passed to `guarded` would allocate on every row, and a
 # `try` in `read_row!` itself would make it uninlinable (§8.9).
@@ -309,20 +316,25 @@ end
     throw(binary ? StmtError(e) : Error(e))
 end
 
-# `@inline` so the `Union{PacketView, ResultEnd}` return is split at the call site instead
-# of boxing the row's `PacketView` on every iteration (§8.9).
-@inline function read_row!(s::Session; binary::Bool=s.command_kind == CMD_STMT_EXECUTE, dest::Vector{UInt8}=s.io.inbuf)
+@inline function read_row_packet!(s::Session; binary::Bool=s.command_kind == CMD_STMT_EXECUTE, dest::Vector{UInt8}=s.io.inbuf, pos::Int=1)
     require_phase(s, ROWS)
-    p = readpacket!(s; dest=dest)
+    p = readpacket!(s; dest=dest, pos=pos)
     what = classify_row_guarded(s, p, binary)
     if what == :row
         row_transition!(s)
-        return p
+        return (p, true)
     end
     what == :err && throw_row_err(s, p, binary)
-    return finish_result!(s, p)
+    return (p, false)
 end
 
+@inline function read_row!(s::Session; binary::Bool=s.command_kind == CMD_STMT_EXECUTE, dest::Vector{UInt8}=s.io.inbuf, pos::Int=1)
+    p, isrow = read_row_packet!(s; binary=binary, dest=dest, pos=pos)
+    return isrow ? p : finish_result!(s, p)
+end
+
+# Ends the result set on its terminator packet (from `read_row_packet!`): parses the OK/EOF,
+# records the status, and moves to RESULT_END or READY.
 function finish_result!(s::Session, p::PacketView)
     if deprecate_eof(s)
         ok = guarded(() -> parse_ok(p, s.capabilities, s.limits), s)

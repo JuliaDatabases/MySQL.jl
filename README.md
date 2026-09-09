@@ -60,10 +60,17 @@ DBInterface.close!(conn)
 Connection options cover TLS (`ssl_mode=:required`, `:verify_ca`, `:verify_identity`, CA and
 client certificates), option files (`option_file`, `read_default_file`), timeouts
 (`connect_timeout`, `read_timeout`, `write_timeout`), `reconnect`, `multi_statements`,
-`init_command`, decoding policies (`zero_dates`, `time_type`, `mysql_date_and_time`), and
+`init_command`, decoding policies (`zero_dates`, `time_type`), and
 memory limits (`max_buffered_bytes`); see the
 [documentation](https://mysql.juliadatabases.org/dev/). The transport is TCP or TLS
 (Unix sockets, named pipes, and compression are not supported yet and raise clear errors).
+
+Results use the JuliaData value types: text and BLOB columns are zero-copy
+[DataStrings.jl](https://github.com/JuliaData/DataStrings.jl) `DataString`/`DataBytes`
+views, DATETIME/TIMESTAMP columns decode to `Timestamp{P}`
+([Durations.jl](https://github.com/JuliaData/Durations.jl), re-exported) at the column's
+fractional precision, and DECIMAL to exact
+[DataDecimals.jl](https://github.com/JuliaData/DataDecimals.jl) values.
 
 ## Contributing
 

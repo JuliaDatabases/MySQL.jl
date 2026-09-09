@@ -182,14 +182,18 @@ function bootstrap_charset!(s::P.Session, ok::P.OKPacket)
 end
 
 # Returns the server's answer to the empty upload: an OK, or the ERR it replied with (a
-# fault while reading — the session is then terminal — propagates).
+# fault while reading — the session is then terminal — propagates). The two concrete
+# `isa` returns keep the reply a union of concrete types, so the callers' rethrow-with-cause
+# calls stay statically resolvable under `--trim=safe`.
 function resync_local_infile!(s::P.Session)
     P.send_local_infile!(s, nothing)
     try
         return P.read_command_response!(s)
     catch server_err
-        (server_err isa P.ServerError && !P.is_terminal(s.phase)) || rethrow()
-        return server_err
+        P.is_terminal(s.phase) && rethrow()
+        server_err isa P.Error && return server_err
+        server_err isa P.StmtError && return server_err
+        rethrow()
     end
 end
 # ServerError is abstract (Error / StmtError); split before `sprint` so the call is

@@ -1,4 +1,5 @@
-using Test, MySQL, DBInterface, Tables, Dates, DecFP, Harbor
+using Test, MySQL, DBInterface, Tables, Dates, Harbor
+using DataStrings: DataString, DataBytes
 const DecimalResult = MySQL.DataDecimals.DecimalValue{MySQL.DataDecimals.Int256}
 
 const MYSQL_IMAGE_REF = get(ENV, "MYSQL_IMAGE", "mysql:8")
@@ -137,9 +138,6 @@ run_integration = docker_available() && get(ENV, "MYSQL_INTEGRATION", "1") != "0
 # Native wire-protocol tests (no database server needed)
 include("protocol/runtests.jl")
 
-# DecFP parameter/load interop via the package extension (no server needed)
-include("decfp_tests.jl")
-
 # JuliaC --trim=safe compilation of the main entrypoints (test/mysql_trim_workload.jl);
 # needs no server (scripted loopback peer). Julia 1.12+ only; skip with MYSQL_RUN_TRIM_TESTS=0.
 include("trim_compile_tests.jl")
@@ -250,12 +248,12 @@ expected = (
   Rate       = Union{Missing, DecimalResult}[DecimalResult(1001,3), DecimalResult(2002,3), DecimalResult(3003,3), DecimalResult(2500,3)],
   LunchTime  = Union{Missing, Dates.Time}[Dates.Time(12,00,00), Dates.Time(13,00,00), Dates.Time(12,30,00), Dates.Time(12,30,00)],
   JoinDate   = Union{Missing, Dates.Date}[Date("2015-08-03"), Date("2015-08-04"), Date("2015-06-02"), Date("2015-07-25")],
-  LastLogin  = Union{Missing, Dates.DateTime}[DateTime("2015-09-05T12:31:30"), DateTime("2015-10-12T13:12:14"), DateTime("2015-09-05T10:05:10"), DateTime("2015-10-10T12:12:25")],
-  LastLogin2 = Dates.DateTime[DateTime("2015-09-05T12:31:30"), DateTime("2015-10-12T13:12:14"), DateTime("2015-09-05T10:05:10"), DateTime("2015-10-10T12:12:25")],
-  Initial    = Union{Missing, String}["A", "B", "C", "D"],
-  Name       = Union{Missing, String}["John", "Tom", "Jim", "Tim"],
-  Photo      = Union{Missing, Vector{UInt8}}[b"abc", b"def", b"ghi", b"jkl"],
-  JobType    = Union{Missing, String}["HR", "HR", "Management", "Accounts"],
+  LastLogin  = Union{Missing, Timestamp{Second}}[Timestamp{Second}(2015, 9, 5, 12, 31, 30), Timestamp{Second}(2015, 10, 12, 13, 12, 14), Timestamp{Second}(2015, 9, 5, 10, 5, 10), Timestamp{Second}(2015, 10, 10, 12, 12, 25)],
+  LastLogin2 = Timestamp{Second}[Timestamp{Second}(2015, 9, 5, 12, 31, 30), Timestamp{Second}(2015, 10, 12, 13, 12, 14), Timestamp{Second}(2015, 9, 5, 10, 5, 10), Timestamp{Second}(2015, 10, 10, 12, 12, 25)],
+  Initial    = Union{Missing, DataString}["A", "B", "C", "D"],
+  Name       = Union{Missing, DataString}["John", "Tom", "Jim", "Tim"],
+  Photo      = Union{Missing, DataBytes}[DataBytes(b"abc"), DataBytes(b"def"), DataBytes(b"ghi"), DataBytes(b"jkl")],
+  JobType    = Union{Missing, DataString}["HR", "HR", "Management", "Accounts"],
   Senior     = Union{Missing, MySQL.Bit}[MySQL.Bit(1), MySQL.Bit(1), MySQL.Bit(0), MySQL.Bit(1)],
 )
 
@@ -498,16 +496,19 @@ res = DBInterface.execute(resstmt) |> columntable
 DBInterface.execute(conn, "DROP TABLE if exists datetime6_field")
 DBInterface.execute(conn, "CREATE TABLE datetime6_field (id int(11), t DATETIME(6))")
 stmt = DBInterface.prepare(conn, "INSERT INTO datetime6_field (id, t) VALUES (?, ?);")
-DBInterface.execute(stmt, [1, DateAndTime(Date(2021, 1, 2), Time(1, 2, 3, 456, 789))])
-resstmt = DBInterface.prepare(conn, "select id, t from datetime6_field"; mysql_date_and_time=true)
+DBInterface.execute(stmt, [1, Timestamp{Microsecond}(2021, 1, 2, 1, 2, 3, 456, 789)])
+resstmt = DBInterface.prepare(conn, "select id, t from datetime6_field")
 res = DBInterface.execute(resstmt) |> columntable
 @test length(res) == 2
-@test res[2][1] == DateAndTime(Date(2021, 1, 2), Time(1, 2, 3, 456, 789))
-res = DBInterface.execute(conn, "select id, t from datetime6_field"; mysql_date_and_time=true) |> columntable
+@test res[2][1] === Timestamp{Microsecond}(2021, 1, 2, 1, 2, 3, 456, 789)
+res = DBInterface.execute(conn, "select id, t from datetime6_field") |> columntable
 @test length(res) == 2
-@test res[2][1] == DateAndTime(Date(2021, 1, 2), Time(1, 2, 3, 456, 789))
-res = DBInterface.execute(conn, "select id, t from datetime6_field where id = ?", (1,); mysql_date_and_time=true) |> columntable
-@test res[2][1] == DateAndTime(Date(2021, 1, 2), Time(1, 2, 3, 456, 789))
+@test res[2][1] === Timestamp{Microsecond}(2021, 1, 2, 1, 2, 3, 456, 789)
+res = DBInterface.execute(conn, "select id, t from datetime6_field where id = ?", (1,)) |> columntable
+@test res[2][1] === Timestamp{Microsecond}(2021, 1, 2, 1, 2, 3, 456, 789)
+# a Timestamp{Nanosecond} parameter binds when it is a whole number of microseconds
+DBInterface.execute(conn, "INSERT INTO datetime6_field (id, t) VALUES (?, ?)", (2, Timestamp{Nanosecond}(2021, 1, 2, 1, 2, 3, 456, 789)))
+@test_throws InexactError DBInterface.execute(conn, "INSERT INTO datetime6_field (id, t) VALUES (?, ?)", (3, Timestamp{Nanosecond}(2021, 1, 2, 1, 2, 3, 456, 789, 1)))
 
 DBInterface.execute(conn, """
 CREATE PROCEDURE get_employee()
@@ -587,9 +588,7 @@ ct2 = columntable(DBInterface.execute(conn, "select * from test194"))
 # https://github.com/JuliaDatabases/MySQL.jl/issues/186
 DBInterface.execute(conn, "SET SESSION SQL_MODE=''")
 dt = DBInterface.execute(conn, "SELECT CAST('0000-00-00' as DATETIME) as dt ") |> Tables.columntable
-@test dt.dt[1] == DateTime(0)
-dt = DBInterface.execute(conn, "SELECT CAST('0000-00-00' as DATETIME) as dt "; mysql_date_and_time=true) |> Tables.columntable
-@test dt.dt[1].date == DateTime(0)
+@test dt.dt[1] === Timestamp{Second}(0, 1, 1)
 
 # 156
 res = DBInterface.execute(conn, "select * from Employee")

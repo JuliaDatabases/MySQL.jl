@@ -1,6 +1,7 @@
 # Serverless subset of the §8.9 performance/allocation gates: the per-row allocation
-# contract of the scan/decode hot path — allocations per row ≤ (String/Vector columns + 1)
-# — asserted against the fake peer on every CI lane (no Docker needed). The full
+# contract of the read/scan/decode hot path — nothing is allocated per row (string and
+# bytes values are views; a streaming cursor with such columns allocates one arena per
+# `RETAIN_ARENA_BYTES` of rows) — asserted against the fake peer on every CI lane (no Docker needed). The full
 # server-backed correctness/limit/allocation gates and the timing report live in
 # `test/perf/perf_gates.jl` and run inside `Pkg.test` when Docker is available.
 
@@ -100,7 +101,8 @@ end
     null_cols = [coldef("a"; type=P.MYSQL_TYPE_LONG), coldef("b"; type=P.MYSQL_TYPE_SHORT)]
     typed_stream = perf_stream(typed_cols, [perf_text_row(i) for i in 1:PERF_NROWS])
     null_stream = perf_stream(null_cols, [perf_null_row(i) for i in 1:PERF_NROWS])
-    # fixed slack covers the cursor/metadata/warmup-independent allocations of a pass
+    # The budget is a fixed slack (cursor, metadata, arenas), not a per-row count: a pass
+    # that allocates once per row exceeds it several times over.
     slack = 3_000
     @testset "buffered: decode-only passes over a retained result" begin
         with_native(c -> begin
@@ -113,11 +115,11 @@ end
             @test length(cursor) == PERF_NROWS
             allocs = alloc_count(() -> perf_scan(cursor))
             @info "buffered typed scan" allocs_per_row=allocs / PERF_NROWS
-            @test allocs <= 2 * PERF_NROWS + slack   # 1 String column + 1
+            @test allocs <= slack
             nullcur = DBInterface.execute(conn, "nulls")
             allocs = alloc_count(() -> perf_scan(nullcur))
             @info "buffered NULL scan" allocs_per_row=allocs / PERF_NROWS
-            @test allocs <= 1 * PERF_NROWS + slack   # no String/Vector columns
+            @test allocs <= slack
         end
     end
     @testset "streaming: full execute + scan passes" begin
@@ -131,7 +133,7 @@ end
             run(); run()   # warm both the execute and scan paths
             allocs = alloc_count(run)
             @info "streaming typed scan" allocs_per_row=allocs / PERF_NROWS
-            @test allocs <= 2 * PERF_NROWS + slack   # 1 String column + 1
+            @test allocs <= slack
         end
     end
 end

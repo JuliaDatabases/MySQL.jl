@@ -231,17 +231,17 @@ function run_workload(port::Int)::Nothing
         ids = Int32[]
         names = Union{Missing, String}[]
         scores = Union{Missing, Float64}[]
-        joineds = Union{Missing, DateTime}[]
+        joineds = Union{Missing, Timestamp{Second}}[]
         for row in cursor
             push!(ids, Tables.getcolumn(row, Int32, 1, :id))
             push!(names, Tables.getcolumn(row, Union{Missing, String}, 2, :name))
             push!(scores, Tables.getcolumn(row, Union{Missing, Float64}, 3, :score))
-            push!(joineds, Tables.getcolumn(row, Union{Missing, DateTime}, 4, :joined))
+            push!(joineds, Tables.getcolumn(row, Union{Missing, Timestamp{Second}}, 4, :joined))
         end
         check(ids == Int32[1, 2, 3], "text id column")
         check(isequal(names, Union{Missing, String}["Ada", "Grace", missing]), "text name column")
         check(isequal(scores, Union{Missing, Float64}[1.5, 2.5, missing]), "text score column")
-        check(isequal(joineds, Union{Missing, DateTime}[DateTime(2024, 2, 29, 13, 14, 15), DateTime(2023, 1, 2, 3, 4, 5), missing]), "text datetime column")
+        check(isequal(joineds, Union{Missing, Timestamp{Second}}[Timestamp{Second}(2024, 2, 29, 13, 14, 15), Timestamp{Second}(2023, 1, 2, 3, 4, 5), missing]), "text datetime column")
 
         # streaming text protocol
         n = 0

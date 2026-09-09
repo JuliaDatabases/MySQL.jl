@@ -33,7 +33,7 @@ function increment!(counter::AcceptedCounter)
     return @atomic counter.value
 end
 
-wiredef(type; flags=NOT_NULL, charset=0x2D) = P.ColumnDef("def", "db", "t", "t", "x", "x", UInt16(charset), UInt32(255), UInt8(type), UInt16(flags), UInt8(0))
+wiredef(type; flags=NOT_NULL, charset=0x2D, decimals=0) = P.ColumnDef("def", "db", "t", "t", "x", "x", UInt16(charset), UInt32(255), UInt8(type), UInt16(flags), UInt8(decimals))
 
 function decode_text(T, value; opts=N.DEFAULT_RESULT_OPTIONS)
     buf = Vector{UInt8}(codeunits(value))
@@ -120,7 +120,7 @@ const TYPED_COLS = [
     coldef("s"; type=P.MYSQL_TYPE_VAR_STRING),
     coldef("b"; type=P.MYSQL_TYPE_BLOB, flags=BINARY),
     coldef("bit"; type=P.MYSQL_TYPE_BIT, flags=UNSIGNED),
-    coldef("dt"; type=P.MYSQL_TYPE_DATETIME),
+    coldef("dt"; type=P.MYSQL_TYPE_DATETIME, decimals=6),
     coldef("da"; type=P.MYSQL_TYPE_DATE),
     coldef("tm"; type=P.MYSQL_TYPE_TIME),
     coldef("y"; type=P.MYSQL_TYPE_YEAR, flags=UNSIGNED),
@@ -140,33 +140,38 @@ const TYPED_COLS = [
         P.MYSQL_TYPE_NEWDECIMAL => MySQL.DataDecimals.DecimalValue{MySQL.DataDecimals.Int256},
         P.MYSQL_TYPE_DOUBLE => Cdouble,
         P.MYSQL_TYPE_YEAR => Clong,
-        P.MYSQL_TYPE_TIMESTAMP => DateTime,
+        P.MYSQL_TYPE_TIMESTAMP => Timestamp{Second},
         P.MYSQL_TYPE_DATE => Date,
         P.MYSQL_TYPE_TIME => Time,
-        P.MYSQL_TYPE_DATETIME => DateTime,
-        P.MYSQL_TYPE_SET => String,
-        P.MYSQL_TYPE_NULL => String,
-        P.MYSQL_TYPE_VARCHAR => String,
-        P.MYSQL_TYPE_VAR_STRING => String,
-        P.MYSQL_TYPE_STRING => String,
-        P.MYSQL_TYPE_JSON => String,
+        P.MYSQL_TYPE_DATETIME => Timestamp{Second},
+        P.MYSQL_TYPE_SET => DataString,
+        P.MYSQL_TYPE_NULL => DataString,
+        P.MYSQL_TYPE_VARCHAR => DataString,
+        P.MYSQL_TYPE_VAR_STRING => DataString,
+        P.MYSQL_TYPE_STRING => DataString,
+        P.MYSQL_TYPE_JSON => DataString,
     )
     for (wire, T) in mapped
         @test N.juliatype(wiredef(wire), N.DEFAULT_RESULT_OPTIONS) === T
         @test N.juliatype(wiredef(wire; flags=0), N.DEFAULT_RESULT_OPTIONS) === Union{Missing, T}
     end
     for wire in (P.MYSQL_TYPE_TINY_BLOB, P.MYSQL_TYPE_MEDIUM_BLOB, P.MYSQL_TYPE_LONG_BLOB, P.MYSQL_TYPE_BLOB, P.MYSQL_TYPE_GEOMETRY)
-        @test N.juliatype(wiredef(wire; flags=NOT_NULL | BINARY), N.DEFAULT_RESULT_OPTIONS) === Vector{UInt8}
-        @test N.juliatype(wiredef(wire), N.DEFAULT_RESULT_OPTIONS) === String
+        @test N.juliatype(wiredef(wire; flags=NOT_NULL | BINARY), N.DEFAULT_RESULT_OPTIONS) === DataBytes
+        @test N.juliatype(wiredef(wire), N.DEFAULT_RESULT_OPTIONS) === DataString
     end
     @test N.juliatype(wiredef(P.MYSQL_TYPE_LONGLONG; flags=NOT_NULL | UNSIGNED), N.DEFAULT_RESULT_OPTIONS) === UInt64
     @test N.juliatype(wiredef(P.MYSQL_TYPE_YEAR; flags=NOT_NULL | UNSIGNED), N.DEFAULT_RESULT_OPTIONS) === unsigned(Clong)
-    @test N.juliatype(wiredef(P.MYSQL_TYPE_DATETIME), N.ResultOptions(; date_and_time=true)) === DateAndTime
+    # DATETIME/TIMESTAMP map to Timestamp{P} by the column's fractional precision (fsp)
+    for (decimals, T) in ((0, Timestamp{Second}), (1, Timestamp{Millisecond}), (3, Timestamp{Millisecond}), (4, Timestamp{Microsecond}), (6, Timestamp{Microsecond}))
+        @test N.juliatype(wiredef(P.MYSQL_TYPE_DATETIME; decimals=decimals), N.DEFAULT_RESULT_OPTIONS) === T
+        @test N.juliatype(wiredef(P.MYSQL_TYPE_TIMESTAMP; flags=0, decimals=decimals), N.DEFAULT_RESULT_OPTIONS) === Union{Missing, T}
+    end
+    @test MySQL.juliatype(P.MYSQL_TYPE_DATETIME) === Timestamp{Microsecond}
     @test N.juliatype(wiredef(P.MYSQL_TYPE_DATE), N.ResultOptions(; zero_dates=:missing)) === Union{Missing, Date}
     # hostile flags must not reach `unsigned(String)` (fuzz finding): a wire-supplied
     # NUM_FLAG is not trusted, and MYSQL_TYPE_NULL maps to String
-    @test N.juliatype(wiredef(P.MYSQL_TYPE_VAR_STRING; flags=NOT_NULL | UNSIGNED | P.NUM_FLAG), N.DEFAULT_RESULT_OPTIONS) === String
-    @test N.juliatype(wiredef(P.MYSQL_TYPE_NULL; flags=NOT_NULL | UNSIGNED), N.DEFAULT_RESULT_OPTIONS) === String
+    @test N.juliatype(wiredef(P.MYSQL_TYPE_VAR_STRING; flags=NOT_NULL | UNSIGNED | P.NUM_FLAG), N.DEFAULT_RESULT_OPTIONS) === DataString
+    @test N.juliatype(wiredef(P.MYSQL_TYPE_NULL; flags=NOT_NULL | UNSIGNED), N.DEFAULT_RESULT_OPTIONS) === DataString
 
     for (T, value, expected) in (
             (Int8, "-128", Int8(-128)), (UInt8, "255", UInt8(255)),
@@ -229,15 +234,18 @@ end
             text_row(nothing, nothing, nothing, nothing, nothing, nothing, nothing, nothing, nothing, nothing, nothing)]
     with_native(c -> (expect_query(c); send_resultset(c, 1, TYPED_COLS, rows))) do conn
         cur = DBInterface.execute(conn, "select typed")
-        @test Tables.schema(cur) == Tables.Schema([:i, :u, :f, :d, :s, :b, :bit, :dt, :da, :tm, :y], [Int32, Union{Missing, UInt64}, Union{Missing, Float32}, Union{Missing, MySQL.DataDecimals.DecimalValue{MySQL.DataDecimals.Int256}}, Union{Missing, String}, Union{Missing, Vector{UInt8}}, Union{Missing, MySQL.Bit}, Union{Missing, DateTime}, Union{Missing, Date}, Union{Missing, Time}, Union{Missing, unsigned(Clong)}])   # YEAR → unsigned(Clong): UInt64 on 64-bit, UInt32 on Windows x64
+        @test Tables.schema(cur) == Tables.Schema([:i, :u, :f, :d, :s, :b, :bit, :dt, :da, :tm, :y], [Int32, Union{Missing, UInt64}, Union{Missing, Float32}, Union{Missing, MySQL.DataDecimals.DecimalValue{MySQL.DataDecimals.Int256}}, Union{Missing, DataString}, Union{Missing, DataBytes}, Union{Missing, MySQL.Bit}, Union{Missing, Timestamp{Microsecond}}, Union{Missing, Date}, Union{Missing, Time}, Union{Missing, unsigned(Clong)}])   # YEAR → unsigned(Clong): UInt64 on 64-bit, UInt32 on Windows x64
         @test length(cur) == 2 && Base.IteratorSize(typeof(cur)) == Base.HasLength() && eltype(cur) == N.TextRow
         state = iterate(cur)
         row, st = state
         @test row.i === Int32(-7) && row.u === typemax(UInt64) && row.f === 1.5f0 && row.d === MySQL.DataDecimals.DecimalValue{MySQL.DataDecimals.Int256}(12345, 3)
         @test row.s == "héllo" && row.b == UInt8[0x00, 0x01] && row.bit == MySQL.Bit(0x0102)
+        @test row.s isa DataString && row.b isa DataBytes                       # zero-copy views of the cursor buffer
+        @test Tables.getcolumn(row, String, 5, :s) === "héllo"  broken=false   # an explicit String is still a copy
+        @test Tables.getcolumn(row, Vector{UInt8}, 6, :b) == UInt8[0x00, 0x01]
         @test_throws P.ConversionError row.tm                               # 838 h does not fit Dates.Time
         @test row.da == Date(2024, 2, 29) && row.y === unsigned(Clong)(2024)        # YEAR is an unsigned numeric (Clong: UInt64 on 64-bit, UInt32 on Windows x64)
-        @test (@test_logs (:warn, r"microsecond") row.dt) == DateTime(2024, 2, 29, 13, 14, 15, 250)   # sub-ms warns once, truncates
+        @test row.dt === Timestamp{Microsecond}(2024, 2, 29, 13, 14, 15, 250, 500)         # DATETIME(6): every digit kept
         @test propertynames(row) == [:i, :u, :f, :d, :s, :b, :bit, :dt, :da, :tm, :y] && length(row) == 11
         @test Base.IndexStyle(typeof(row)) == Base.IndexLinear()
         row2, _ = iterate(cur, st)
@@ -256,10 +264,10 @@ end
     serve = c -> (expect_query(c); send_resultset(c, 1, cols, rows))
     with_native(serve) do conn   # defaults: Time, :sentinel
         cur = DBInterface.execute(conn, "select")
-        @test Tables.schema(cur).types == (Union{Missing, Time}, DateTime, Date)
+        @test Tables.schema(cur).types == (Union{Missing, Time}, Timestamp{Second}, Date)
         r1, st = iterate(cur)
         @test_throws P.ConversionError r1.tm                                 # negative
-        @test r1.dt == DateTime(0) && r1.da == Date(0)
+        @test r1.dt == Timestamp{Second}(0, 1, 1) && r1.da == Date(0)
         r2, _ = iterate(cur, st)
         @test r2.tm == Time(23, 59, 59, 999, 999)
         @test_throws P.ConversionError r2.dt                                 # partial zero date
@@ -267,7 +275,7 @@ end
     end
     with_native(serve; connect_kw=(; zero_dates=:missing, time_type=Dates.Microsecond)) do conn
         cur = DBInterface.execute(conn, "select")
-        @test Tables.schema(cur).types == (Union{Missing, Dates.Microsecond}, Union{Missing, DateTime}, Union{Missing, Date})   # NOT NULL widened
+        @test Tables.schema(cur).types == (Union{Missing, Dates.Microsecond}, Union{Missing, Timestamp{Second}}, Union{Missing, Date})   # NOT NULL widened
         r1, st = iterate(cur)
         @test r1.tm == Dates.Microsecond(-3_723_500_000) && r1.dt === missing && r1.da === missing
         r2, _ = iterate(cur, st)
@@ -283,29 +291,30 @@ end
     missing_dates = N.ResultOptions(; zero_dates=:missing)
     duration = N.ResultOptions(; time_type=Dates.Microsecond)
     # a zero month or day is a partial zero date; year 0000 alone is a legal year
-    @test decode_text(Union{Missing, DateTime}, "2024-00-01 00:00:00"; opts=missing_dates) === missing
+    @test decode_text(Union{Missing, Timestamp{Second}}, "2024-00-01 00:00:00"; opts=missing_dates) === missing
     @test decode_text(Union{Missing, Date}, "2024-05-00"; opts=missing_dates) === missing
-    @test_throws P.ConversionError decode_text(DateTime, "2024-00-01 00:00:00")
+    @test_throws P.ConversionError decode_text(Timestamp{Second}, "2024-00-01 00:00:00")
     @test_throws P.ConversionError decode_text(Date, "2024-05-00")
-    @test decode_text(DateTime, "0000-05-01 00:00:00") == DateTime(0, 5, 1)
+    @test decode_text(Timestamp{Second}, "0000-05-01 00:00:00") == Timestamp{Second}(0, 5, 1)
     @test decode_text(Date, "0000-01-01") == Date(0, 1, 1)
     @test decode_text(Union{Missing, Date}, "0000-01-01"; opts=missing_dates) == Date(0, 1, 1)
-    @test decode_text(Union{Missing, DateTime}, "0000-12-31 23:59:59"; opts=missing_dates) == DateTime(0, 12, 31, 23, 59, 59)
+    @test decode_text(Union{Missing, Timestamp{Second}}, "0000-12-31 23:59:59"; opts=missing_dates) == Timestamp{Second}(0, 12, 31, 23, 59, 59)
     @test decode_text(Date, "0000-01-01"; opts=N.ResultOptions(; zero_dates=:error)) == Date(0, 1, 1)
-    @test_throws P.ConversionError decode_text(Union{Missing, DateTime}, "xxxx-00-xx 00:00:00"; opts=missing_dates)
-    @test_throws P.ConversionError decode_text(DateTime, "0000-00-00::::")
-    @test_throws P.ConversionError decode_text(DateTime, "2024-01-01 00:00:00.")
-    @test_throws P.ConversionError decode_text(DateTime, "2024-01-01 00:00:00.1234567")
+    @test_throws P.ConversionError decode_text(Union{Missing, Timestamp{Second}}, "xxxx-00-xx 00:00:00"; opts=missing_dates)
+    @test_throws P.ConversionError decode_text(Timestamp{Second}, "0000-00-00::::")
+    @test_throws P.ConversionError decode_text(Timestamp{Microsecond}, "2024-01-01 00:00:00.")
+    @test_throws P.ConversionError decode_text(Timestamp{Microsecond}, "2024-01-01 00:00:00.1234567")
     @test_throws P.ConversionError decode_text(Dates.Microsecond, "839:00:00"; opts=duration)
     @test_throws P.ConversionError decode_text(Dates.Microsecond, "01:02:03."; opts=duration)
     @test_throws P.ConversionError decode_text(Dates.Microsecond, "01:02:03.1234567"; opts=duration)
     # fractional digits are scaled by their position (DATETIME(1) `.1` is 100 ms; 1.x read it as 1 µs)
-    @test decode_text(DateAndTime, "2024-01-01 00:00:00.1") == DateAndTime(Date(2024, 1, 1), Time(0, 0, 0, 100, 0))
-    @test decode_text(DateAndTime, "2024-01-01 00:00:00.123") == DateAndTime(Date(2024, 1, 1), Time(0, 0, 0, 123, 0))
-    @test decode_text(DateAndTime, "2024-01-01 00:00:00.123456") == DateAndTime(Date(2024, 1, 1), Time(0, 0, 0, 123, 456))
-    # sub-millisecond precision into a DateTime warns once and truncates (same as the binary path)
-    @test decode_text(DateTime, "2024-01-01 00:00:00.123") == DateTime(2024, 1, 1, 0, 0, 0, 123)
-    @test (@test_logs (:warn, r"microsecond") decode_text(DateTime, "2024-01-01 00:00:00.123456")) == DateTime(2024, 1, 1, 0, 0, 0, 123)
+    @test decode_text(Timestamp{Millisecond}, "2024-01-01 00:00:00.1") === Timestamp{Millisecond}(2024, 1, 1, 0, 0, 0, 100)
+    @test decode_text(Timestamp{Millisecond}, "2024-01-01 00:00:00.123") === Timestamp{Millisecond}(2024, 1, 1, 0, 0, 0, 123)
+    @test decode_text(Timestamp{Microsecond}, "2024-01-01 00:00:00.123456") === Timestamp{Microsecond}(2024, 1, 1, 0, 0, 0, 123, 456)
+    @test decode_text(Timestamp{Microsecond}, "2024-01-01 00:00:00.5") === Timestamp{Microsecond}(2024, 1, 1, 0, 0, 0, 500)
+    # a value finer than the column's declared precision (servers never send one) is an error, never truncated
+    @test_throws P.ConversionError decode_text(Timestamp{Second}, "2024-01-01 00:00:00.5")
+    @test_throws P.ConversionError decode_text(Timestamp{Millisecond}, "2024-01-01 00:00:00.1234")
 end
 
 @testset "DML cursors, lastrowid snapshots, rows_affected bitcast" begin
@@ -426,6 +435,41 @@ end
         @test_throws P.ProtocolError row.x                                  # invalid before draining touches the wire
         put!(release_rows, nothing)
         @test fetch(other).rows_affected == 0
+    end
+end
+
+@testset "streaming views: rows are kept in shared arenas" begin
+    # Out-of-line (> 12 byte) `DataString`/`DataBytes` values view the row buffer. A streaming
+    # cursor with such columns keeps its rows in shared arenas, so views collected while
+    # iterating stay valid after later rows (in the same arena, in the next one, or in one the
+    # packet reader had to grow for a row wider than an arena) and after the result is done.
+    cols = [coldef("i"; type=P.MYSQL_TYPE_LONG, flags=NOT_NULL), coldef("s"; flags=NOT_NULL), coldef("b"; type=P.MYSQL_TYPE_BLOB, flags=NOT_NULL | BINARY)]
+    nrows = 4 * N.RETAIN_ARENA_BYTES ÷ 48                        # ~48-byte rows: several arenas
+    value(i) = "value-$(lpad(i, 6, '0'))-" * "x"^(i % 17)         # 13–29 bytes: never inline
+    wide = "w"^(N.RETAIN_ARENA_BYTES + 10)                         # wider than one arena
+    payload(i) = i == 100 ? wide : value(i)
+    rows = [text_row(string(i), value(i), payload(i)) for i in 1:nrows]
+    with_native(c -> begin
+        expect_query(c); send_resultset(c, 1, cols, rows)
+        expect_query(c); send_ok(c, 1)
+    end) do conn
+        cur = DBInterface.execute(conn, "select"; mysql_store_result=false)
+        @test cur.retain_rows
+        strings = DataString[]
+        bytes = DataBytes[]
+        arenas = Set{UInt}()
+        for row in cur
+            push!(strings, row.s)
+            push!(bytes, row.b)
+            push!(arenas, objectid(cur.buf))
+        end
+        @test length(strings) == nrows
+        @test all(i -> strings[i] == value(i), 1:nrows)
+        @test all(i -> bytes[i] == codeunits(payload(i)), 1:nrows)
+        # bounded and shared: neither one buffer for the whole result nor one per row
+        @test 3 <= length(arenas) <= sum(length, rows) ÷ N.RETAIN_ARENA_BYTES + 2
+        @test DBInterface.execute(conn, "after").rows_affected == 0
+        @test all(i -> strings[i] == value(i), 1:nrows)             # untouched by the next command
     end
 end
 

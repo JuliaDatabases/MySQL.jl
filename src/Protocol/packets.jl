@@ -151,12 +151,14 @@ end
 @noinline sequence_mismatch(expected::UInt8, got::UInt8) = return protocol_error("sequence id mismatch: expected $(Int(expected)), got $(Int(got))")
 
 """
-    readpacket!(io, transport, max_payload; max_response=nothing, dest=io.inbuf, buffered=false) -> PacketView
+    readpacket!(io, transport, max_payload; max_response=nothing, dest=io.inbuf, pos=1, buffered=false) -> PacketView
 
 Reads one logical packet, reassembling continuation chunks, validating sequence ids, and
 bounding the reassembled size by `max_payload` *before* growing the buffer. `max_response`
 bounds the cumulative payload bytes since `newcommand!`. `dest` is the buffer the payload is
-read into (a cursor passes its own buffer so rows never alias the shared reader buffer).
+read into (a cursor passes its own buffer so rows never alias the shared reader buffer) and
+`pos` the position in it the payload starts at (a cursor appending rows to a shared buffer
+passes its next free byte; the bytes before it are left untouched).
 `buffered=true` batches transport reads through `io.readbuf` (command phase only).
 `stale_err=true` (the first packet of a command response) additionally accepts an ERR
 packet numbered 0 where sequence 1 was expected: a MySQL server that closes an idle
@@ -164,7 +166,7 @@ connection (`wait_timeout`, error 4031) announces it with such a packet before t
 next command, so it arrives as the "response". The returned view then carries `seq == 0`
 so the session can treat it as the terminal disconnect it is.
 """
-function readpacket!(io::PacketIO, transport::Transport, max_payload::Int; max_response::Union{Nothing, Int}=nothing, dest::Vector{UInt8}=io.inbuf, buffered::Bool=false, stale_err::Bool=false)
+function readpacket!(io::PacketIO, transport::Transport, max_payload::Int; max_response::Union{Nothing, Int}=nothing, dest::Vector{UInt8}=io.inbuf, pos::Int=1, buffered::Bool=false, stale_err::Bool=false)
     total = 0
     nchunks = 0
     first_chunk_len = -1
@@ -184,17 +186,18 @@ function readpacket!(io::PacketIO, transport::Transport, max_payload::Int; max_r
         check_limit("packet length", total + len, max_payload)
         next_response_bytes = io.response_bytes + UInt64(len)
         max_response === nothing || next_response_bytes <= UInt64(max_response) || throw(ProtocolError("response bytes $(next_response_bytes) exceeds limit $(max_response)"))
-        length(dest) < total + len && resize!(dest, total + len)
-        packet_read!(io, transport, dest, total + 1, len, buffered)
+        needed = pos + total + len - 1
+        length(dest) < needed && resize!(dest, needed)
+        packet_read!(io, transport, dest, pos + total, len, buffered)
         total += len
         io.response_bytes = next_response_bytes
         len < MAX_CHUNK && break
     end
     if stale
-        (total > 0 && dest[1] == ERR_HEADER) || sequence_mismatch(0x01, 0x00)
+        (total > 0 && dest[pos] == ERR_HEADER) || sequence_mismatch(0x01, 0x00)
         seq = 0x00
     end
-    return PacketView(dest, 1, total, seq, nchunks, first_chunk_len)
+    return PacketView(dest, pos, pos + total - 1, seq, nchunks, first_chunk_len)
 end
 
 # Frames `payload` into chunks in `io.outbuf` (one write per logical packet), advancing the

@@ -45,6 +45,8 @@ mutable struct Cursor{binary, buffered} <: DBInterface.Cursor
     finished::Bool
     closed::Bool
     opts::ResultOptions
+    retain_rows::Bool   # a column decodes to a view of the row buffer: streaming rows are kept in arenas
+    arena_pos::Int      # next free byte of `buf` (a retaining streaming cursor appends rows to it)
 end
 
 const TextCursor = Cursor{false}
@@ -157,7 +159,7 @@ end
 # A result-less (DML/OK) cursor has zero rows: `length` is 0 and `collect` works (1.x
 # reported the C client's `-1` sentinel); its outcome lives in `rows_affected`/`lastrowid`.
 function empty_cursor(conn::Connection, sql::String, token::Int, ok::P.OKPacket, ::Val{binary}, ::Val{buffered}, opts::ResultOptions, number::Int) where {binary, buffered}
-    c = Cursor{binary, buffered}(conn, sql, token, @atomic(conn.generation), nothing, EMPTY_NAMES, EMPTY_TYPES, nothing, EMPTY_COLTYPES, 0, 0, Core.bitcast(Int64, ok.affected_rows), ok, ok.status, ok.warnings, EMPTY_BYTES, EMPTY_BYTES, EMPTY_INTS, EMPTY_INTS, EMPTY_INTS, P.PacketCursor(EMPTY_BYTES), 0, 0, number, true, false, opts)
+    c = Cursor{binary, buffered}(conn, sql, token, @atomic(conn.generation), nothing, EMPTY_NAMES, EMPTY_TYPES, nothing, EMPTY_COLTYPES, 0, 0, Core.bitcast(Int64, ok.affected_rows), ok, ok.status, ok.warnings, EMPTY_BYTES, EMPTY_BYTES, EMPTY_INTS, EMPTY_INTS, EMPTY_INTS, P.PacketCursor(EMPTY_BYTES), 0, 0, number, true, false, opts, false, 1)
     P.more_results(ok) || release_token!(c)
     return c
 end
@@ -179,10 +181,22 @@ function finish_result_cursor!(conn::Connection, sql::String, token::Int, header
         charge_buffered!(conn, s, header.metadata_bytes + (2 * n + 1) * sizeof(Int))
         binary && charge_buffered!(conn, s, n * sizeof(UInt8))
     end
-    c = Cursor{binary, buffered}(conn, sql, token, @atomic(conn.generation), nothing, names, types, lookup, coltypes, n, buffered ? 0 : -1, Int64(0), nothing, UInt16(0), UInt16(0), UInt8[], UInt8[], Int[], Vector{Int}(undef, n), Vector{Int}(undef, n), P.PacketCursor(EMPTY_BYTES), 0, 0, number, false, false, opts)
+    c = Cursor{binary, buffered}(conn, sql, token, @atomic(conn.generation), nothing, names, types, lookup, coltypes, n, buffered ? 0 : -1, Int64(0), nothing, UInt16(0), UInt16(0), UInt8[], UInt8[], Int[], Vector{Int}(undef, n), Vector{Int}(undef, n), P.PacketCursor(EMPTY_BYTES), 0, 0, number, false, false, opts, any(is_view_type, types), 1)
     buffered && buffer_rows!(c, s)
     return c
 end
+
+# Columns whose values view the row buffer (`DataString`/`DataBytes`).
+function is_view_type(T::Type)
+    B = nonmissingtype(T)
+    return B === DataString || B === DataBytes
+end
+
+# A streaming cursor with view-typed columns appends its rows to a shared arena and starts a
+# fresh one once the current one holds this many bytes: the views stay valid (an arena is
+# never overwritten), one retained view keeps at most one arena alive, and the cost is two
+# allocations per arena rather than per row (§8.9).
+const RETAIN_ARENA_BYTES = 64 * 1024
 
 # `binary`/`buffered` travel as `Val`s so every cursor construction (and the row scan
 # machinery behind it) is concretely typed — `--trim=safe` needs the resolution, and the
@@ -226,18 +240,18 @@ function buffer_rows!(c::Cursor{binary, true}, s::P.Session) where {binary}
     conn = c.conn
     try
         while true
-            r = P.read_row!(s)
-            if r isa P.ResultEnd
-                finish!(c, r)
+            p, isrow = P.read_row_packet!(s)
+            if !isrow
+                finish!(c, P.finish_result!(s, p))
                 break
             end
-            scan_row_guarded!(c, r, s)
-            n = P.payload_length(r)
+            scan_row_guarded!(c, p, s)
+            n = P.payload_length(p)
             charge_buffered!(conn, s, n + sizeof(Int))
             old = length(c.buf)
             push!(c.rowstarts, old + 1)
             resize!(c.buf, old + n)
-            copyto!(c.buf, old + 1, r.buf, r.lo, n)
+            copyto!(c.buf, old + 1, p.buf, p.lo, n)
             c.nrows += 1
         end
     catch
@@ -253,8 +267,8 @@ end
 function drain_rows!(c::Cursor{binary, false}, s::P.Session) where {binary}
     try
         while !c.finished
-            r = P.read_row!(s; dest=c.spare)
-            r isa P.ResultEnd && finish!(c, r)
+            p, isrow = P.read_row_packet!(s; dest=c.spare)
+            isrow || finish!(c, P.finish_result!(s, p))
         end
     catch
         c.finished = true
@@ -266,7 +280,7 @@ end
 # ---- iteration ----
 
 # Per-row guard without a closure (the closure passed to `P.guarded` allocated on every
-# streaming row; §8.9 requires allocations per row ≤ String/Vector columns + 1).
+# streaming row; §8.9 requires an allocation-free row path).
 @inline function scan_row_guarded!(c::Cursor, p::P.PacketView, s::P.Session)
     try
         scan_row!(c, p)
@@ -304,22 +318,34 @@ function stream_advance!(c::Cursor{binary, false}, i::Int) where {binary}
         claim_streaming_owner!(c)
         check_active(c)
         s = session(conn)
-        r = try
-            P.read_row!(s; dest=c.spare)
-        catch
-            c.finished = true
-            rethrow()
+        # A row whose string/bytes values are views must keep its bytes: it is appended to
+        # the current arena (after the bytes of every earlier row, which stay untouched) or
+        # starts a fresh one, instead of overwriting the reused buffer pair.
+        if c.retain_rows
+            dest, pos = c.buf, c.arena_pos
+            if pos > RETAIN_ARENA_BYTES
+                dest, pos = Vector{UInt8}(undef, RETAIN_ARENA_BYTES), 1
+            end
+        else
+            dest, pos = c.spare, 1
         end
-        if r isa P.ResultEnd
-            finish!(c, r)
-            return false
-        end
-        # Stale the old row before replacing any state that it can observe. If scanning the
-        # new row fails, the old row must not decode with partially replaced offsets.
-        @atomic c.epoch += 1
-        c.buf, c.spare = c.spare, c.buf
+        # A failure in the read, the terminator, or the scan ends the cursor.
         try
-            scan_current!(c, r, i, s)
+            p, isrow = P.read_row_packet!(s; dest=dest, pos=pos)
+            if !isrow
+                finish!(c, P.finish_result!(s, p))
+                return false
+            end
+            # Stale the old row before replacing any state that it can observe. If scanning
+            # the new row fails, the old row must not decode with partially replaced offsets.
+            @atomic c.epoch += 1
+            if c.retain_rows
+                c.buf = dest
+                c.arena_pos = p.hi + 1
+            else
+                c.buf, c.spare = c.spare, c.buf
+            end
+            scan_current!(c, p, i, s)
         catch
             c.finished = true
             rethrow()
@@ -382,7 +408,7 @@ function read_response!(conn::Connection, s::P.Session)
 end
 
 """
-    DBInterface.execute(conn::MySQL.Connection, sql; mysql_store_result=true, mysql_date_and_time=false) -> TextCursor
+    DBInterface.execute(conn::MySQL.Connection, sql; mysql_store_result=true) -> TextCursor
 
 Runs `sql` with the text protocol and returns a cursor over the first result. With
 `mysql_store_result=false` rows are streamed (the connection is busy until the cursor is
@@ -390,9 +416,9 @@ exhausted or closed). Further results of a multi-statement or CALL response are 
 the next operation; use `DBInterface.executemultiple` to consume them. Passing `params`
 prepares, executes and returns a binary-protocol cursor bound to a one-shot statement.
 """
-function DBInterface.execute(conn::Connection, sql::AbstractString, params=(); mysql_store_result::Bool=true, mysql_date_and_time::Bool=false)
-    params === () || return execute_params(conn, sql, params; mysql_store_result=mysql_store_result, mysql_date_and_time=mysql_date_and_time)
-    opts = mysql_date_and_time ? ResultOptions(; date_and_time=true, zero_dates=conn.results.zero_dates, time_type=conn.results.time_type) : conn.results
+function DBInterface.execute(conn::Connection, sql::AbstractString, params=(); mysql_store_result::Bool=true)
+    params === () || return execute_params(conn, sql, params; mysql_store_result=mysql_store_result)
+    opts = conn.results
     lock(conn.lock) do
         s = begin_command!(conn)
         token = new_token!(conn)
@@ -428,8 +454,8 @@ Base.show(io::IO, tc::Cursors) = return print(io, "MySQL.Cursors(", repr(tc.sql)
 Base.eltype(::Cursors{binary, buffered}) where {binary, buffered} = return Cursor{binary, buffered}
 Base.IteratorSize(::Type{<:Cursors}) = return Base.SizeUnknown()
 
-function DBInterface.executemultiple(conn::Connection, sql::AbstractString, params=(); mysql_store_result::Bool=true, mysql_date_and_time::Bool=false)
-    first = DBInterface.execute(conn, sql, params; mysql_store_result=mysql_store_result, mysql_date_and_time=mysql_date_and_time)
+function DBInterface.executemultiple(conn::Connection, sql::AbstractString, params=(); mysql_store_result::Bool=true)
+    first = DBInterface.execute(conn, sql, params; mysql_store_result=mysql_store_result)
     return Cursors(conn, String(sql), first.opts, first)
 end
 
