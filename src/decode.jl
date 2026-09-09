@@ -99,24 +99,10 @@ end
 decode_value(::Type{Vector{UInt8}}, buf::Vector{UInt8}, pos::Int, len::Int, ::ResultOptions) = return buf[pos:(pos + len - 1)]
 
 # DECIMAL (up to 65 digits) arrives as its ASCII form; the coefficient and scale are kept
-# exactly. With Parsers 3, DataDecimals' Parsers extension parses the byte span in place; with
-# Parsers 2 (where that extension is a no-op) DataDecimals' own string scanner reads a
-# `DataString` view of the span. Neither path copies the bytes or allocates.
-@static if pkgversion(Parsers) >= v"3"
-    parse_decimal(buf::Vector{UInt8}, pos::Int, len::Int) = return Parsers.tryparse(DecimalResult, buf, pos, pos + len - 1)
-else
-    function parse_decimal(buf::Vector{UInt8}, pos::Int, len::Int)
-        s = decode_value(DataString, buf, pos, len, DEFAULT_RESULT_OPTIONS)
-        return try
-            DecimalResult(s)
-        catch
-            nothing
-        end
-    end
-end
-
+# exactly. DataDecimals' Parsers extension parses the byte span in place: no copy, no
+# allocation.
 function decode_value(::Type{DecimalResult}, buf::Vector{UInt8}, pos::Int, len::Int, ::ResultOptions)
-    x = parse_decimal(buf, pos, len)
+    x = Parsers.tryparse(DecimalResult, buf, pos, pos + len - 1)
     x === nothing && conversion_error(DecimalResult, buf, pos, len)
     return x
 end
@@ -133,19 +119,10 @@ end
 
 # ---- numbers (Parsers) ----
 
-# Parsers 3 parses a byte span as `tryparse(T, buf, first, last)`; Parsers 2 (which the
-# current CSV.jl and JSON3.jl releases require) takes a positional `Options` and the last
-# index. Both are supported so that 2.0 installs next to those packages.
-@static if pkgversion(Parsers) < v"3"
-    @inline parse_span(::Type{T}, buf::Vector{UInt8}, first::Int, last::Int) where {T} = return Parsers.tryparse(T, buf, Parsers.OPTIONS, first, last)
-else
-    @inline parse_span(::Type{T}, buf::Vector{UInt8}, first::Int, last::Int) where {T} = return Parsers.tryparse(T, buf, first, last)
-end
-
 function decode_value(::Type{T}, buf::Vector{UInt8}, pos::Int, len::Int, ::ResultOptions) where {T <: Union{Integer, AbstractFloat}}
     len == 0 && conversion_error(T, buf, pos, len)
     (T <: Unsigned && buf[pos] == UInt8('-')) && conversion_error(T, buf, pos, len)
-    x = parse_span(T, buf, pos, pos + len - 1)
+    x = Parsers.tryparse(T, buf, pos, pos + len - 1)
     x === nothing && conversion_error(T, buf, pos, len)
     return x
 end

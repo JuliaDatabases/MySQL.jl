@@ -265,8 +265,7 @@ source are never read.
   slack for cursors, metadata, and arenas — asserted serverless in
   `test/protocol/perf_tests.jl` and against live servers in `test/perf/perf_gates.jl`).
   Six per-row allocations were eliminated: the closure passed to `guarded` per scanned
-  row; the `String` copy per DECIMAL value (DataDecimals parses the byte span in place
-  with Parsers 3, or its own scanner reads a `DataString` view with Parsers 2); the `lock(l) do` closure and the `Union{Nothing, Tuple}` iteration-protocol return
+  row; the `String` copy per DECIMAL value (DataDecimals parses the byte span in place); the `lock(l) do` closure and the `Union{Nothing, Tuple}` iteration-protocol return
   of the streaming `iterate` (now a thin `@inline` wrapper over a `Bool`-returning
   `stream_advance!`); the mutable `PacketCursor` per scan (cursors own a scratch one,
   rebound per row); the `String`/`Vector{UInt8}` copy per string or blob value
@@ -335,15 +334,3 @@ response, sequence 0, ERR header), regardless of its error code. The session rep
 server's error (4031 for this idle timeout) as terminal (BROKEN, transport closed), so
 `reconnect=true` recovers on the following command. Every other
 sequence mismatch still faults. MariaDB closes idle connections silently (peer EOF → 2006).
-
-## Third-party consultations
-
-- **2026-09-08, Codex round-1 review — policy exception.** Question: does
-  `sha256_password` require an empty response or a NUL byte for an empty password?
-  The reviewer opened Oracle's GPL client source
-  [`sql-common/client_authentication.cc` on the `8.4` branch](https://github.com/mysql/mysql-server/blob/8.4/sql-common/client_authentication.cc)
-  before reading the source restrictions above. The source sends one NUL byte. This
-  consultation violated the review policy. No code was copied, and no authentication
-  implementation or test was changed based on it. A separate live check on MySQL 8.4
-  accepted the existing empty response over both TCP and TLS. The maintainer must review
-  this exception; the source-pattern check cannot validate consultation history.
