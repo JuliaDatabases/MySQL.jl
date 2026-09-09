@@ -175,7 +175,7 @@ function readpacket!(io::PacketIO, transport::Transport, max_payload::Int; max_r
         len = Int(io.header[1]) | (Int(io.header[2]) << 8) | (Int(io.header[3]) << 16)
         got = io.header[4]
         if got != io.seq
-            (stale_err && total == 0 && io.seq == 0x01 && got == 0x00) || sequence_mismatch(io.seq, got)
+            (stale_err && io.response_bytes == 0 && nchunks == 0 && io.seq == 0x01 && got == 0x00) || sequence_mismatch(io.seq, got)
             stale = true
         end
         io.seq += 0x01
