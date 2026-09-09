@@ -1,0 +1,13 @@
+# Coverage is enforced by the native line-coverage gate (scripts/check_native_coverage.jl,
+# ≥85% of src/), run in the `coverage` CI job. That job uploads serverless coverage to
+# codecov as a signal; live integration tests run separately. Codecov's project/patch
+# statuses are informational because the line-coverage script supplies the blocking gate.
+coverage:
+  status:
+    project:
+      default:
+        informational: true
+    patch:
+      default:
+        informational: true
+comment: false

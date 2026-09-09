@@ -4,10 +4,26 @@ on:
     branches: [main]
     tags: ["*"]
   pull_request:
+  schedule:
+    # nightly deterministic fuzz budget (plan §8.4); the smoke batch runs in every test job
+    - cron: "17 6 * * *"
+  workflow_dispatch:
 jobs:
+  cleanroom:
+    name: Native clean-room source check
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: "1.10"
+      - run: julia --startup-file=no scripts/check_native_cleanroom.jl
   test:
     name: Julia ${{ matrix.version }} - ${{ matrix.os }} - ${{ matrix.arch }} - ${{ github.event_name }}
+    if: github.event_name != 'schedule'
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -17,25 +33,134 @@ jobs:
           - nightly
         os:
           - ubuntu-latest
+          - macOS-latest
+          - windows-latest
         arch:
           - x64
+        exclude:
+          - os: macOS-latest
+            arch: x64
+        include:
+          - os: macOS-latest
+            arch: aarch64
+            version: "1.10"
+          - os: macOS-latest
+            arch: aarch64
+            version: 1
+          - os: macOS-latest
+            arch: aarch64
+            version: nightly
     steps:
       - uses: actions/checkout@v5
+      # The wire-protocol tests need no server; the server integration tests run only
+      # where Docker is available (Linux runners).
       - run: docker info
+        if: runner.os == 'Linux'
       - uses: julia-actions/setup-julia@v2
         with:
           version: ${{ matrix.version }}
           arch: ${{ matrix.arch }}
       - uses: julia-actions/cache@v2
       - uses: julia-actions/julia-buildpkg@v1
+      # The cross-platform matrix runs the serverless protocol suite only (MYSQL_INTEGRATION=0):
+      # it is fast, needs no server, and the Docker integration (live lanes + leak soak +
+      # the server integration tests) runs in the dedicated `integration` job instead.
+      # Coverage is measured by the `coverage` job.
       - uses: julia-actions/julia-runtest@v1
+        with:
+          coverage: false
+        env:
+          MYSQL_INTEGRATION: "0"
+  integration:
+    # Live lanes (mysql:8.4, mariadb:11.4), the golden behavior manifest, the leak/lifecycle
+    # soak, and the server integration tests, all against real servers via Harbor. Linux-only
+    # (Docker) and pinned to Julia 1.10, whose GC is stable under the soak's GC-thrash (1.12+
+    # can hang on shared runners).
+    name: Integration (Docker)
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v5
+      - run: docker info
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: "1.10"
+      - uses: julia-actions/cache@v2
+      - uses: julia-actions/julia-buildpkg@v1
+      - uses: julia-actions/julia-runtest@v1
+        with:
+          coverage: false
+  coverage:
+    # Line-coverage gate (plan §8.15). The serverless fake-peer suite alone covers ~96% of
+    # src/, so the gate needs neither Docker nor the leak soak and stays fast; it also
+    # feeds codecov.
+    name: Native coverage
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: "1"
+      - uses: julia-actions/cache@v2
+      - uses: julia-actions/julia-buildpkg@v1
+      - run: julia --project=. --code-coverage=@src --startup-file=no -e 'include("test/protocol/runtests.jl")'
       - uses: julia-actions/julia-processcoverage@v1
+      - run: julia --startup-file=no scripts/check_native_coverage.jl lcov.info 0.85
       - uses: codecov/codecov-action@v5
         with:
           files: lcov.info
           token: ${{ secrets.CODECOV_TOKEN }}
+  fuzz:
+    # Budgeted mutation fuzzing in isolated worker processes (test/protocol/fuzz.jl via
+    # scripts/fuzz.jl); scheduled nightly, or run on demand with workflow_dispatch.
+    name: Nightly fuzz
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: "1"
+      - uses: julia-actions/cache@v2
+      - uses: julia-actions/julia-buildpkg@v1
+      - run: julia --project=. scripts/fuzz.jl --minutes 30 --seed $(date +%Y%m%d)000000 --out fuzz_failures
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: fuzz-failures
+          path: fuzz_failures/
+  perf:
+    # §8.9 gates (correctness/allocation) plus the wall-clock timing report. They are too
+    # heavy for the shared PR test lanes, so they run here on the nightly schedule and on
+    # demand (MYSQL_PERF_GATES=1), with coverage off. Cross-driver comparisons (MySQL.jl 1.x,
+    # other clients) live in bench/, outside CI.
+    name: Performance gates (§8.9)
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+      - run: docker info
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: "1"
+      - uses: julia-actions/cache@v2
+      - uses: julia-actions/julia-buildpkg@v1
+      - uses: julia-actions/julia-runtest@v1
+        with:
+          coverage: false
+        env:
+          MYSQL_PERF_GATES: "1"
+          # Only the §8.9 gates here: the live lanes/soak run in the Integration job on
+          # Julia 1.10 (the soak can hang 1.12+ on shared runners — see test/runtests.jl).
+          MYSQL_INTEGRATION: "0"
   docs:
     name: Documentation
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5

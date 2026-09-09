@@ -1,0 +1,171 @@
+# STARTTLS orchestration on top of Reseau TLS.
+
+"""
+    SSLMode
+
+`SSL_DISABLED` never sends SSLRequest; `SSL_PREFERRED` (the default) uses TLS when the
+server advertises `CLIENT_SSL` and continues in plaintext only when it does not (a failed
+TLS handshake never falls back); `SSL_REQUIRED` fails without TLS; `SSL_VERIFY_CA` also
+verifies the certificate chain; `SSL_VERIFY_IDENTITY` also verifies the host name / IP SAN.
+Only the last two authenticate the server; `SSL_PREFERRED`/`SSL_REQUIRED` give
+confidentiality against passive observers and no protection against an active MITM.
+"""
+@enum SSLMode SSL_DISABLED SSL_PREFERRED SSL_REQUIRED SSL_VERIFY_CA SSL_VERIFY_IDENTITY
+
+const SSL_MODE_NAMES = Dict{Symbol, SSLMode}(:disabled => SSL_DISABLED, :preferred => SSL_PREFERRED, :required => SSL_REQUIRED, :verify_ca => SSL_VERIFY_CA, :verify_identity => SSL_VERIFY_IDENTITY)
+
+@noinline unknown_ssl_mode(sym::Symbol) = return throw(ArgumentError("unknown ssl_mode :$sym; expected one of :disabled, :preferred, :required, :verify_ca, :verify_identity"))
+
+function ssl_mode_named(sym::Symbol)::SSLMode
+    return get(SSL_MODE_NAMES, sym) do
+        unknown_ssl_mode(sym)
+    end
+end
+
+ssl_mode_string(str::String)::SSLMode = return ssl_mode_named(Symbol(replace(lowercase(str), "-" => "_", "ssl_mode_" => "")))
+
+@inline function ssl_mode(x)::SSLMode
+    x isa SSLMode && return x
+    x isa Symbol && return ssl_mode_named(x)
+    x isa String && return ssl_mode_string(x)
+    x isa SubString{String} && return ssl_mode_string(String(x))
+    throw(ArgumentError("ssl_mode must be a Symbol or String naming one of :disabled, :preferred, :required, :verify_ca, :verify_identity"))
+end
+
+"""
+    TLSOptions(; mode=SSL_PREFERRED, ca_file=nothing, cert_file=nothing, key_file=nothing,
+                 server_name=nothing, min_version=nothing, max_version=nothing)
+
+`ca_file` may be a bundle or a hashed CA directory (Reseau accepts both); `cert_file`/`key_file`
+enable mutual TLS; `server_name` overrides the SNI/verification name derived from the host.
+"""
+struct TLSOptions
+    mode::SSLMode
+    ca_file::Union{Nothing, String}
+    cert_file::Union{Nothing, String}
+    key_file::Union{Nothing, String}
+    server_name::Union{Nothing, String}
+    min_version::Union{Nothing, UInt16}
+    max_version::Union{Nothing, UInt16}
+end
+
+function TLSOptions(; mode=SSL_PREFERRED, ca_file=nothing, cert_file=nothing, key_file=nothing, server_name=nothing, min_version=nothing, max_version=nothing)
+    xor(cert_file === nothing, key_file === nothing) && throw(ArgumentError("ssl_cert and ssl_key must be provided together"))
+    m = ssl_mode(mode)
+    return TLSOptions(m, ca_file === nothing ? nothing : String(ca_file), cert_file === nothing ? nothing : String(cert_file), key_file === nothing ? nothing : String(key_file), server_name === nothing ? nothing : String(server_name), min_version, max_version)
+end
+
+is_ip_literal(host::AbstractString) = return occursin(r"^\d{1,3}(\.\d{1,3}){3}$", host) || occursin(':', host)
+
+# SNI is sent for DNS names in every TLS mode; an IP literal is passed only when it is needed
+# for verification (RFC 6066 forbids IP literals in SNI, and Reseau needs the name to check
+# the IP SAN).
+function tls_server_name(opts::TLSOptions, host::AbstractString)
+    opts.server_name === nothing || return opts.server_name
+    name = (startswith(host, '[') && endswith(host, ']')) ? String(host[2:(end - 1)]) : String(host)
+    is_ip_literal(name) || return name
+    (opts.mode == SSL_VERIFY_CA || opts.mode == SSL_VERIFY_IDENTITY) && return name
+    return nothing
+end
+
+# Reseau's `Config` constructors take `Union{Nothing, ...}` arguments, and a call whose
+# arguments are still unions is not statically resolvable under `--trim=safe`. The nested
+# `=== nothing` branches below narrow each optional (SNI name, the client cert/key pair,
+# the CA file) to a concrete type before the one positional `Config` call in each leaf.
+@inline function tls_config_leaf(sn::Union{Nothing, String}, vp::Bool, vh::Bool, cf::Union{Nothing, String}, kf::Union{Nothing, String}, caf::Union{Nothing, String}, hs::Int64, minv::UInt16, maxv::UInt16)
+    return Reseau.TLS.Config(sn, vp, vh, Reseau.TLS.ClientAuthMode.NoClientCert, cf, kf, caf, nothing, String[], UInt16[], hs, minv, maxv, false)
+end
+
+@inline function tls_config_ca(sn, vp::Bool, vh::Bool, cf, kf, caf::Union{Nothing, String}, hs::Int64, minv::UInt16, maxv::UInt16)
+    caf === nothing && return tls_config_leaf(sn, vp, vh, cf, kf, nothing, hs, minv, maxv)
+    return tls_config_leaf(sn, vp, vh, cf, kf, caf, hs, minv, maxv)
+end
+
+@inline function tls_config_cert(sn, vp::Bool, vh::Bool, cf::Union{Nothing, String}, kf::Union{Nothing, String}, caf, hs::Int64, minv::UInt16, maxv::UInt16)
+    (cf === nothing || kf === nothing) && return tls_config_ca(sn, vp, vh, nothing, nothing, caf, hs, minv, maxv)
+    return tls_config_ca(sn, vp, vh, cf, kf, caf, hs, minv, maxv)
+end
+
+function tls_config(opts::TLSOptions, host::AbstractString, handshake_timeout_ns::Integer)
+    verify_peer = opts.mode == SSL_VERIFY_CA || opts.mode == SSL_VERIFY_IDENTITY
+    verify_hostname = opts.mode == SSL_VERIFY_IDENTITY
+    sn = tls_server_name(opts, host)
+    hs = max(Int64(0), Int64(handshake_timeout_ns))
+    minv = opts.min_version === nothing ? Reseau.TLS.TLS1_2_VERSION : opts.min_version
+    maxv = opts.max_version === nothing ? Reseau.TLS.TLS1_3_VERSION : opts.max_version
+    sn === nothing && return tls_config_cert(nothing, verify_peer, verify_hostname, opts.cert_file, opts.key_file, opts.ca_file, hs, minv, maxv)
+    return tls_config_cert(sn, verify_peer, verify_hostname, opts.cert_file, opts.key_file, opts.ca_file, hs, minv, maxv)
+end
+
+raw_tcp(t::Reseau.TCP.Conn) = return t
+raw_tcp(t::FaultTransport) = return t.inner isa Reseau.TCP.Conn ? t.inner : throw(ArgumentError("STARTTLS needs a TCP transport"))
+raw_tcp(::Reseau.TLS.Conn) = return throw(ArgumentError("the session is already on TLS"))
+
+function socket_fd(tcp::Reseau.TCP.Conn)
+    raw = Reseau.TCP.rawfd(tcp)
+    @static if Sys.iswindows()
+        return reinterpret(UInt, raw)
+    else
+        return reinterpret(Cint, raw)
+    end
+end
+
+# A valid server cannot send application bytes between its greeting and the client's
+# SSLRequest. Peek without consuming so bytes from a coalescing peer never enter TLS.
+function has_pending_tcp_bytes(tcp::Reseau.TCP.Conn)
+    byte = Ref{UInt8}(0x00)
+    n = GC.@preserve tcp byte Reseau.SocketOps.recv_from!(socket_fd(tcp), Base.unsafe_convert(Ptr{UInt8}, byte), Csize_t(1), Reseau.SocketOps.MSG_PEEK)
+    n > 0 && return true
+    n == 0 && return false
+    errno = Reseau.SocketOps.last_error()
+    errno == Int32(Base.Libc.EAGAIN) && return false
+    throw(SystemError("recv(MSG_PEEK)", Int(errno)))
+end
+
+is_secure_transport(t::Reseau.TLS.Conn) = return true
+is_secure_transport(t::Reseau.TCP.Conn) = return false
+is_secure_transport(t::FaultTransport) = return t.inner isa Reseau.TLS.Conn
+is_secure_transport(s::Session) = return is_secure_transport(s.transport)
+
+"""
+    starttls!(s, opts, host; handshake_timeout_ns=0) -> Bool
+
+Applies the `ssl_mode` policy after the greeting (phase `HANDSHAKE`): returns `false` when
+the connection legitimately stays in plaintext (`SSL_DISABLED`, or `SSL_PREFERRED` against a
+server without `CLIENT_SSL`), `true` after a completed TLS handshake. A server that lacks
+TLS under `SSL_REQUIRED` or stricter raises `TLSNegotiationError`; a failed handshake faults
+the session (`TLSNegotiationError`, or `TimeoutError` on a deadline) — there is never a
+plaintext fallback once SSLRequest has been sent.
+"""
+function starttls!(s::Session, opts::TLSOptions, host::AbstractString; handshake_timeout_ns::Integer=0)
+    require_phase(s, HANDSHAKE)
+    opts.mode == SSL_DISABLED && return false
+    if !has_capability(s.server.capabilities, CLIENT_SSL)
+        opts.mode == SSL_PREFERRED && return false
+        throw(TLSNegotiationError("the server does not support TLS but ssl_mode=$(opts.mode) requires it", nothing))
+    end
+    tcp = raw_tcp(s.transport)
+    config = tls_config(opts, host, handshake_timeout_ns)
+    has_pending_tcp_bytes(tcp) && throw(fault!(s, ProtocolError("unexpected bytes followed the server greeting before STARTTLS")))
+    send_ssl_request!(s)
+    tls = nothing
+    try
+        tls = Reseau.TLS.client(tcp, config)
+        Reseau.TLS.handshake!(tls)
+    catch err
+        tls === nothing || transport_close(tls)
+        throw(fault!(s, tls_failure(err)))
+    end
+    replace_transport!(s, tls)
+    return true
+end
+
+@inline function tls_failure(err)
+    err isa Reseau.TLS.TLSHandshakeTimeoutError && return Reseau.IOPoll.DeadlineExceededError()
+    is_deadline_error(err) && return err
+    (err isa Reseau.TLS.TLSError && is_deadline_error(err.cause)) && return err.cause
+    err isa Reseau.TLS.TLSError && return TLSNegotiationError("TLS handshake failed: $(err.message)", err)
+    err isa Reseau.TLS.ConfigError && return TLSNegotiationError("invalid TLS configuration: $(sprint(showerror, err))", err)
+    err isa EOFError && return TLSNegotiationError("the server closed the connection during the TLS handshake", err)
+    return err
+end

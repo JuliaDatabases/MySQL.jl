@@ -1,0 +1,443 @@
+# Command phase at the framing level: sending commands and walking their responses through
+# the phase machine. Value decoding of rows belongs to the cursor layer; here rows
+# are raw `PacketView`s.
+
+"""
+    ResultHeader
+
+Column definitions of one result set (execute-time metadata is authoritative) and their
+wire payload size for retained-buffer accounting.
+"""
+struct ResultHeader
+    columns::Vector{ColumnDef}
+    binary::Bool
+    metadata_bytes::Int
+end
+
+"""
+    ResultEnd
+
+The terminator of one result set: status flags, warning count, the OK snapshot when the
+terminator was an OK packet (DEPRECATE_EOF), and whether another result set follows.
+"""
+struct ResultEnd
+    status::UInt16
+    warnings::UInt16
+    ok::Union{Nothing, OKPacket}
+    more_results::Bool
+end
+
+const CommandResponse = Union{OKPacket, EOFPacket, ResultHeader, LocalInfileRequest}
+
+function command_payload(command::UInt8, payload::AbstractVector{UInt8})
+    buf = Vector{UInt8}(undef, 1 + length(payload))
+    buf[1] = command
+    copyto!(buf, 2, payload, 1, length(payload))
+    return buf
+end
+
+function check_command_size!(s::Session, payload::AbstractVector{UInt8})
+    length(payload) <= max_payload(s) - 1 || throw(fault!(s, ProtocolError("command packet length $(length(payload) + 1) exceeds limit $(max_payload(s))")))
+    return nothing
+end
+
+# ---- direct command framing ----
+# Almost every command is one wire chunk, so it is framed directly in `io.outbuf` — header
+# placeholder, sequence byte, command byte — the caller appends the payload bytes to the
+# returned buffer, and `finish_command!` patches the length and writes. That is one buffer
+# fill and one write per command instead of building the payload in one or two intermediate
+# vectors first (§8.9 round-trip work). A payload that outgrows one chunk (≥ 16 MiB) falls
+# back to the chunked `sendpacket!` path in `finish_command!`.
+
+function start_command!(s::Session, command::UInt8)
+    require_phase(s, READY)
+    newcommand!(s.io)
+    s.result_sets = 0
+    s.metadata_bytes = 0
+    out = s.io.outbuf
+    empty!(out)
+    write_u24!(out, 0)                     # length, patched in finish_command!
+    push!(out, s.io.seq)
+    s.io.seq += 0x01
+    push!(out, command)
+    return out
+end
+
+function flush_command!(s::Session)
+    out = s.io.outbuf
+    n = length(out) - PACKET_HEADER_LEN    # command byte + payload
+    n <= max_payload(s) || throw(fault!(s, ProtocolError("command packet length $n exceeds limit $(max_payload(s))")))
+    s.debug && @debug "MySQL.Protocol write" phase=s.phase length=n seq=(s.io.seq - 0x01)
+    try
+        if n < MAX_CHUNK
+            out[1] = n % UInt8
+            out[2] = (n >> 8) % UInt8
+            out[3] = (n >> 16) % UInt8
+            arm_write_deadline!(s.io, s.transport)
+            transport_write(s.transport, out)
+        else
+            # rare: the command needs wire chunking; extract the payload and re-frame
+            payload = out[(PACKET_HEADER_LEN + 1):end]
+            s.io.seq = 0x00
+            sendpacket!(s.io, s.transport, payload)
+        end
+    catch err
+        throw(fault!(s, err))
+    end
+    return nothing
+end
+
+function finish_command!(s::Session, kind::CommandKind)
+    flush_command!(s)
+    s.command_kind = kind
+    transition!(s, :send_command, CMD_SENT)
+    return nothing
+end
+
+function finish_noresponse!(s::Session)
+    flush_command!(s)
+    transition!(s, :send_noresponse, READY)
+    return nothing
+end
+
+"""
+    send_command!(s, command, payload=UInt8[]; kind=CMD_QUERY)
+
+Writes a command that expects a response (READY → CMD_SENT). The sequence counter restarts
+at 0 and per-command accounting is reset.
+"""
+function send_command!(s::Session, command::UInt8, payload::AbstractVector{UInt8}=UInt8[]; kind::CommandKind=CMD_QUERY)
+    require_phase(s, READY)
+    check_command_size!(s, payload)
+    newcommand!(s.io)
+    s.result_sets = 0
+    s.metadata_bytes = 0
+    sendpacket!(s, command_payload(command, payload))
+    s.command_kind = kind
+    transition!(s, :send_command, CMD_SENT)
+    return nothing
+end
+
+"""
+    send_noresponse!(s, command, payload=UInt8[])
+
+Writes a command the server never answers (COM_STMT_CLOSE, COM_STMT_SEND_LONG_DATA); the
+session stays READY and must not read.
+"""
+function send_noresponse!(s::Session, command::UInt8, payload::AbstractVector{UInt8}=UInt8[])
+    require_phase(s, READY)
+    check_command_size!(s, payload)
+    newcommand!(s.io)
+    sendpacket!(s, command_payload(command, payload))
+    transition!(s, :send_noresponse, READY)
+    return nothing
+end
+
+function query!(s::Session, sql::AbstractString)
+    out = start_command!(s, COM_QUERY)
+    append!(out, codeunits(sql))
+    return finish_command!(s, CMD_QUERY)
+end
+
+function ping!(s::Session)
+    start_command!(s, COM_PING)
+    return finish_command!(s, CMD_SIMPLE)
+end
+
+function init_db!(s::Session, db::AbstractString)
+    out = start_command!(s, COM_INIT_DB)
+    append!(out, codeunits(db))
+    return finish_command!(s, CMD_SIMPLE)
+end
+
+function reset_connection!(s::Session)
+    start_command!(s, COM_RESET_CONNECTION)
+    return finish_command!(s, CMD_SIMPLE)
+end
+
+function set_option!(s::Session, option::Integer)
+    out = start_command!(s, COM_SET_OPTION)
+    write_u16!(out, option)
+    return finish_command!(s, CMD_SET_OPTION)
+end
+
+function stmt_close!(s::Session, statement_id::Integer)
+    out = start_command!(s, COM_STMT_CLOSE)
+    write_u32!(out, statement_id)
+    return finish_noresponse!(s)
+end
+
+"""
+    quit!(s)
+
+Best-effort COM_QUIT followed by closing the transport. The server answers a COM_QUIT by
+closing the connection, so nothing is read.
+"""
+function quit!(s::Session)
+    if s.phase == READY
+        try
+            newcommand!(s.io)
+            sendpacket!(s.io, s.transport, command_payload(COM_QUIT, UInt8[]))
+        catch
+        end
+        transition!(s, :quit, CLOSED)
+    end
+    close!(s)
+    return nothing
+end
+
+# ---- responses ----
+
+"""
+    read_command_response!(s; kind=CMD_QUERY) -> OKPacket | EOFPacket | ResultHeader | LocalInfileRequest
+
+Reads the first packet of a command response and advances the phase: an OK returns to READY
+(or RESULT_END when MORE_RESULTS_EXISTS is set), an ERR returns to READY and is thrown as
+`Error` for connection commands or `StmtError` for prepared commands, a LOCAL INFILE request
+enters LOCAL_INFILE, and a column count reads the column definitions (plus the
+pre-DEPRECATE_EOF metadata EOF) and enters ROWS.
+"""
+function read_command_response!(s::Session; kind::CommandKind=s.command_kind)
+    require_phase(s, CMD_SENT)
+    s.command_kind = kind
+    p = readpacket!(s)
+    what = guarded(() -> classify_command_response(kind, p), s)
+    (what == :ok || what == :eof || what == :column_count) && next_result_set!(s)
+    what == :ok && return finish_ok!(s, p)
+    what == :eof && return finish_eof!(s, p)
+    what == :err && return throw_command_err!(s, p, kind)
+    what == :local_infile && return begin_local_infile!(s, p)
+    what == :prepare_ok && throw(fault!(s, ProtocolError("internal error: COM_STMT_PREPARE responses must be read with read_prepare_response!")))
+    return read_result_header!(s, p, kind == CMD_STMT_EXECUTE)
+end
+
+function finish_eof!(s::Session, p::PacketView)
+    eof = if s.command_kind == CMD_SET_OPTION && payload_length(p) == 1
+        EOFPacket(0x0000, s.status)
+    else
+        guarded(() -> parse_eof(p, s.capabilities), s)
+    end
+    s.status = eof.status
+    more = more_results(eof)
+    transition!(s, more ? :ok_more : :ok, more ? RESULT_END : READY)
+    return eof
+end
+
+function finish_ok!(s::Session, p::PacketView)
+    ok = guarded(() -> parse_ok(p, s.capabilities, s.limits), s)
+    s.status = ok.status
+    s.command_kind == CMD_LOCAL_INFILE && (s.command_kind = CMD_QUERY)
+    if more_results(ok)
+        transition!(s, :ok_more, RESULT_END)
+    else
+        transition!(s, :ok, READY)
+    end
+    return ok
+end
+
+function throw_command_err!(s::Session, p::PacketView, kind::CommandKind)
+    e = guarded(() -> parse_err(p, s.capabilities), s)
+    transition!(s, :err, READY)
+    if kind == CMD_STMT_PREPARE || kind == CMD_STMT_EXECUTE || kind == CMD_STMT_RESET
+        throw(StmtError(e))
+    end
+    throw(Error(e))
+end
+
+function begin_local_infile!(s::Session, p::PacketView)
+    has_capability(s, CLIENT_LOCAL_FILES) || throw(fault!(s, ProtocolError("server sent a LOCAL INFILE request although CLIENT_LOCAL_FILES was not negotiated")))
+    req = guarded(() -> parse_local_infile_request(p), s)
+    transition!(s, :local_infile, LOCAL_INFILE)
+    return req
+end
+
+# Every response unit of a command (an OK or a result-set header) counts toward max_result_sets.
+function next_result_set!(s::Session)
+    s.result_sets += 1
+    s.result_sets <= s.limits.max_result_sets || throw(fault!(s, ProtocolError("command produced more than $(s.limits.max_result_sets) result sets")))
+    return nothing
+end
+
+function read_result_header!(s::Session, p::PacketView, binary::Bool)
+    cc = PacketCursor(p)
+    ncols_wire = guarded(() -> read_lenenc!(cc), s)
+    atend(cc) || throw(fault!(s, ProtocolError("malformed column count packet: $(remaining(cc)) trailing bytes")))
+    0 < ncols_wire <= UInt64(s.limits.max_columns) || throw(fault!(s, ProtocolError("column count $ncols_wire is outside 1:$(s.limits.max_columns)")))
+    ncols = Int(ncols_wire)
+    transition!(s, :column_count, COLUMN_DEFS)
+    columns = ColumnDef[]
+    metadata_start = s.metadata_bytes
+    for i in 1:ncols
+        cp = readpacket!(s; packet_limit=s.limits.max_metadata_bytes - s.metadata_bytes)
+        s.metadata_bytes += payload_length(cp)
+        s.metadata_bytes <= s.limits.max_metadata_bytes || throw(fault!(s, ProtocolError("column metadata exceeded $(s.limits.max_metadata_bytes) bytes")))
+        push!(columns, guarded(() -> parse_column_def(cp), s))
+        transition!(s, :column_def, COLUMN_DEFS)
+    end
+    if deprecate_eof(s)
+        transition!(s, :metadata_complete, ROWS)
+    else
+        ep = readpacket!(s)
+        is_eof_packet(ep) || throw(fault!(s, ProtocolError("expected EOF after column definitions")))
+        s.status = guarded(() -> parse_eof(ep, s.capabilities), s).status
+        transition!(s, :metadata_eof, ROWS)
+    end
+    return ResultHeader(columns, binary, s.metadata_bytes - metadata_start)
+end
+
+"""
+    read_row_packet!(s; binary=false, dest=s.io.inbuf, pos=1) -> (PacketView, isrow::Bool)
+
+Reads the next packet of a result set as a view over `dest` from `pos` (valid until the next
+read into that region of the buffer): a row (`isrow`), or the terminator, which the caller
+passes to `finish_result!` to end the result set. A server ERR in row state ends the result
+set, returns the session to READY, and is thrown as `StmtError` for a binary prepared
+response and as `Error` for a text response. Cursors read rows through this pair rather than
+`read_row!` so that no `Union{PacketView, ResultEnd}` value exists per row: such a value is
+boxed on every row (§8.9).
+
+    read_row!(s; binary=false, dest=s.io.inbuf, pos=1) -> PacketView | ResultEnd
+
+The same as one call: the row, or the parsed terminator.
+"""
+# Function-call guard: a closure passed to `guarded` would allocate on every row, and a
+# `try` in `read_row!` itself would make it uninlinable (§8.9).
+function classify_row_guarded(s::Session, p::PacketView, binary::Bool)
+    try
+        return classify_row(p, binary)
+    catch err
+        throw(fault!(s, err))
+    end
+end
+
+@noinline function throw_row_err(s::Session, p::PacketView, binary::Bool)
+    e = guarded(() -> parse_err(p, s.capabilities), s)
+    transition!(s, :err, READY)
+    throw(binary ? StmtError(e) : Error(e))
+end
+
+@inline function read_row_packet!(s::Session; binary::Bool=s.command_kind == CMD_STMT_EXECUTE, dest::Vector{UInt8}=s.io.inbuf, pos::Int=1)
+    require_phase(s, ROWS)
+    p = readpacket!(s; dest=dest, pos=pos)
+    what = classify_row_guarded(s, p, binary)
+    if what == :row
+        row_transition!(s)
+        return (p, true)
+    end
+    what == :err && throw_row_err(s, p, binary)
+    return (p, false)
+end
+
+@inline function read_row!(s::Session; binary::Bool=s.command_kind == CMD_STMT_EXECUTE, dest::Vector{UInt8}=s.io.inbuf, pos::Int=1)
+    p, isrow = read_row_packet!(s; binary=binary, dest=dest, pos=pos)
+    return isrow ? p : finish_result!(s, p)
+end
+
+# Ends the result set on its terminator packet (from `read_row_packet!`): parses the OK/EOF,
+# records the status, and moves to RESULT_END or READY.
+function finish_result!(s::Session, p::PacketView)
+    if deprecate_eof(s)
+        ok = guarded(() -> parse_ok(p, s.capabilities, s.limits), s)
+        status, warnings, oksnap = ok.status, ok.warnings, ok
+    else
+        is_eof_packet(p) || throw(fault!(s, ProtocolError("expected EOF terminator, got a $(payload_length(p))-byte 0xFE packet")))
+        eof = guarded(() -> parse_eof(p, s.capabilities), s)
+        status, warnings, oksnap = eof.status, eof.warnings, nothing
+    end
+    s.status = status
+    more = more_results(status)
+    transition!(s, more ? :terminator_more : :terminator, more ? RESULT_END : READY)
+    return ResultEnd(status, warnings, oksnap, more)
+end
+
+"""
+    next_result!(s; kind=CMD_QUERY) -> OKPacket | ResultHeader | LocalInfileRequest
+
+Advances from RESULT_END to the next result of a multi-result response (the sequence counter
+continues; nothing is sent).
+"""
+function next_result!(s::Session; kind::CommandKind=s.command_kind)
+    require_phase(s, RESULT_END)
+    s.result_sets < s.limits.max_result_sets || throw(fault!(s, ProtocolError("command produced more than $(s.limits.max_result_sets) result sets")))
+    transition!(s, :next_result, CMD_SENT)
+    return read_command_response!(s; kind=kind)
+end
+
+"""
+    drain!(s)
+
+Reads and discards everything the server still has to say about the current command (rows,
+terminators, further result sets) until the session is READY. Server ERR packets are
+swallowed; faults (which leave the session BROKEN, even when reported as the classic
+client `Error` codes) propagate.
+"""
+function drain!(s::Session)
+    while !is_terminal(s.phase) && s.phase != READY
+        try
+            drain_step!(s)
+        catch err
+            (err isa ServerError && !is_terminal(s.phase)) || rethrow()
+        end
+    end
+    return nothing
+end
+
+function drain_step!(s::Session)
+    if s.phase == CMD_SENT
+        # an unread COM_STMT_PREPARE answer (the caller was interrupted between the send and
+        # the read) is a PREPARE_OK, not a generic response. Close the otherwise unowned id
+        # after the response returns the session to READY.
+        if s.command_kind == CMD_STMT_PREPARE
+            ok = read_prepare_response!(s)
+            stmt_close!(s, ok.statement_id)
+        else
+            read_command_response!(s)
+        end
+    elseif s.phase == ROWS
+        read_row!(s)
+    elseif s.phase == RESULT_END
+        next_result!(s)
+    elseif s.phase == LOCAL_INFILE
+        send_local_infile!(s, nothing)
+    else
+        wrong_phase(s, "a command-response phase")
+    end
+    return nothing
+end
+
+"""
+    send_local_infile!(s, source::Union{Nothing, IO}; max_bytes=nothing)
+
+Streams `source` as LOCAL INFILE data packets followed by the empty terminator packet
+(LOCAL_INFILE → CMD_SENT); `nothing` sends only the terminator (a refusal at the framing
+level — the connection layer turns it into `LocalInfileRefused`). Returns the number of
+bytes sent. Any failure after the first data packet faults the session.
+"""
+function send_local_infile!(s::Session, source::Union{Nothing, IO}; max_bytes::Union{Nothing, Integer}=nothing, chunk_size::Integer=min(MAX_CHUNK - 1, s.limits.max_packet))
+    require_phase(s, LOCAL_INFILE)
+    1 <= chunk_size <= min(MAX_CHUNK - 1, s.limits.max_packet) || throw(ArgumentError("LOCAL INFILE chunk_size must be in 1:$(min(MAX_CHUNK - 1, s.limits.max_packet))"))
+    max_bytes === nothing || max_bytes >= 0 || throw(ArgumentError("LOCAL INFILE max_bytes must be nonnegative or nothing"))
+    sent = 0
+    if source !== nothing
+        chunk = Vector{UInt8}(undef, chunk_size)
+        try
+            while !eof(source)
+                n = readbytes!(source, chunk, chunk_size)
+                n == 0 && break
+                if max_bytes !== nothing && !(sent <= max_bytes && n <= max_bytes - sent)
+                    err = ProtocolError("LOCAL INFILE upload exceeded $max_bytes bytes")
+                    sent == 0 ? throw(err) : throw(fault!(s, err))
+                end
+                sendpacket!(s, view(chunk, 1:n))
+                sent += n
+            end
+        catch err
+            sent == 0 && rethrow()
+            throw(fault!(s, err))
+        end
+    end
+    sendpacket!(s, UInt8[])
+    s.command_kind = CMD_LOCAL_INFILE
+    transition!(s, :upload_done, CMD_SENT)
+    return sent
+end
