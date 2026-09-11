@@ -104,7 +104,9 @@ function resolve_bind(
     TRIM_CALL_EDGE[] && work()
     task = Task(work)
     task.sticky = false
-    errormonitor(task)
+    # BindResolve returns resolver errors through result; wait(task) below also
+    # propagates task failures. Base.errormonitor adds a dynamic error-display
+    # task that cannot be compiled with --trim=safe on Julia 1.13.
     schedule(task)
     left = deadline - Int64(time_ns())
     left > 0 || throw(P.TimeoutError(timeout_message))
@@ -200,7 +202,9 @@ end
 # statically resolvable.
 @inline server_error_text(e::P.ServerError) = return e isa P.StmtError ? sprint(showerror, e) : sprint(showerror, e::P.Error)
 
-@inline function throw_with_server_cause(err, cause::P.ServerError)
+# A caught user exception has type Any. Keep one callable specialization for it,
+# so trim compilation need not resolve dispatch on the user's exception type.
+@noinline function throw_with_server_cause(@nospecialize(err), cause::P.ServerError)
     try
         throw(cause)
     catch

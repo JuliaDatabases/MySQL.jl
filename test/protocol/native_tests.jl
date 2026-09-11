@@ -327,6 +327,17 @@ end
     warm_deadline = Int64(time_ns()) + 5_000_000_000
     @test N.resolve_bind("bind.example", warm_deadline, resolver) == [Reseau.TCP.loopback_addr(0)]
     @test take!(called_with) == ("tcp", "bind.example:0")
+    # Resolver errors travel through BindResolveOutcome and retain their identity
+    # without a separate errormonitor task.
+    resolver_error = ErrorException("bind resolver failed")
+    failing_resolver = (network, address) -> throw(resolver_error)
+    caught = try
+        N.resolve_bind("bind.example", Int64(time_ns()) + 5_000_000_000, failing_resolver)
+        nothing
+    catch ex
+        ex
+    end
+    @test caught === resolver_error
     block_resolver[] = true
     before = Int64(time_ns())
     err = try
