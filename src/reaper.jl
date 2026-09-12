@@ -160,7 +160,8 @@ function ensure_reaper!()
         end
         task = Task(reaper_loop)
         task.sticky = false
-        errormonitor(task)
+        # reaper_loop handles timer shutdown and logs reclamation errors itself.
+        # Base.errormonitor would add an untrimmable dynamic error-display task.
         schedule(task)
         atexit(reaper_atexit)
     finally
