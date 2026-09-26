@@ -1,6 +1,7 @@
 # JuliaC --trim=safe workload: drives the main MySQL.jl entrypoints — connect (handshake,
 # auth, charset bootstrap), text-protocol execute (buffered and streaming), prepared
-# statements (binary protocol), one-shot parameterized execute, ping, escape, and close —
+# statements (binary protocol), one-shot parameterized execute, transaction scopes,
+# rollback failure, ping, escape, and close —
 # against an in-process scripted server on a loopback Reseau TCP listener, so the
 # executable needs no database and runs on every platform.
 #
@@ -162,6 +163,8 @@ function serve_connection!(conn)::Nothing
     send_packet(conn, 0, greeting_payload())
     seq, _ = read_packet(conn)                 # handshake response (auth ignored)
     send_packet(conn, seq + 1, ok_payload())
+    status = P.SERVER_STATUS_AUTOCOMMIT
+    fail_rollback = false
     while true
         local cmd
         local payload
@@ -182,9 +185,16 @@ function serve_connection!(conn)::Nothing
             sql = String(payload[2:end])
             if occursin("FROM people", sql)
                 send_resultset(conn, people_cols(), people_rows())
+            elseif fail_rollback && startswith(sql, "ROLLBACK")
+                err = UInt8[0xff]
+                P.write_u16!(err, 1305)
+                append!(err, codeunits("#HY000scripted rollback failure"))
+                send_packet(conn, 1, err)
             else
-                # SET NAMES, CREATE TABLE, START TRANSACTION, COMMIT, INSERT, ...
-                send_packet(conn, 1, ok_payload(; affected=occursin("INSERT", sql) ? 1 : 0))
+                sql == "START TRANSACTION" && (status |= P.SERVER_STATUS_IN_TRANS)
+                sql in ("COMMIT", "ROLLBACK") && (status = P.SERVER_STATUS_AUTOCOMMIT)
+                sql == "FAIL ROLLBACK" && (fail_rollback = true)
+                send_packet(conn, 1, ok_payload(; affected=occursin("INSERT", sql) ? 1 : 0, status))
             end
         elseif cmd == P.COM_STMT_PREPARE
             sql = String(payload[2:end])
@@ -216,10 +226,9 @@ function check(cond::Bool, what::String)::Nothing
     return nothing
 end
 
-function run_workload(port::Int)::Nothing
-    # no connect_timeout: Reseau <= 1.4.1's deadline-armed dial parks on tasks a trimmed
-    # build never ran (fixed in Reseau#151); the scripted loopback peer answers immediately
-    # anyway — re-add once the fixed Reseau is released
+function run_workload(port::Int, value::Int)::Int
+    # The scripted loopback peer answers immediately; this workload does not
+    # exercise connection deadlines.
     conn = DBInterface.connect(MySQL.Connection, "127.0.0.1", "root", "secret"; port=port, ssl_mode=:disabled)
     try
         check(isopen(conn)::Bool, "connection is open")
@@ -275,11 +284,45 @@ function run_workload(port::Int)::Nothing
         check(MySQL.ping(conn), "ping")
         check(MySQL.escape(conn, "a'b") == "a\\'b", "escape")
         check(MySQL.escape_identifier("weird`name") == "`weird``name`", "escape_identifier")
+        return run_transaction_workload(conn, value)
     finally
         DBInterface.close!(conn)
     end
-    check(!(isopen(conn)::Bool), "connection closed")
-    return nothing
+end
+
+function run_transaction_workload(conn::MySQL.Connection, value::Int)::Int
+    result = DBInterface.transaction(conn) do
+        inner = DBInterface.transaction(() -> value, conn)
+        inner * 2 + 1
+    end
+    DBInterface.execute(conn, "START TRANSACTION")
+    marker = ErrorException("scripted callback failure")
+    caught = try
+        DBInterface.transaction(() -> throw(marker), conn)
+        false
+    catch err
+        err === marker
+    end
+    check(caught, "original callback error")
+    check(P.in_transaction(MySQL.session(conn).status), "manual outer transaction remains open")
+    DBInterface.execute(conn, "ROLLBACK")
+    check(conn.transaction_owner === nothing, "transaction owner restored")
+
+    # An unsuccessful rollback must close the session and retain both errors.
+    caught = try
+        DBInterface.transaction(conn) do
+            DBInterface.execute(conn, "FAIL ROLLBACK")
+            throw(marker)
+        end
+        false
+    catch err
+        err isa CompositeException && length(err.exceptions) == 2 &&
+            err.exceptions[1] === marker && err.exceptions[2] isa MySQL.Error
+    end
+    check(caught, "callback and rollback errors retained")
+    check(!(isopen(conn)::Bool), "uncertain connection closed")
+    check(conn.transaction_owner === nothing, "failed cleanup restores owner")
+    return result
 end
 
 # Task bodies must be named zero-argument functions (registered via
@@ -330,7 +373,7 @@ function exercise_reaper(port::Int)::Nothing
     return nothing
 end
 
-function run_trim_workload()::Nothing
+function run_trim_workload(value::Int)::Int
     listener = TCP.listen(TCP.loopback_addr(0))
     laddr = TCP.addr(listener)::TCP.SocketAddrV4
     port = Int(laddr.port)
@@ -338,21 +381,24 @@ function run_trim_workload()::Nothing
     SERVER_ERROR[] = nothing
     server_task = Task(server_task_entry)
     schedule(server_task)
-    try
-        run_workload(port)
+    result = try
+        result = run_workload(port, value)
         exercise_reaper(port)
+        result
     finally
         close(listener)
         wait(server_task)
         SERVER_LISTENER[] = nothing
     end
     SERVER_ERROR[] === nothing || throw(SERVER_ERROR[])
-    return nothing
+    return result
 end
 
 function (@main)(args::Vector{String})::Cint
-    _ = args
-    run_trim_workload()
+    isempty(args) || length(args) == 2 || return 2
+    value = isempty(args) ? 9 : parse(Int, args[1])
+    expected = isempty(args) ? 19 : parse(Int, args[2])
+    run_trim_workload(value) == expected || return 1
     Core.println("mysql trim workload passed")
     return 0
 end
