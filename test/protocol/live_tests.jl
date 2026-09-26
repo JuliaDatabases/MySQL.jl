@@ -5,6 +5,7 @@ include(joinpath(@__DIR__, "..", "behavior_manifest.jl"))
 using .BehaviorManifest
 include(joinpath(@__DIR__, "leak_soak.jl"))
 include(joinpath(@__DIR__, "..", "user_workflow.jl"))
+include(joinpath(@__DIR__, "..", "pool_workflow.jl"))
 
 const LIVE_IMAGES = split(get(ENV, "MYSQL_NATIVE_IMAGES", "mysql:8.4,mariadb:11.4"), ',')
 const ROOT_PW = "native-secret"
@@ -143,6 +144,7 @@ function run_live_lane(ref::String; soak::Bool=false, manifest::Bool=false)
             conn = DBInterface.connect(MySQL.Connection, "127.0.0.1", "root", ROOT_PW; port=port)
             try
                 run_user_workflow(conn)
+                run_pool_workflow(conn)
             finally
                 DBInterface.close!(conn)
             end
