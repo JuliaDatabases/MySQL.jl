@@ -264,7 +264,10 @@ end
 
 # Runs a statement that must answer with OK (no result set) and returns the OK packet.
 function execute_ok!(conn::Connection, sql::AbstractString)
-    s = begin_command!(conn)
+    return execute_ok!(begin_command!(conn), sql)
+end
+
+function execute_ok!(s::P.Session, sql::AbstractString)
     P.query!(s, sql)
     resp = P.read_command_response!(s)
     if !(resp isa P.OKPacket)
@@ -318,30 +321,55 @@ server_kind(conn::Connection) = return (session(conn).server::P.ServerInfo).kind
     DBInterface.transaction(f, conn)
 
 Runs `f()` inside `START TRANSACTION` / `COMMIT` (or `ROLLBACK` when `f` throws) and returns
-`f()`'s value. The connection lock is held for the whole callback: other tasks block until
-the transaction ends, so `f` must not wait on tasks that need this connection.
+`f()`'s value. Inside an existing transaction, including one started with SQL, uses a
+savepoint instead: success releases it, and failure rolls back only this block's changes.
+Savepoint names beginning with `_mysqljl_` are reserved for the driver.
+
+The connection lock is held for the whole callback: other tasks block until the block
+ends, so `f` must not wait on tasks that need this connection. Statements that implicitly
+commit (such as most DDL) and explicit transaction-control statements inside `f` are not
+protected by the block. If rollback fails, closes the connection and throws a
+`CompositeException` containing the original error, the cleanup error, and any close error.
 """
 function DBInterface.transaction(f, conn::Connection)
     lock(conn.lock)
-    owns_transaction = false
+    previous_owner = conn.transaction_owner
     try
-        conn.transaction_owner === nothing || throw(MySQLInterfaceError("a transaction is already active on this connection"))
-        execute_ok!(conn, "START TRANSACTION")
+        # Draining a previous result can update the server's transaction status.
+        s = begin_command!(conn)
+        if previous_owner !== nothing && !P.in_transaction(s.status)
+            throw(MySQLInterfaceError("the enclosing transaction has already ended"))
+        end
+        savepoint = if previous_owner !== nothing || P.in_transaction(s.status)
+            conn.next_token += 1
+            string("_mysqljl_", conn.next_token)
+        else
+            nothing
+        end
+        execute_ok!(s, savepoint === nothing ? "START TRANSACTION" : "SAVEPOINT $savepoint")
         conn.transaction_owner = current_task()
-        owns_transaction = true
         try
             result = f()
-            execute_ok!(conn, "COMMIT")
+            execute_ok!(conn, savepoint === nothing ? "COMMIT" : "RELEASE SAVEPOINT $savepoint")
             return result
-        catch
+        catch original_error
             try
-                execute_ok!(conn, "ROLLBACK")
-            catch
+                execute_ok!(conn, savepoint === nothing ? "ROLLBACK" : "ROLLBACK TO SAVEPOINT $savepoint")
+                savepoint === nothing || execute_ok!(conn, "RELEASE SAVEPOINT $savepoint")
+            catch cleanup_error
+                # An unconfirmed rollback must not leave a session available for reuse.
+                errors = Any[original_error, cleanup_error]
+                try
+                    DBInterface.close!(conn)
+                catch close_error
+                    push!(errors, close_error)
+                end
+                throw(CompositeException(errors))
             end
             rethrow()
         end
     finally
-        owns_transaction && (conn.transaction_owner = nothing)
+        conn.transaction_owner = previous_owner
         unlock(conn.lock)
     end
 end

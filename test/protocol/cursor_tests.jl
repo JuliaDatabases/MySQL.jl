@@ -1080,27 +1080,31 @@ end
     end
 end
 
-@testset "transactions hold the lock; nested use is an error" begin
+@testset "transactions hold the lock across nested scopes" begin
     seen = String[]
     with_native(c -> begin
-        for _ in 1:3
-            push!(seen, expect_query(c)); send_ok(c, 1)
+        for _ in 1:9
+            sql = expect_query(c)
+            push!(seen, sql)
+            status = sql in ("COMMIT", "ROLLBACK") ? P.SERVER_STATUS_AUTOCOMMIT :
+                P.SERVER_STATUS_AUTOCOMMIT | P.SERVER_STATUS_IN_TRANS
+            send_ok(c, 1; status)
         end
-        push!(seen, expect_query(c)); send_ok(c, 1)
-        push!(seen, expect_query(c)); send_ok(c, 1)
     end) do conn
         @test DBInterface.transaction(conn) do
             DBInterface.execute(conn, "insert 1")
-            @test_throws MySQL.MySQLInterfaceError DBInterface.transaction(() -> nothing, conn)
+            @test DBInterface.transaction(() -> :nested, conn) === :nested
             @test conn.transaction_owner === current_task()
-            @test_throws MySQL.MySQLInterfaceError DBInterface.transaction(() -> nothing, conn)
+            @test DBInterface.transaction(() -> nothing, conn) === nothing
             42
         end == 42
         @test_throws ErrorException DBInterface.transaction(conn) do
             error("inside")
         end
     end
-    @test seen == ["START TRANSACTION", "insert 1", "COMMIT", "START TRANSACTION", "ROLLBACK"]
+    @test seen == ["START TRANSACTION", "insert 1", "SAVEPOINT _mysqljl_2",
+        "RELEASE SAVEPOINT _mysqljl_2", "SAVEPOINT _mysqljl_3", "RELEASE SAVEPOINT _mysqljl_3",
+        "COMMIT", "START TRANSACTION", "ROLLBACK"]
 
     seen = String[]
     with_native(c -> begin

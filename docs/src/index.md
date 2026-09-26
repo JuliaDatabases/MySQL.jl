@@ -73,7 +73,19 @@ DBInterface.close!(stmt)
 ```
 
 `DBInterface.transaction(conn) do ... end` wraps the block in `START TRANSACTION`/`COMMIT`
-(`ROLLBACK` on an exception). `DBInterface.executemultiple` iterates the result sets of a
+(`ROLLBACK` on an exception). If a transaction is already active, including one started
+with SQL, the block uses a savepoint. Nested success leaves the outer transaction open;
+nested failure rolls back only that block's changes. This also lets `executemany` run
+inside a caller's transaction. The connection lock stays held throughout the block;
+do not wait on another task that needs the same connection.
+
+Statements that implicitly commit, such as most DDL, and explicit transaction-control
+statements inside the block are not protected. For example, `MySQL.load` creates a table
+before inserting rows; that creation can commit an existing transaction. Savepoint names
+beginning with `_mysqljl_` are reserved. A failed rollback closes the connection and reports
+both the original and cleanup errors in a `CompositeException`.
+
+`DBInterface.executemultiple` iterates the result sets of a
 `CALL` or of a multi-statement string (`multi_statements=true`) as distinct cursors.
 `MySQL.load(table, conn, name)` creates a table from a Tables.jl source's schema and
 inserts its rows in batches. Close the connection with `DBInterface.close!(conn)`.

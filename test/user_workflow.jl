@@ -1,4 +1,6 @@
 # Shared end-to-end API check, run on both live server lanes.
+include("transaction_workflow.jl")
+
 function run_user_workflow(conn)
     @testset "DBInterface and Tables user workflow" begin
         DBInterface.execute(conn, "CREATE DATABASE IF NOT EXISTS workflow_review")
@@ -64,6 +66,7 @@ function run_user_workflow(conn)
         @test only(Tables.columntable(DBInterface.execute(conn, "SELECT COUNT(*) AS n FROM items")).n) == 3
         @test_throws MySQL.StmtError DBInterface.execute(conn, "INSERT INTO items (id) VALUES (?)", (1,))
         @test MySQL.ping(conn)
+        run_transaction_workflow(conn)
 
         # Five columns cross the old 4096-parameter failure at the default batch size.
         source = (id=collect(1:1005), label=fill("loaded", 1005), amount=fill("1.250000", 1005), stamp=fill(DateTime(2026, 1, 2), 1005), data=fill(UInt8[42], 1005))
