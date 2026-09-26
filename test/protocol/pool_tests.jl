@@ -113,9 +113,10 @@ test_pool(port; kw...) = MySQL.ConnectionPool("127.0.0.1", "root", "pw";
 
 pool_throw_callback(_, marker) = throw(marker)
 
-# Observe the actual blocked condition wait, rather than assuming a task has run after a sleep.
-function wait_for_pool_waiters(pool, n)
-    @test timedwait(() -> lock(() -> length(pool.condition.waitq) >= n, pool.condition),
+# Notify reports how many callers were actually waiting. Normal notifications make
+# them recheck capacity; error delivery is observed in the same operation.
+function wait_for_pool_waiters(pool, n; value=nothing, error=false)
+    @test timedwait(() -> lock(() -> notify(pool.condition, value; all=true, error) >= n, pool.condition),
         5; pollint=0.001) == :ok
 end
 
@@ -431,12 +432,8 @@ end
                 err
             end
             try
-                wait_for_pool_waiters(pool, 1)
                 marker = InterruptException()
-                lock(pool.condition) do
-                    # Condition's error delivery wakes its registered waiter safely.
-                    notify(pool.condition, marker; error=true)
-                end
+                wait_for_pool_waiters(pool, 1; value=marker, error=true)
                 @test fetch(waiter) === marker
                 @test !called[] && pool.total == 1 && isempty(pool.idle)
                 put!(leave, nothing)
