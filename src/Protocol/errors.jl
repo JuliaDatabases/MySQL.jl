@@ -8,7 +8,7 @@ Root of the native backend's exception hierarchy.
 - `AuthError` / `UnsupportedAuthError`: authentication policy or plugin problems
 - `TimeoutError`: a deadline expired
 - `ConversionError`: a wire value cannot be represented by the requested Julia type
-- `TLSNegotiationError`: the TLS handshake failed while establishing the connection
+- `TLSNegotiationError`: TLS could not be set up, or the TLS connection failed or closed before authentication completed
 - `LocalInfileRefused`: the LOCAL INFILE handler declined a server request
 """
 abstract type MySQLError <: Exception end

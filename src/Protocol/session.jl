@@ -100,7 +100,9 @@ and committed it, even if no answer byte arrived). During connection setup it be
     if err isa EOFError || (err isa Reseau.TLS.TLSError && err.cause isa EOFError)
         if !s.authenticated
             # A TLS certificate rejection may close the socket before its alert arrives.
-            s.transport isa Reseau.TLS.Conn && return TLSNegotiationError("TLS connection closed before authentication completed", err)
+            # Inference does not narrow `err` through the `||` above; `::Exception` keeps the
+            # call static, which `--trim=safe` requires on Julia 1.12.
+            s.transport isa Reseau.TLS.Conn && return TLSNegotiationError("TLS connection closed before authentication completed", err::Exception)
             return ProtocolError("connection closed by the server in the middle of the protocol stream")
         end
         phase == READY && return Error(CR_SERVER_GONE_ERROR, "MySQL server has gone away", "HY000")
