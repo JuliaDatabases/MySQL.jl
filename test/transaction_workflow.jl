@@ -93,7 +93,7 @@ function run_transaction_workflow(conn)
         DBInterface.execute(conn, "CREATE TABLE transaction_deadlock_weight (id INT PRIMARY KEY) ENGINE=InnoDB")
         DBInterface.execute(conn, "INSERT INTO transaction_deadlock VALUES (1, 0), (2, 0)")
         o = conn.options
-        db = only(Tables.columntable(DBInterface.execute(conn, "SELECT DATABASE() AS db")).db)
+        db = String(only(Tables.columntable(DBInterface.execute(conn, "SELECT DATABASE() AS db")).db))
         peer = DBInterface.connect(MySQL.Connection, o.host, o.user, o.password; port=o.port, db=db)
         peer_holds_row2 = Base.Event()
         try
