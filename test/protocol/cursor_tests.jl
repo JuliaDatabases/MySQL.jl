@@ -981,6 +981,25 @@ end
     @test received == ["INSERT 1"]
 end
 
+@testset "TLS connection reset after a command was written" begin
+    for version in ("TLSv1.2", "TLSv1.3")
+        with_server(raw -> tls_peer_connect!(raw; after=tls -> begin
+            _, command, sql = read_command(tls)
+            @test command == P.COM_QUERY && String(sql) == "INSERT 1"
+            Reseau.TCP.set_linger!(raw, 0)
+            close(raw)
+        end)) do port
+            conn = DBInterface.connect(N.Connection, "127.0.0.1", "root", "pw"; port=port, ssl_mode=:required, tls_version=version, connect_timeout=10)
+            err = try; DBInterface.execute(conn, "INSERT 1"); nothing; catch e; e; end
+            @test err isa MySQL.Error && err.errno == P.CR_SERVER_LOST && err.sqlstate == "HY000"
+            @test !isopen(conn)
+            err = try; DBInterface.execute(conn, "INSERT 2"); nothing; catch e; e; end
+            @test err isa MySQL.Error && err.errno == P.CR_SERVER_GONE_ERROR
+            DBInterface.close!(conn)
+        end
+    end
+end
+
 @testset "a failed reconnect leaves the connection retryable, not closed" begin
     # When the dead session cannot be re-established, ensure_live! keeps the old (closed)
     # handle so the next command retries the reconnect, instead of reporting the connection

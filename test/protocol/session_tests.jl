@@ -99,7 +99,7 @@ Base.eof(io::FailingUpload) = eof(io.source)
 
 function Base.readbytes!(io::FailingUpload, buffer::AbstractVector{UInt8}, n::Integer=length(buffer))
     io.reads += 1
-    io.reads == 2 && error("injected upload source failure")
+    io.reads == 2 && throw(SystemError("read upload source", Libc.EIO))
     return readbytes!(io.source, buffer, n)
 end
 
@@ -638,7 +638,7 @@ end
             P.query!(s, "LOAD DATA LOCAL INFILE 'f' INTO TABLE t")
             P.read_command_response!(s)
             source = FailingUpload(IOBuffer("12345678"), 0)
-            @test_throws ErrorException P.send_local_infile!(s, source; chunk_size=4)
+            @test_throws SystemError P.send_local_infile!(s, source; chunk_size=4)
             @test s.phase == P.BROKEN && !isopen(s)
         end
         # Invalid buffer sizes fail before allocation or protocol I/O.
