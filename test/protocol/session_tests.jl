@@ -99,7 +99,7 @@ Base.eof(io::FailingUpload) = eof(io.source)
 
 function Base.readbytes!(io::FailingUpload, buffer::AbstractVector{UInt8}, n::Integer=length(buffer))
     io.reads += 1
-    io.reads == 2 && error("injected upload source failure")
+    io.reads == 2 && throw(SystemError("read upload source", Libc.EIO))
     return readbytes!(io.source, buffer, n)
 end
 
@@ -638,7 +638,7 @@ end
             P.query!(s, "LOAD DATA LOCAL INFILE 'f' INTO TABLE t")
             P.read_command_response!(s)
             source = FailingUpload(IOBuffer("12345678"), 0)
-            @test_throws ErrorException P.send_local_infile!(s, source; chunk_size=4)
+            @test_throws SystemError P.send_local_infile!(s, source; chunk_size=4)
             @test s.phase == P.BROKEN && !isopen(s)
         end
         # Invalid buffer sizes fail before allocation or protocol I/O.
@@ -806,20 +806,31 @@ end
             @test err isa P.Error && err.errno == P.CR_SERVER_LOST && occursin("Lost connection", err.msg)
             @test s.phase == P.BROKEN
         end
-        # peer closes instead of answering: the classic 2006 "server has gone away"
+        # peer closes after the command was written, without answering: 2013, because the
+        # server may have executed it (2006 is only for a command that was never written)
         with_peer(conn -> (server_handshake!(conn); read_command(conn))) do client
             s = P.Session(client)
             client_handshake!(s)
             P.query!(s, "SELECT 1")
             err = try; P.read_command_response!(s); nothing; catch e; e; end
-            @test err isa P.Error && err.errno == P.CR_SERVER_GONE_ERROR && err.sqlstate == "HY000"
+            @test err isa P.Error && err.errno == P.CR_SERVER_LOST && err.sqlstate == "HY000"
             @test s.phase == P.BROKEN
             # a faulted session is not drained further (drain! only swallows real server ERRs)
             @test_throws ErrorException P.drain_step!(s)
             P.drain!(s)
         end
-        # All truncated first-header positions count as a response, on both real TCP and
-        # the unbuffered fault path. drain! must propagate these client errors too.
+        # a reset instead of an orderly close is a lost connection as well
+        with_peer(conn -> (server_handshake!(conn); read_command(conn); Reseau.TCP.set_linger!(conn, 0))) do client
+            s = P.Session(client)
+            client_handshake!(s)
+            P.query!(s, "SELECT 1")
+            err = try; P.read_command_response!(s); nothing; catch e; e; end
+            @test err isa P.Error && err.errno == P.CR_SERVER_LOST
+            @test s.phase == P.BROKEN
+        end
+        # Every EOF after the command was written is 2013, from no answer byte to a cut-short
+        # header, on both real TCP and the unbuffered fault path. drain! must propagate
+        # these client errors too.
         answer = framed(0x01, ok_payload())
         for cut in 0:(length(answer) - 1), injected in (false, true)
             t = injected ? P.FaultTransport(IOBuffer(answer); fail_read_at=cut) :
@@ -829,8 +840,7 @@ end
             s.phase = P.CMD_SENT
             s.io.seq = 0x01
             err = try; P.drain!(s); nothing; catch e; e; end
-            @test err isa P.Error && err.errno == (cut == 0 ? P.CR_SERVER_GONE_ERROR : P.CR_SERVER_LOST)
-            @test s.io.received_bytes == cut
+            @test err isa P.Error && err.errno == P.CR_SERVER_LOST
             @test s.phase == P.BROKEN
         end
         for cut in 1:3
@@ -840,7 +850,6 @@ end
                 P.ping!(s)
                 err = try; P.read_command_response!(s); nothing; catch e; e; end
                 @test err isa P.Error && err.errno == P.CR_SERVER_LOST
-                @test s.io.received_bytes == cut
             end
         end
         # peer closes during the greeting: still a protocol-level failure
@@ -918,6 +927,14 @@ end
             @test s.phase == P.BROKEN
             @test ft.write_bytes == cut
         end
+        # a socket error while writing (the peer reset the connection) also means not sent
+        ft = P.FaultTransport(IOBuffer(); fail_write_at=2, write_error=SystemError("write", Libc.EPIPE))
+        s = P.Session(ft)
+        s.phase = P.READY
+        s.authenticated = true
+        err = try; P.query!(s, "SELECT 1"); nothing; catch e; e; end
+        @test err isa P.Error && err.errno == P.CR_SERVER_GONE_ERROR
+        @test s.phase == P.BROKEN
         for (fail_at, label) in ((0, "before the first byte"), (2, "inside the header"), (4, "after the header"), (10, "mid-payload"))
             with_peer(conn -> (send_packet(conn, 0, greeting()); try; read_packet(conn); catch; end)) do client
                 ft = P.FaultTransport(client; fail_write_at=fail_at, write_error=InterruptException())

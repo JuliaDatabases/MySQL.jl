@@ -174,4 +174,27 @@
             @test_throws P.ProtocolError iterate(cursor)
         end
     end
+
+    @testset "COMMIT lost after it was written (#248)" begin
+        # The transaction may have committed: the COMMIT reports 2013, the ROLLBACK that
+        # follows is refused before it is written (2006), and the connection is closed.
+        with_server(conn -> plain_peer_connect!(conn; caps=MYSQL8_SERVER_CAPS & ~P.CLIENT_SSL, after=c -> begin
+            @test expect_query(c) == "START TRANSACTION"
+            send_ok(c, 1; status=in_trans)
+            @test expect_query(c) == "INSERT 1"
+            send_ok(c, 1; affected=1, status=in_trans)
+            @test expect_query(c) == "COMMIT"
+        end)) do port
+            conn = DBInterface.connect(N.Connection, "127.0.0.1", "root", "pw"; port=port, ssl_mode=:disabled, connect_timeout=10)
+            err = try; DBInterface.transaction(() -> DBInterface.execute(conn, "INSERT 1"), conn); nothing; catch e; e; end
+            @test err isa CompositeException
+            if err isa CompositeException
+                @test length(err.exceptions) == 2
+                commit_err, rollback_err = err.exceptions
+                @test commit_err isa MySQL.Error && commit_err.errno == P.CR_SERVER_LOST
+                @test rollback_err isa MySQL.Error && rollback_err.errno == P.CR_SERVER_GONE_ERROR
+            end
+            @test !isopen(conn)
+        end
+    end
 end
