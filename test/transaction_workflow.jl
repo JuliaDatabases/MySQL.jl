@@ -96,6 +96,7 @@ function run_transaction_workflow(conn)
         db = String(only(Tables.columntable(DBInterface.execute(conn, "SELECT DATABASE() AS db")).db))
         peer = DBInterface.connect(MySQL.Connection, o.host, o.user, o.password; port=o.port, db=db)
         peer_holds_row2 = Base.Event()
+        conn_holds_row1 = Base.Event()
         try
             # InnoDB rolls back the transaction that modified fewer rows: `conn`.
             peer_task = errormonitor(Threads.@spawn begin
@@ -103,6 +104,7 @@ function run_transaction_workflow(conn)
                 DBInterface.execute(peer, "INSERT INTO transaction_deadlock_weight VALUES " * join(("($i)" for i in 1:100), ","))
                 DBInterface.execute(peer, "UPDATE transaction_deadlock SET v = v + 1 WHERE id = 2")
                 notify(peer_holds_row2)
+                wait(conn_holds_row1)
                 DBInterface.execute(peer, "UPDATE transaction_deadlock SET v = v + 1 WHERE id = 1")
                 DBInterface.execute(peer, "COMMIT")
             end)
@@ -110,6 +112,7 @@ function run_transaction_workflow(conn)
                 DBInterface.transaction(conn) do
                     DBInterface.transaction(conn) do
                         DBInterface.execute(conn, "UPDATE transaction_deadlock SET v = v + 10 WHERE id = 1")
+                        notify(conn_holds_row1)
                         wait(peer_holds_row2)
                         DBInterface.execute(conn, "UPDATE transaction_deadlock SET v = v + 10 WHERE id = 2")
                     end
