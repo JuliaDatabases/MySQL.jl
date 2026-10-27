@@ -819,6 +819,15 @@ end
             @test_throws ErrorException P.drain_step!(s)
             P.drain!(s)
         end
+        # a reset instead of an orderly close is a lost connection as well
+        with_peer(conn -> (server_handshake!(conn); read_command(conn); Reseau.TCP.set_linger!(conn, 0))) do client
+            s = P.Session(client)
+            client_handshake!(s)
+            P.query!(s, "SELECT 1")
+            err = try; P.read_command_response!(s); nothing; catch e; e; end
+            @test err isa P.Error && err.errno == P.CR_SERVER_LOST
+            @test s.phase == P.BROKEN
+        end
         # Every EOF after the command was written is 2013, from no answer byte to a cut-short
         # header, on both real TCP and the unbuffered fault path. drain! must propagate
         # these client errors too.
@@ -918,6 +927,14 @@ end
             @test s.phase == P.BROKEN
             @test ft.write_bytes == cut
         end
+        # a socket error while writing (the peer reset the connection) also means not sent
+        ft = P.FaultTransport(IOBuffer(); fail_write_at=2, write_error=SystemError("write", Libc.EPIPE))
+        s = P.Session(ft)
+        s.phase = P.READY
+        s.authenticated = true
+        err = try; P.query!(s, "SELECT 1"); nothing; catch e; e; end
+        @test err isa P.Error && err.errno == P.CR_SERVER_GONE_ERROR
+        @test s.phase == P.BROKEN
         for (fail_at, label) in ((0, "before the first byte"), (2, "inside the header"), (4, "after the header"), (10, "mid-payload"))
             with_peer(conn -> (send_packet(conn, 0, greeting()); try; read_packet(conn); catch; end)) do client
                 ft = P.FaultTransport(client; fail_write_at=fail_at, write_error=InterruptException())

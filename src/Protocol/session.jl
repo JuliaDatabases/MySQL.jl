@@ -83,13 +83,14 @@ end
     fault!(s, err) -> Exception
 
 Marks the session `BROKEN`, closes the transport, and returns the exception the caller
-should throw: deadlines become `TimeoutError`; a peer EOF in the command phase becomes the
-classic client error, chosen by whether the command was written — `Error(2006)` "MySQL
-server has gone away" when writing it failed (phase `READY`: the server never received the
-whole command), `Error(2013)` "Lost connection to MySQL server during query" once it was
-written (the server may have executed and committed it, even if no answer byte arrived) —
-and `ProtocolError` during the connection phase; everything else (including
-`InterruptException` and `ProtocolError`) is returned as is.
+should throw: deadlines become `TimeoutError`; a peer EOF in the command phase (the
+transport reports a reset the same way) becomes the classic client error, chosen by whether
+the command was written — `Error(2006)` "MySQL server has gone away" when writing it failed
+(phase `READY`: the server never received the whole command), `Error(2013)` "Lost
+connection to MySQL server during query" once it was written (the server may have executed
+and committed it, even if no answer byte arrived) — and `ProtocolError` during the
+connection phase; everything else (including `InterruptException` and `ProtocolError`) is
+returned as is.
 """
 @inline function fault!(s::Session, err)
     phase = s.phase
