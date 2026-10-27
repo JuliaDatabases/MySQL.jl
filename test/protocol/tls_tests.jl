@@ -96,6 +96,24 @@ end
         end
     end
 
+    @testset "a TLS reset before authentication is a negotiation failure" begin
+        for version in ("TLSv1.2", "TLSv1.3")
+            with_server(raw -> begin
+                send_packet(raw, 0, greeting())
+                read_packet(raw) # SSLRequest
+                tls = TLS.server(raw, server_config())
+                TLS.handshake!(tls)
+                read_packet(tls) # HandshakeResponse
+                Reseau.TCP.set_linger!(raw, 0)
+                close(raw)
+                close(tls)
+            end) do port
+                err = try; native_connect(port; ssl_mode=:required, tls_version=version); nothing; catch e; e; end
+                @test err isa P.TLSNegotiationError
+            end
+        end
+    end
+
     @testset "disabled never sends SSLRequest; required refuses a TLS-less server" begin
         with_server(conn -> plain_peer_connect!(conn)) do port
             h = native_connect(port; ssl_mode=:disabled)

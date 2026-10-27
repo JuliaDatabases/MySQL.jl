@@ -88,9 +88,9 @@ transport reports a reset the same way) becomes the classic client error, chosen
 the command was written — `Error(2006)` "MySQL server has gone away" when writing it failed
 (phase `READY`: the server never received the whole command), `Error(2013)` "Lost
 connection to MySQL server during query" once it was written (the server may have executed
-and committed it, even if no answer byte arrived) — and `ProtocolError` during the
-connection phase; everything else (including `InterruptException` and `ProtocolError`) is
-returned as is.
+and committed it, even if no answer byte arrived). During connection setup it becomes
+`ProtocolError` over plaintext or `TLSNegotiationError` over TLS; everything else
+(including `InterruptException` and `ProtocolError`) is returned as is.
 """
 @inline function fault!(s::Session, err)
     phase = s.phase
@@ -98,7 +98,11 @@ returned as is.
     transport_close(s.transport)
     is_deadline_error(err) && return TimeoutError("deadline expired while waiting for the server (phase $phase); the connection has been closed")
     if err isa EOFError || (err isa Reseau.TLS.TLSError && err.cause isa EOFError)
-        s.authenticated || return ProtocolError("connection closed by the server in the middle of the protocol stream")
+        if !s.authenticated
+            # A TLS certificate rejection may close the socket before its alert arrives.
+            s.transport isa Reseau.TLS.Conn && return TLSNegotiationError("TLS connection closed before authentication completed", err)
+            return ProtocolError("connection closed by the server in the middle of the protocol stream")
+        end
         phase == READY && return Error(CR_SERVER_GONE_ERROR, "MySQL server has gone away", "HY000")
         return Error(CR_SERVER_LOST, "Lost connection to MySQL server during query", "HY000")
     end
