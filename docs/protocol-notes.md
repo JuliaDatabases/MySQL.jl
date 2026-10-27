@@ -333,4 +333,5 @@ reader accepts a valid ERR in that position (`stale_err`: first packet of a fres
 response, sequence 0, ERR header), regardless of its error code. The session reports the
 server's error (4031 for this idle timeout) as terminal (BROKEN, transport closed), so
 `reconnect=true` recovers on the following command. Every other
-sequence mismatch still faults. MariaDB closes idle connections silently (peer EOF → 2006).
+sequence mismatch still faults. MariaDB closes idle connections silently (peer EOF after the
+next command was written → 2013).

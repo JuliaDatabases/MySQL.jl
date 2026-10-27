@@ -952,10 +952,10 @@ end
         @test (@atomic accepted.value) == 2
         conn.handle.session.status = P.SERVER_STATUS_AUTOCOMMIT
         conn.handle.session.phase = P.READY
-        # the server drops the connection instead of answering: the classic 2006, the session
-        # is BROKEN, and the *next* command reconnects (the libmysqlclient contract)
+        # the server drops the connection after the command was written, without answering:
+        # 2013 (it may have run), the session is BROKEN, and the *next* command reconnects
         err = try; DBInterface.execute(conn, "peer hangs up"); nothing; catch e; e; end
-        @test err isa P.Error && err.errno == P.CR_SERVER_GONE_ERROR
+        @test err isa P.Error && err.errno == P.CR_SERVER_LOST
         @test !isopen(conn) && conn.handle.session.phase == P.BROKEN
         @test DBInterface.execute(conn, "after broken").rows_affected == 0
         @test (@atomic accepted.value) == 3 && isopen(conn)
@@ -963,6 +963,22 @@ end
     finally
         close(listener)
     end
+end
+
+@testset "connection loss tells a sent command from a refused one (#248)" begin
+    # The peer reads the command and hangs up without answering: the server may have run it
+    # (2013). The next command is refused before anything is written (2006).
+    received = String[]
+    with_server(conn -> plain_peer_connect!(conn; caps=MYSQL8_SERVER_CAPS & ~P.CLIENT_SSL, after=c -> push!(received, expect_query(c)))) do port
+        conn = DBInterface.connect(N.Connection, "127.0.0.1", "root", "pw"; port=port, ssl_mode=:disabled, connect_timeout=10)
+        err = try; DBInterface.execute(conn, "INSERT 1"); nothing; catch e; e; end
+        @test err isa MySQL.Error && err.errno == P.CR_SERVER_LOST && err.sqlstate == "HY000"
+        @test !isopen(conn)
+        err = try; DBInterface.execute(conn, "INSERT 2"); nothing; catch e; e; end
+        @test err isa MySQL.Error && err.errno == P.CR_SERVER_GONE_ERROR && err.sqlstate == "HY000"
+        DBInterface.close!(conn)
+    end
+    @test received == ["INSERT 1"]
 end
 
 @testset "a failed reconnect leaves the connection retryable, not closed" begin

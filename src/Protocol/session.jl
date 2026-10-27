@@ -84,10 +84,11 @@ end
 
 Marks the session `BROKEN`, closes the transport, and returns the exception the caller
 should throw: deadlines become `TimeoutError`; a peer EOF in the command phase becomes the
-classic client error — `Error(2006)` "MySQL server has gone away" when the server closed
-the connection instead of answering a command (an idle connection reaped by `wait_timeout`,
-a restart), `Error(2013)` "Lost connection to MySQL server during query" when it went away
-mid-response — and `ProtocolError` during the connection phase; everything else (including
+classic client error, chosen by whether the command was written — `Error(2006)` "MySQL
+server has gone away" when writing it failed (phase `READY`: the server never received the
+whole command), `Error(2013)` "Lost connection to MySQL server during query" once it was
+written (the server may have executed and committed it, even if no answer byte arrived) —
+and `ProtocolError` during the connection phase; everything else (including
 `InterruptException` and `ProtocolError`) is returned as is.
 """
 @inline function fault!(s::Session, err)
@@ -97,7 +98,7 @@ mid-response — and `ProtocolError` during the connection phase; everything els
     is_deadline_error(err) && return TimeoutError("deadline expired while waiting for the server (phase $phase); the connection has been closed")
     if err isa EOFError || (err isa Reseau.TLS.TLSError && err.cause isa EOFError)
         s.authenticated || return ProtocolError("connection closed by the server in the middle of the protocol stream")
-        ((phase == READY || phase == CMD_SENT) && s.io.received_bytes == 0) && return Error(CR_SERVER_GONE_ERROR, "MySQL server has gone away", "HY000")
+        phase == READY && return Error(CR_SERVER_GONE_ERROR, "MySQL server has gone away", "HY000")
         return Error(CR_SERVER_LOST, "Lost connection to MySQL server during query", "HY000")
     end
     # A TLS 1.3 server may reject the session (e.g. a missing client certificate) on the

@@ -806,20 +806,22 @@ end
             @test err isa P.Error && err.errno == P.CR_SERVER_LOST && occursin("Lost connection", err.msg)
             @test s.phase == P.BROKEN
         end
-        # peer closes instead of answering: the classic 2006 "server has gone away"
+        # peer closes after the command was written, without answering: 2013, because the
+        # server may have executed it (2006 is only for a command that was never written)
         with_peer(conn -> (server_handshake!(conn); read_command(conn))) do client
             s = P.Session(client)
             client_handshake!(s)
             P.query!(s, "SELECT 1")
             err = try; P.read_command_response!(s); nothing; catch e; e; end
-            @test err isa P.Error && err.errno == P.CR_SERVER_GONE_ERROR && err.sqlstate == "HY000"
+            @test err isa P.Error && err.errno == P.CR_SERVER_LOST && err.sqlstate == "HY000"
             @test s.phase == P.BROKEN
             # a faulted session is not drained further (drain! only swallows real server ERRs)
             @test_throws ErrorException P.drain_step!(s)
             P.drain!(s)
         end
-        # All truncated first-header positions count as a response, on both real TCP and
-        # the unbuffered fault path. drain! must propagate these client errors too.
+        # Every EOF after the command was written is 2013, from no answer byte to a cut-short
+        # header, on both real TCP and the unbuffered fault path. drain! must propagate
+        # these client errors too.
         answer = framed(0x01, ok_payload())
         for cut in 0:(length(answer) - 1), injected in (false, true)
             t = injected ? P.FaultTransport(IOBuffer(answer); fail_read_at=cut) :
@@ -829,8 +831,7 @@ end
             s.phase = P.CMD_SENT
             s.io.seq = 0x01
             err = try; P.drain!(s); nothing; catch e; e; end
-            @test err isa P.Error && err.errno == (cut == 0 ? P.CR_SERVER_GONE_ERROR : P.CR_SERVER_LOST)
-            @test s.io.received_bytes == cut
+            @test err isa P.Error && err.errno == P.CR_SERVER_LOST
             @test s.phase == P.BROKEN
         end
         for cut in 1:3
@@ -840,7 +841,6 @@ end
                 P.ping!(s)
                 err = try; P.read_command_response!(s); nothing; catch e; e; end
                 @test err isa P.Error && err.errno == P.CR_SERVER_LOST
-                @test s.io.received_bytes == cut
             end
         end
         # peer closes during the greeting: still a protocol-level failure

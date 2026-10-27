@@ -1284,3 +1284,17 @@ end
         @test MySQL.load(ReusedLoadBytes(UInt8[0], 3), conn, "bytes") == "`bytes`"
     end
 end
+
+@testset "prepared connection loss after EXECUTE was written (#248)" begin
+    # PREPARE is answered; EXECUTE is written and never answered, so the row may exist: 2013.
+    with_server(conn -> plain_peer_connect!(conn; caps=MYSQL8_SERVER_CAPS & ~P.CLIENT_SSL, after=c -> begin
+        expect_prepare(c); send_prepare_ok(c, 1, 7, paramdefs(1), P.ColumnDef[])
+        expect_execute(c)
+    end)) do port
+        conn = DBInterface.connect(N.Connection, "127.0.0.1", "root", "pw"; port=port, ssl_mode=:disabled, connect_timeout=10)
+        err = try; DBInterface.execute(conn, "INSERT INTO t VALUES (?)", (1,)); nothing; catch e; e; end
+        @test err isa MySQL.Error && err.errno == P.CR_SERVER_LOST
+        @test !isopen(conn)
+        DBInterface.close!(conn)
+    end
+end
