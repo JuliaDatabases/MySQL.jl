@@ -75,7 +75,9 @@ DBInterface.close!(stmt)
 `DBInterface.transaction(conn) do ... end` wraps the block in `START TRANSACTION`/`COMMIT`
 (`ROLLBACK` on an exception). If a transaction is already active, including one started
 with SQL, the block uses a savepoint. Nested success leaves the outer transaction open;
-nested failure rolls back only that block's changes. This also lets `executemany` run
+nested failure rolls back only that block's changes. A deadlock is the exception: the
+server rolls back the whole transaction, so its error propagates out of every enclosing
+block and the connection stays open for a retry. This also lets `executemany` run
 inside a caller's transaction. The connection lock stays held throughout the block;
 do not wait on another task that needs the same connection.
 

@@ -323,6 +323,8 @@ server_kind(conn::Connection) = return (session(conn).server::P.ServerInfo).kind
 Runs `f()` inside `START TRANSACTION` / `COMMIT` (or `ROLLBACK` when `f` throws) and returns
 `f()`'s value. Inside an existing transaction, including one started with SQL, uses a
 savepoint instead: success releases it, and failure rolls back only this block's changes.
+A deadlock is the exception: the server rolls back the whole transaction, so its error
+propagates out of every enclosing block and the connection stays open for a retry.
 Savepoint names beginning with `_mysqljl_` are reserved for the driver.
 
 The connection lock is held for the whole callback: other tasks block until the block
@@ -354,8 +356,7 @@ function DBInterface.transaction(f, conn::Connection)
             return result
         catch original_error
             try
-                execute_ok!(conn, savepoint === nothing ? "ROLLBACK" : "ROLLBACK TO SAVEPOINT $savepoint")
-                savepoint === nothing || execute_ok!(conn, "RELEASE SAVEPOINT $savepoint")
+                savepoint === nothing ? execute_ok!(conn, "ROLLBACK") : rollback_to_savepoint!(conn, savepoint)
             catch cleanup_error
                 # An unconfirmed rollback must not leave a session available for reuse.
                 errors = Any[original_error, cleanup_error]
@@ -372,6 +373,20 @@ function DBInterface.transaction(f, conn::Connection)
         conn.transaction_owner = previous_owner
         unlock(conn.lock)
     end
+end
+
+# A deadlock makes the server roll back the whole transaction, savepoints included. A missing
+# savepoint therefore leaves nothing to undo here; the session is healthy, and the error
+# reaches the enclosing scopes, which roll back nothing as well.
+function rollback_to_savepoint!(conn::Connection, savepoint::String)
+    try
+        execute_ok!(conn, "ROLLBACK TO SAVEPOINT $savepoint")
+    catch err
+        err isa P.Error && err.errno == P.ER_SP_DOES_NOT_EXIST && return nothing
+        rethrow()
+    end
+    execute_ok!(conn, "RELEASE SAVEPOINT $savepoint")
+    return nothing
 end
 
 # ---- escaping ----

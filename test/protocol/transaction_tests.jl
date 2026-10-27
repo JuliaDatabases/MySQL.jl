@@ -47,7 +47,7 @@
                     send_ok(c, 1; status=in_trans)
                     @test expect_query(c) == "RELEASE SAVEPOINT $name"
                 end
-                send_err(c, 1, 1305, "cleanup failed")
+                send_err(c, 1, 1181, "cleanup failed")
             end) do conn
                 nested && DBInterface.execute(conn, "START TRANSACTION")
                 err = try
@@ -60,11 +60,51 @@
                     @test length(err.exceptions) == 2
                     @test err.exceptions[1] === marker
                     @test err.exceptions[2] isa MySQL.Error
-                    @test err.exceptions[2].errno == 1305
+                    @test err.exceptions[2].errno == 1181
                 end
                 @test !isopen(conn)
                 @test conn.transaction_owner === nothing
                 @test_throws ErrorException MySQL.ping(conn)
+            end
+        end
+    end
+
+    # A deadlock rolls back the whole transaction on the server, savepoints included.
+    for outer in (:sql, :helper)
+        @testset "Savepoint discarded by a deadlock keeps the session (outer=$outer)" begin
+            with_native(c -> begin
+                @test expect_query(c) == "START TRANSACTION"
+                send_ok(c, 1; status=in_trans)
+                sql = expect_query(c)
+                @test startswith(sql, "SAVEPOINT _mysqljl_")
+                send_ok(c, 1; status=in_trans)
+                @test expect_query(c) == "UPDATE t SET v = 1"
+                send_err(c, 1, 1213, "Deadlock found when trying to get lock"; sqlstate="40001")
+                @test expect_query(c) == "ROLLBACK TO SAVEPOINT $(split(sql)[2])"
+                send_err(c, 1, 1305, "SAVEPOINT does not exist"; sqlstate="42000")
+                if outer === :helper
+                    @test expect_query(c) == "ROLLBACK"
+                    send_ok(c, 1)
+                end
+                _, cmd, _ = read_command(c)
+                @test cmd == P.COM_PING
+                send_ok(c, 1)
+            end) do conn
+                inner() = DBInterface.transaction(() -> DBInterface.execute(conn, "UPDATE t SET v = 1"), conn)
+                err = try
+                    if outer === :sql
+                        DBInterface.execute(conn, "START TRANSACTION")
+                        inner()
+                    else
+                        DBInterface.transaction(inner, conn)
+                    end
+                catch err
+                    err
+                end
+                @test err isa MySQL.Error && err.errno == 1213
+                @test isopen(conn)
+                @test conn.transaction_owner === nothing
+                @test MySQL.ping(conn)
             end
         end
     end

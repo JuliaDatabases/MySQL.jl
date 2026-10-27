@@ -87,4 +87,46 @@ function run_transaction_workflow(conn)
             DBInterface.execute(conn, "DROP TEMPORARY TABLE transaction_scopes")
         end
     end
+
+    @testset "A deadlock in a nested scope keeps the connection" begin
+        DBInterface.execute(conn, "CREATE TABLE transaction_deadlock (id INT PRIMARY KEY, v INT) ENGINE=InnoDB")
+        DBInterface.execute(conn, "CREATE TABLE transaction_deadlock_weight (id INT PRIMARY KEY) ENGINE=InnoDB")
+        DBInterface.execute(conn, "INSERT INTO transaction_deadlock VALUES (1, 0), (2, 0)")
+        o = conn.options
+        db = only(Tables.columntable(DBInterface.execute(conn, "SELECT DATABASE() AS db")).db)
+        peer = DBInterface.connect(MySQL.Connection, o.host, o.user, o.password; port=o.port, db=db)
+        peer_holds_row2 = Base.Event()
+        try
+            # InnoDB rolls back the transaction that modified fewer rows: `conn`.
+            peer_task = errormonitor(Threads.@spawn begin
+                DBInterface.execute(peer, "START TRANSACTION")
+                DBInterface.execute(peer, "INSERT INTO transaction_deadlock_weight VALUES " * join(("($i)" for i in 1:100), ","))
+                DBInterface.execute(peer, "UPDATE transaction_deadlock SET v = v + 1 WHERE id = 2")
+                notify(peer_holds_row2)
+                DBInterface.execute(peer, "UPDATE transaction_deadlock SET v = v + 1 WHERE id = 1")
+                DBInterface.execute(peer, "COMMIT")
+            end)
+            err = try
+                DBInterface.transaction(conn) do
+                    DBInterface.transaction(conn) do
+                        DBInterface.execute(conn, "UPDATE transaction_deadlock SET v = v + 10 WHERE id = 1")
+                        wait(peer_holds_row2)
+                        DBInterface.execute(conn, "UPDATE transaction_deadlock SET v = v + 10 WHERE id = 2")
+                    end
+                end
+            catch err
+                err
+            end
+            wait(peer_task)
+            @test err isa MySQL.Error && err.errno == 1213
+            @test isopen(conn)
+            @test conn.transaction_owner === nothing
+            @test !MySQL.Protocol.in_transaction(MySQL.session(conn).status)
+            @test collect(Tables.columntable(DBInterface.execute(conn, "SELECT v FROM transaction_deadlock ORDER BY id")).v) == [1, 1]
+        finally
+            DBInterface.close!(peer)
+            DBInterface.execute(conn, "DROP TABLE transaction_deadlock")
+            DBInterface.execute(conn, "DROP TABLE transaction_deadlock_weight")
+        end
+    end
 end
