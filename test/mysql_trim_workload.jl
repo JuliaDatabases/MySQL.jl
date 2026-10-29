@@ -1,7 +1,7 @@
 # JuliaC --trim=safe workload: drives the main MySQL.jl entrypoints — connect (handshake,
 # auth, charset bootstrap), text-protocol execute (buffered and streaming), prepared
 # statements (binary protocol), one-shot parameterized execute, transaction scopes,
-# rollback failure, ping, escape, and close —
+# rollback failure, scoped connection pools, ping, escape, and close —
 # against an in-process scripted server on a loopback Reseau TCP listener, so the
 # executable needs no database and runs on every platform.
 #
@@ -177,13 +177,16 @@ function serve_connection!(conn)::Nothing
         cmd = payload[1]
         if cmd == P.COM_QUIT
             return nothing
-        elseif cmd == P.COM_PING
+        elseif cmd == P.COM_PING || cmd == P.COM_RESET_CONNECTION || cmd == P.COM_INIT_DB
             send_packet(conn, 1, ok_payload())
         elseif cmd == P.COM_STMT_CLOSE
             # no response
         elseif cmd == P.COM_QUERY
             sql = String(payload[2:end])
-            if occursin("FROM people", sql)
+            if sql == "SELECT DATABASE()"
+                send_resultset(conn, Vector{UInt8}[coldef("DATABASE()")],
+                    Vector{UInt8}[text_row(Union{Missing, String}[missing])])
+            elseif occursin("FROM people", sql)
                 send_resultset(conn, people_cols(), people_rows())
             elseif fail_rollback && startswith(sql, "ROLLBACK")
                 err = UInt8[0xff]
@@ -373,7 +376,47 @@ function exercise_reaper(port::Int)::Nothing
     return nothing
 end
 
-function run_trim_workload(value::Int)::Int
+function exercise_pool(port::Int, repetitions::Int)::Nothing
+    for database in ("trim", "")
+        pool = MySQL.ConnectionPool("127.0.0.1", "root", "secret";
+            port, db=database, limit=1, ssl_mode=:disabled, init_command="SET @configured=41")
+        try
+            for _ in 1:repetitions
+                owned = MySQL.with_connection(pool) do conn
+                    check(MySQL.ping(conn), "pooled ping")
+                    cursor = DBInterface.execute(conn, "SELECT id, name, score, joined FROM people")::MySQL.TextCursor{true}
+                    check(Tables.getcolumn(first(cursor), Int32, 1, :id) == 1, "pooled typed row")
+                    cursor
+                end
+                check(length(owned) == 3, "pooled owned result")
+                check(pool.total == 1 && length(pool.idle) == 1, "pooled reuse")
+            end
+            marker = ErrorException("pool callback marker")
+            caught = false
+            try
+                MySQL.with_connection(pool) do conn
+                    check(MySQL.ping(conn), "retiring pooled ping")
+                    repetitions > 0 && throw(marker)
+                end
+            catch err
+                caught = err === marker
+            end
+            check(caught && pool.total == 0, "pool callback retirement")
+        finally
+            close(pool)
+        end
+        caught = false
+        try
+            MySQL.with_connection(MySQL.ping, pool)
+        catch err
+            caught = err isa InvalidStateException
+        end
+        check(caught && !isopen(pool), "closed pool rejects lease")
+    end
+    return nothing
+end
+
+function run_trim_workload(value::Int, repetitions::Int)::Int
     listener = TCP.listen(TCP.loopback_addr(0))
     laddr = TCP.addr(listener)::TCP.SocketAddrV4
     port = Int(laddr.port)
@@ -383,6 +426,7 @@ function run_trim_workload(value::Int)::Int
     schedule(server_task)
     result = try
         result = run_workload(port, value)
+        exercise_pool(port, repetitions)
         exercise_reaper(port)
         result
     finally
@@ -395,10 +439,12 @@ function run_trim_workload(value::Int)::Int
 end
 
 function (@main)(args::Vector{String})::Cint
-    isempty(args) || length(args) == 2 || return 2
+    length(args) in (0, 2, 3) || return 2
     value = isempty(args) ? 9 : parse(Int, args[1])
     expected = isempty(args) ? 19 : parse(Int, args[2])
-    run_trim_workload(value) == expected || return 1
+    repetitions = length(args) == 3 ? parse(Int, args[3]) : 2
+    check(1 <= repetitions <= 4, "pool repetitions must be between 1 and 4")
+    run_trim_workload(value, repetitions) == expected || return 1
     Core.println("mysql trim workload passed")
     return 0
 end

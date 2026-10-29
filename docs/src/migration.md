@@ -198,8 +198,10 @@ schema-aware sinks make. The runtime-schema conveniences (`Tables.columntable`, 
 `row.name` access, `MySQL.load`) build columns from runtime `Type` values and are not
 statically resolvable; use them from regular Julia. A custom `local_infile_handler` (and
 the `IO` it returns) is dispatched dynamically and works in a trimmed binary only if its
-methods were compiled in. The trim workload also exercises abandoned-connection reaping,
-but leaves all connection deadlines disabled; it does not validate timeout behavior.
+methods were compiled in. The trim workload also exercises abandoned-connection reaping
+and sequential scoped pool leases with statically known callbacks, session cleanup,
+callback-error retirement, and closed-pool rejection. It leaves all connection deadlines
+disabled; it does not validate timeout behavior.
 `connect_timeout` hangs in trimmed executables with Reseau ≤ 1.4.1 — its deadline-armed
 dial parked on tasks a trimmed build never ran, fixed in
 [Reseau #151](https://github.com/JuliaServices/Reseau.jl/pull/151).
