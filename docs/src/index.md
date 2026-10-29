@@ -73,7 +73,21 @@ DBInterface.close!(stmt)
 ```
 
 `DBInterface.transaction(conn) do ... end` wraps the block in `START TRANSACTION`/`COMMIT`
-(`ROLLBACK` on an exception). `DBInterface.executemultiple` iterates the result sets of a
+(`ROLLBACK` on an exception). If a transaction is already active, including one started
+with SQL, the block uses a savepoint. Nested success leaves the outer transaction open;
+nested failure rolls back only that block's changes. A deadlock is the exception: the
+server rolls back the whole transaction, so its error propagates out of every enclosing
+block and the connection stays open for a retry. This also lets `executemany` run
+inside a caller's transaction. The connection lock stays held throughout the block;
+do not wait on another task that needs the same connection.
+
+Statements that implicitly commit, such as most DDL, and explicit transaction-control
+statements inside the block are not protected. For example, `MySQL.load` creates a table
+before inserting rows; that creation can commit an existing transaction. Savepoint names
+beginning with `_mysqljl_` are reserved. A failed rollback closes the connection and reports
+both the original and cleanup errors in a `CompositeException`.
+
+`DBInterface.executemultiple` iterates the result sets of a
 `CALL` or of a multi-statement string (`multi_statements=true`) as distinct cursors.
 `MySQL.load(table, conn, name)` creates a table from a Tables.jl source's schema and
 inserts its rows in batches. Close the connection with `DBInterface.close!(conn)`.
@@ -279,9 +293,15 @@ represented exactly. Construct one with `Timestamp{Microsecond}(2024, 2, 29, 13,
 
 Server errors are thrown as `MySQL.Error` (or `MySQL.StmtError` from prepared-statement
 operations) with `errno`, `msg`, and `sqlstate` fields. A connection the server dropped
-reports 4031 when MySQL supplies an idle-disconnect ERR, or the classic client codes
-2006 ("MySQL server has gone away") and 2013 ("Lost connection to MySQL server during query")
-when the transport closes. Protocol and server exceptions derive from
+reports 4031 when MySQL supplies an idle-disconnect ERR. Otherwise a lost connection reports
+a classic client code that tells whether the command reached the server: 2006 ("MySQL server
+has gone away") when it was not sent (the connection was already closed or broken, or
+writing the command failed), and 2013 ("Lost connection to MySQL server during query") once
+it was sent; the server may then have executed and committed it although no answer arrived.
+A 2006 covers only the command that raised it: a transaction open on the lost connection is
+gone, so re-sending that command elsewhere is safe only if it did not depend on the lost
+transaction or session state. A `TimeoutError` while waiting for an answer also leaves the
+outcome unknown. Protocol and server exceptions derive from
 `MySQL.MySQLError`: besides the server errors there are `ProtocolError` (the byte stream
 violated the protocol or a limit; the connection is closed), `TimeoutError`, `AuthError`,
 `TLSNegotiationError`, `ConversionError` (a value cannot be represented by the column's

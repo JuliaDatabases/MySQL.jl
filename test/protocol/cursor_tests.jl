@@ -952,16 +952,51 @@ end
         @test (@atomic accepted.value) == 2
         conn.handle.session.status = P.SERVER_STATUS_AUTOCOMMIT
         conn.handle.session.phase = P.READY
-        # the server drops the connection instead of answering: the classic 2006, the session
-        # is BROKEN, and the *next* command reconnects (the libmysqlclient contract)
+        # the server drops the connection after the command was written, without answering:
+        # 2013 (it may have run), the session is BROKEN, and the *next* command reconnects
         err = try; DBInterface.execute(conn, "peer hangs up"); nothing; catch e; e; end
-        @test err isa P.Error && err.errno == P.CR_SERVER_GONE_ERROR
+        @test err isa P.Error && err.errno == P.CR_SERVER_LOST
         @test !isopen(conn) && conn.handle.session.phase == P.BROKEN
         @test DBInterface.execute(conn, "after broken").rows_affected == 0
         @test (@atomic accepted.value) == 3 && isopen(conn)
         DBInterface.close!(conn)
     finally
         close(listener)
+    end
+end
+
+@testset "connection loss tells a sent command from a refused one (#248)" begin
+    # The peer reads the command and hangs up without answering: the server may have run it
+    # (2013). The next command is refused before anything is written (2006).
+    received = String[]
+    with_server(conn -> plain_peer_connect!(conn; caps=MYSQL8_SERVER_CAPS & ~P.CLIENT_SSL, after=c -> push!(received, expect_query(c)))) do port
+        conn = DBInterface.connect(N.Connection, "127.0.0.1", "root", "pw"; port=port, ssl_mode=:disabled, connect_timeout=10)
+        err = try; DBInterface.execute(conn, "INSERT 1"); nothing; catch e; e; end
+        @test err isa MySQL.Error && err.errno == P.CR_SERVER_LOST && err.sqlstate == "HY000"
+        @test !isopen(conn)
+        err = try; DBInterface.execute(conn, "INSERT 2"); nothing; catch e; e; end
+        @test err isa MySQL.Error && err.errno == P.CR_SERVER_GONE_ERROR && err.sqlstate == "HY000"
+        DBInterface.close!(conn)
+    end
+    @test received == ["INSERT 1"]
+end
+
+@testset "TLS connection reset after a command was written" begin
+    for version in ("TLSv1.2", "TLSv1.3")
+        with_server(raw -> tls_peer_connect!(raw; after=tls -> begin
+            _, command, sql = read_command(tls)
+            @test command == P.COM_QUERY && String(sql) == "INSERT 1"
+            Reseau.TCP.set_linger!(raw, 0)
+            close(raw)
+        end)) do port
+            conn = DBInterface.connect(N.Connection, "127.0.0.1", "root", "pw"; port=port, ssl_mode=:required, tls_version=version, connect_timeout=10)
+            err = try; DBInterface.execute(conn, "INSERT 1"); nothing; catch e; e; end
+            @test err isa MySQL.Error && err.errno == P.CR_SERVER_LOST && err.sqlstate == "HY000"
+            @test !isopen(conn)
+            err = try; DBInterface.execute(conn, "INSERT 2"); nothing; catch e; e; end
+            @test err isa MySQL.Error && err.errno == P.CR_SERVER_GONE_ERROR
+            DBInterface.close!(conn)
+        end
     end
 end
 
@@ -1080,27 +1115,31 @@ end
     end
 end
 
-@testset "transactions hold the lock; nested use is an error" begin
+@testset "transactions hold the lock across nested scopes" begin
     seen = String[]
     with_native(c -> begin
-        for _ in 1:3
-            push!(seen, expect_query(c)); send_ok(c, 1)
+        for _ in 1:9
+            sql = expect_query(c)
+            push!(seen, sql)
+            status = sql in ("COMMIT", "ROLLBACK") ? P.SERVER_STATUS_AUTOCOMMIT :
+                P.SERVER_STATUS_AUTOCOMMIT | P.SERVER_STATUS_IN_TRANS
+            send_ok(c, 1; status)
         end
-        push!(seen, expect_query(c)); send_ok(c, 1)
-        push!(seen, expect_query(c)); send_ok(c, 1)
     end) do conn
         @test DBInterface.transaction(conn) do
             DBInterface.execute(conn, "insert 1")
-            @test_throws MySQL.MySQLInterfaceError DBInterface.transaction(() -> nothing, conn)
+            @test DBInterface.transaction(() -> :nested, conn) === :nested
             @test conn.transaction_owner === current_task()
-            @test_throws MySQL.MySQLInterfaceError DBInterface.transaction(() -> nothing, conn)
+            @test DBInterface.transaction(() -> nothing, conn) === nothing
             42
         end == 42
         @test_throws ErrorException DBInterface.transaction(conn) do
             error("inside")
         end
     end
-    @test seen == ["START TRANSACTION", "insert 1", "COMMIT", "START TRANSACTION", "ROLLBACK"]
+    @test seen == ["START TRANSACTION", "insert 1", "SAVEPOINT _mysqljl_2",
+        "RELEASE SAVEPOINT _mysqljl_2", "SAVEPOINT _mysqljl_3", "RELEASE SAVEPOINT _mysqljl_3",
+        "COMMIT", "START TRANSACTION", "ROLLBACK"]
 
     seen = String[]
     with_native(c -> begin

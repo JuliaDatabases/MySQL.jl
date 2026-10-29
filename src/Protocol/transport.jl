@@ -98,9 +98,22 @@ end
 supports_buffered_reads(::Union{Reseau.TCP.Conn, Reseau.TLS.Conn}) = return true
 supports_buffered_reads(::FaultTransport) = return false
 
+# A socket error on an open connection (a reset or broken pipe; under TLS the cause of a
+# `TLSError`) means the peer is gone. It is reported as EOF, with the socket error kept as
+# the cause, so the session classifies it like any other lost connection. `@inline` keeps
+# the callers' catch blocks free of a dynamic `::Any`-argument call under `--trim=safe`.
+@inline function throw_lost_peer(err)
+    (err isa SystemError || (err isa Reseau.TLS.TLSError && err.cause isa SystemError)) && throw(EOFError())
+    rethrow()
+end
+
 # Reads 1..n available bytes into `buf[offset:end]` (one transport read); 0 means EOF.
 function transport_read_some!(t::Union{Reseau.TCP.Conn, Reseau.TLS.Conn}, buf::Vector{UInt8}, offset::Int, n::Int)
-    return Base.readbytes!(t, view(buf, offset:lastindex(buf)), n; all=false)
+    try
+        return Base.readbytes!(t, view(buf, offset:lastindex(buf)), n; all=false)
+    catch err
+        throw_lost_peer(err)
+    end
 end
 
 function transport_read_some!(t::FaultTransport, buf::Vector{UInt8}, offset::Int, n::Int)
@@ -115,7 +128,14 @@ function transport_read_some!(t::FaultTransport, buf::Vector{UInt8}, offset::Int
     return got
 end
 
-@inline transport_write(t::Transport, bytes::Vector{UInt8}) = return (write(t, bytes); nothing)
+@inline function transport_write(t::Transport, bytes::Vector{UInt8})
+    try
+        write(t, bytes)
+    catch err
+        throw_lost_peer(err)
+    end
+    return nothing
+end
 
 transport_isopen(t::Transport) = return isopen(t)
 

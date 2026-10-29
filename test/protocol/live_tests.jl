@@ -150,7 +150,8 @@ function run_live_lane(ref::String; soak::Bool=false, manifest::Bool=false)
             end
             @test !isopen(conn)
             # an idle connection reaped by wait_timeout: MySQL 8.0.24+ announces it (4031),
-            # MariaDB just closes (2006); either way the next command reconnects
+            # MariaDB just closes (2013: the command was already written); either way the next
+            # command reconnects
             conn = DBInterface.connect(MySQL.Connection, "127.0.0.1", "root", ROOT_PW; port=port, reconnect=true)
             stmt = nothing
             try
@@ -160,7 +161,7 @@ function run_live_lane(ref::String; soak::Bool=false, manifest::Bool=false)
                 N.send_long_data!(stmt, 0, UInt8[0xff])
                 sleep(2.5)
                 err = try; DBInterface.execute(conn, "SELECT 1"); nothing; catch e; e; end
-                @test err isa MySQL.Error && err.errno in (4031, P.CR_SERVER_GONE_ERROR)
+                @test err isa MySQL.Error && err.errno in (4031, P.CR_SERVER_LOST)
                 @test !isopen(conn)
                 # The next execute re-prepares on the new session and replays copied
                 # long-data chunks. No statement execute was attempted on the dead one.
