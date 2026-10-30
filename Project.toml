@@ -1,6 +1,6 @@
 name = "MySQL"
 uuid = "39abe10b-433b-5dbd-92d4-e302a9df00cd"
-version = "2.2.0"
+version = "2.2.1"
 author = ["quinnj"]
 
 [deps]
