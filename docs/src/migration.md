@@ -129,6 +129,7 @@ Deliberate, documented changes relative to Connector/C 1.6.0:
 | BIT decoding | text: first byte only; binary: little-endian | big-endian value of all bytes (≤ 8) in both protocols |
 | BIT parameters | little-endian `bitvalue` encoding | big-endian binary string (matches the decode) |
 | `Bool` parameters | fell through to the `MYSQL_TYPE_STRING` fallback (untested latent bug) | bound as `MYSQL_TYPE_TINY` |
+| `DateTime` parameters | bound as `MYSQL_TYPE_TIMESTAMP`: MariaDB stored NULL for values before 1970 or after 2106 | bound as `MYSQL_TYPE_DATETIME`, like `Timestamp` |
 | TIME decoding | text parse errored on negative/≥24 h; binary ignored sign and days | `Dates.Time` for `0 ≤ t < 24h`, `ConversionError` otherwise; `time_type=Dates.Microsecond` opt-in is lossless and signed |
 | Zero dates | text special-cased only zero DATETIME; text zero DATE failed; binary mapped zero components to 1970 | unified `zero_dates` policy: `:sentinel` (default, `Date(0)` / `Timestamp{P}(0, 1, 1)`), `:missing` (widens column types to `Union{Missing, T}`), `:error`; partial zero dates (`2024-00-05`) are `ConversionError` unless `:missing` |
 | `Base.isopen` | `mysql_ping` round trip | local check only; use `MySQL.ping(conn)` for a round trip |

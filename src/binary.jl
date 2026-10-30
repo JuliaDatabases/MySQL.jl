@@ -180,7 +180,9 @@ param_type(::Bit) = return (P.MYSQL_TYPE_BLOB, false)
 param_type(::Vector{UInt8}) = return (P.MYSQL_TYPE_BLOB, false)
 param_type(::DataBytes) = return (P.MYSQL_TYPE_BLOB, false)
 param_type(::Timestamp) = return (P.MYSQL_TYPE_DATETIME, false)
-param_type(::DateTime) = return (P.MYSQL_TYPE_TIMESTAMP, false)
+# DATETIME, not TIMESTAMP: MariaDB turns a TIMESTAMP-typed parameter outside the TIMESTAMP
+# range (before 1970, after 2106) into NULL, even when it is stored in a DATETIME column.
+param_type(::DateTime) = return (P.MYSQL_TYPE_DATETIME, false)
 param_type(::Date) = return (P.MYSQL_TYPE_DATE, false)
 param_type(::Dates.Time) = return (P.MYSQL_TYPE_TIME, false)
 param_type(::AbstractString) = return (P.MYSQL_TYPE_STRING, false)

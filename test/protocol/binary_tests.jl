@@ -996,7 +996,8 @@ end
     @test roundtrip(Timestamp{Microsecond}, Timestamp{Nanosecond}(2024, 1, 2, 1, 2, 3, 456, 789)) === Timestamp{Microsecond}(2024, 1, 2, 1, 2, 3, 456, 789)
     # the wire carries microseconds: a sub-microsecond Timestamp{Nanosecond} is refused, never truncated
     @test_throws InexactError N.encode_param_value!(UInt8[], Timestamp{Nanosecond}(2024, 1, 2, 1, 2, 3, 456, 789, 1))
-    @test N.param_signature(Any[Timestamp{Second}(2024, 1, 1), DateTime(2024, 1, 1)]) == UInt16[P.MYSQL_TYPE_DATETIME, P.MYSQL_TYPE_TIMESTAMP]
+    # DateTime binds as DATETIME: MariaDB nulls TIMESTAMP-typed parameters outside 1970-2106
+    @test N.param_signature(Any[Timestamp{Second}(2024, 1, 1), DateTime(2024, 1, 1)]) == UInt16[P.MYSQL_TYPE_DATETIME, P.MYSQL_TYPE_DATETIME]
     @test roundtrip(Time, Time(13, 14, 15)) == Time(13, 14, 15)
     @test roundtrip(Time, Time(13, 14, 15, 250, 500)) == Time(13, 14, 15, 250, 500)
 

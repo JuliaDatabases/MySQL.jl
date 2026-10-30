@@ -55,6 +55,16 @@ function run_user_workflow(conn)
         @test expected.data == [UInt8[0, 255], UInt8[2], UInt8[3]]
         @test Tables.columntable(DBInterface.execute(conn, "SELECT * FROM items ORDER BY id"; mysql_store_result=false)) == expected
         @test Tables.columntable(DBInterface.execute(conn, "SELECT * FROM items WHERE id > ? ORDER BY id", (0,))) == expected
+        # DateTime parameters before 1970 or after 2106: MariaDB stored NULL for them while they
+        # were sent as MYSQL_TYPE_TIMESTAMP.
+        DBInterface.execute(conn, "DROP TABLE IF EXISTS old_dates")
+        DBInterface.execute(conn, "CREATE TABLE old_dates (id INT PRIMARY KEY, at DATETIME(3))")
+        dates = [DateTime(1955, 3, 4, 5, 6, 7, 890), DateTime(1969, 12, 31, 23, 59, 59), DateTime(2200, 1, 1)]
+        DBInterface.executemany(conn, "INSERT INTO old_dates VALUES (?, ?)", (id=[1, 2, 3], at=dates))
+        @test isequal(Tables.columntable(DBInterface.execute(conn, "SELECT at FROM old_dates ORDER BY id")).at, Timestamp{Millisecond}.(dates))
+        DBInterface.execute(conn, "DROP TABLE IF EXISTS old_dates_load")
+        MySQL.load((id=[1], born=[DateTime(1955, 3, 4)]), conn, "old_dates_load")
+        @test isequal(Tables.columntable(DBInterface.execute(conn, "SELECT born FROM old_dates_load")).born, [Timestamp{Millisecond}(DateTime(1955, 3, 4))])
         @test DBInterface.transaction(conn) do
             DBInterface.execute(conn, "UPDATE items SET label='changed' WHERE id=1")
             :committed
