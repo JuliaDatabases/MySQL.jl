@@ -92,6 +92,46 @@ both the original and cleanup errors in a `CompositeException`.
 `MySQL.load(table, conn, name)` creates a table from a Tables.jl source's schema and
 inserts its rows in batches. Close the connection with `DBInterface.close!(conn)`.
 
+## Scoped connection pooling
+
+`MySQL.ConnectionPool` creates connections on demand, up to `limit`. Use
+`MySQL.with_connection` to keep related operations on one session:
+
+```julia
+pool = MySQL.ConnectionPool("localhost", "user", "password"; db="mydb", limit=8)
+try
+    id = MySQL.with_connection(pool) do conn
+        DBInterface.execute(conn, "INSERT INTO users (name) VALUES ('alice')")
+        first(DBInterface.execute(conn, "SELECT LAST_INSERT_ID()"))[1]
+    end
+finally
+    close(pool)
+end
+```
+
+Before a connection is reused, the pool drains unread results, resets the server session
+(including rolling back unfinished transactions), invalidates old statement and cursor
+generations, restores the configured database and utf8mb4 settings, and repeats
+`init_command`. Use that option only for repeatable session setup. These steps add network
+round trips; pooling avoids a new connection and authentication, not cleanup. With no
+configured `db`, a session that selected a database is replaced because a reset cannot
+clear that selection. Servers without session-reset support also require replacement.
+Consume results inside the callback to observe SQL errors; unread responses are discarded
+by the driver's ordinary draining behavior.
+
+Finish all work on the borrowed connection before the callback returns, including work
+started in other tasks. Do not keep using the connection, prepared statements, or
+unfinished streamed results afterward. Owned buffered results and materialized values
+remain readable. The connection is not a revocable lease: an escaped prepared statement
+may still auto-reprepare under the ordinary driver rules. For nested work, pass the
+already borrowed connection; another lease uses separate capacity and can block.
+
+An uncaught callback error retires the connection and is rethrown unchanged. A reset
+failure also retires it and propagates; callbacks are never replayed. A local open check
+does not prove the server is reachable. `close(pool)` rejects new leases, wakes waiting
+callers, and closes idle connections. It lets already acquired leases finish, even if
+their callbacks start after a racing close, then closes their sessions on return.
+
 ## Connection options
 
 `DBInterface.connect(MySQL.Connection, host, user, password; kw...)` accepts the keywords
@@ -277,6 +317,9 @@ MySQL.Connection
 MySQL.Statement
 MySQL.Cursor
 MySQL.ConnectOptions
+MySQL.ConnectionPool
+MySQL.with_connection
+Base.close(::MySQL.ConnectionPool)
 DBInterface.connect
 DBInterface.close!
 DBInterface.execute

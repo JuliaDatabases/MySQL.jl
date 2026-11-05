@@ -39,6 +39,7 @@ include("connection.jl")
 include("cursor.jl")
 include("statement.jl")
 include("load.jl")
+include("pool.jl")
 include("precompile.jl")
 
 end # module

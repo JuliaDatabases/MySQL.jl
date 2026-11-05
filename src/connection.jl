@@ -56,6 +56,10 @@ like `host`/`user`/`password`.
 """
 function DBInterface.connect(::Type{Connection}, host::AbstractString, user::AbstractString, passwd::Union{AbstractString, Nothing}=nothing; db::Union{AbstractString, Nothing}=nothing, port::Union{Integer, Nothing}=nothing, kw...)
     opts = ConnectOptions(strip_scheme(host), user, passwd; db=db, port=port, kw...)
+    return connection(opts)
+end
+
+function connection(opts::ConnectOptions)
     h = connect(opts)
     results = ResultOptions(; zero_dates=opts.zero_dates, time_type=opts.time_type)
     return Connection(
