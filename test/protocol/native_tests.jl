@@ -484,6 +484,10 @@ end
     # (thrown into the task resident on thread 1) does not land in the reaper.
     @test Threads.threadpool(reaper) === :default
     timer = N.REAPER_TIMER[]
+    # Under the timer's lock, a task linked in the timer's wait queue is parked in `wait(timer)`.
+    # The queue holds the tasks themselves on Julia <= 1.14 and WaitEntry records with an
+    # atomic `task` field on 1.15.
+    in_waitq(t::Task, c) = any(w -> (w isa Task ? w : (@atomic :monotonic w.task)) === t, c.waitq)
     # Throw an InterruptException into the reaper while it is parked in `wait(timer)`, as a
     # Ctrl-C does when the reaper is the task resident on thread 1. The timer's lock keeps
     # the timer tick from waking the reaper between the check and the throw.
@@ -491,7 +495,7 @@ end
     deadline = time() + 15
     while !injected && time() < deadline
         @lock timer.cond begin
-            if reaper.queue === timer.cond.waitq
+            if in_waitq(reaper, timer.cond)
                 schedule(reaper, InterruptException(); error=true)
                 injected = true
             end
