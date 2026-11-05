@@ -36,6 +36,7 @@ const REAPER_LOCK = Threads.SpinLock()
 const REAPER_QUEUE = Ref{Union{Nothing, ReapEntry}}(nothing)
 const REAPER_QUEUE_LENGTH = Ref(0)
 const REAPER_TIMER = Ref{Union{Nothing, Timer}}(nothing)
+const REAPER_TASK = Ref{Union{Nothing, Task}}(nothing)
 const REAPER_INTERVAL_S = 0.5
 const REAPER_STATS = Ref((enqueued=0, closed=0))
 
@@ -127,15 +128,15 @@ const REAPER_SETUP_LOCK = ReentrantLock()
 # `Timer(callback)`: Base dispatches timer callbacks from an internal closure task, which
 # a trimmed executable cannot run, while `wait(::Timer)` is woken from the event loop's C
 # side. The task body and the atexit hook are `@noinline` with static call edges below.
+#
+# Nothing is caught around `wait`: a SIGINT is thrown into whichever task is resident on
+# thread 1, and when that is the reaper the InterruptException must leave the task so that
+# Base's task_done_hook can hand it to the REPL. `ensure_reaper!` replaces a dead reaper.
 @noinline function reaper_loop()
     t = REAPER_TIMER[]
     t === nothing && return nothing
     while isopen(t)
-        try
-            wait(t)
-        catch
-            break   # timer closed
-        end
+        wait(t)
         try
             reap_now!()
         catch err
@@ -147,23 +148,30 @@ end
 
 @noinline reaper_atexit() = return (try; reap_now!(); catch; end; nothing)
 
-# Starts the timer once. A ReentrantLock (not the finalizer-safe spinlock) because creating a
-# Timer and registering the atexit hook may yield.
+# Starts the timer once and a reaper task whenever none is alive. A ReentrantLock (not the
+# finalizer-safe spinlock) because creating a Timer and registering the atexit hook may yield.
 function ensure_reaper!()
     lock(REAPER_SETUP_LOCK)
     try
-        REAPER_TIMER[] === nothing || return nothing
-        REAPER_TIMER[] = Timer(REAPER_INTERVAL_S; interval=REAPER_INTERVAL_S)
+        task = REAPER_TASK[]
+        task === nothing || istaskdone(task) || return nothing
+        if REAPER_TIMER[] === nothing
+            REAPER_TIMER[] = Timer(REAPER_INTERVAL_S; interval=REAPER_INTERVAL_S)
+            atexit(reaper_atexit)
+        end
         if TRIM_CALL_EDGE[]
             reaper_loop()
             reaper_atexit()
         end
         task = Task(reaper_loop)
         task.sticky = false
-        # reaper_loop handles timer shutdown and logs reclamation errors itself.
-        # Base.errormonitor would add an untrimmable dynamic error-display task.
+        # The default pool: when an interactive pool exists the user's tasks run there, and
+        # a Ctrl-C goes to the task resident on thread 1, which must not be the reaper.
+        Threads._spawn_set_thrpool(task, :default)
+        # reaper_loop logs reclamation errors itself. Base.errormonitor would add an
+        # untrimmable dynamic error-display task.
+        REAPER_TASK[] = task
         schedule(task)
-        atexit(reaper_atexit)
     finally
         unlock(REAPER_SETUP_LOCK)
     end

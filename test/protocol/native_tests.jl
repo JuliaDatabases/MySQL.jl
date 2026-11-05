@@ -476,6 +476,56 @@ end
     @test all(ref -> ref.value === nothing, refs)
 end
 
+@testset "reaper: an interrupt leaves the task and the next registration restarts it" begin
+    N.ensure_reaper!()
+    reaper = N.REAPER_TASK[]
+    @test reaper isa Task
+    # Off the interactive pool, where the user's work runs when one exists, so a Ctrl-C
+    # (thrown into the task resident on thread 1) does not land in the reaper.
+    @test Threads.threadpool(reaper) === :default
+    timer = N.REAPER_TIMER[]
+    # Under the timer's lock, a task linked in the timer's wait queue is parked in `wait(timer)`.
+    # The queue holds the tasks themselves on Julia <= 1.13 and WaitEntry records with an
+    # atomic `task` field from 1.14 on.
+    in_waitq(t::Task, c) = any(w -> (w isa Task ? w : (@atomic :monotonic w.task)) === t, c.waitq)
+    # Throw an InterruptException into the reaper while it is parked in `wait(timer)`, as a
+    # Ctrl-C does when the reaper is the task resident on thread 1. The timer's lock keeps
+    # the timer tick from waking the reaper between the check and the throw.
+    injected = false
+    deadline = time() + 15
+    while !injected && time() < deadline
+        @lock timer.cond begin
+            if in_waitq(reaper, timer.cond)
+                schedule(reaper, InterruptException(); error=true)
+                injected = true
+            end
+        end
+        injected || sleep(0.01)
+    end
+    @test injected
+    deadline = time() + 15
+    while !istaskdone(reaper) && time() < deadline
+        sleep(0.01)
+    end
+    # The interrupt leaves the task, so Base's task_done_hook can hand it to the REPL.
+    @test istaskfailed(reaper)
+    @test reaper.result isa InterruptException
+    N.ensure_reaper!()
+    fresh = N.REAPER_TASK[]
+    @test fresh isa Task && fresh !== reaper && !istaskdone(fresh)
+    counter = P.FaultTransport(IOBuffer())
+    entry = N.ReapEntry(counter)
+    while (@atomic entry.state) == :live
+        N.enqueue_from_finalizer!(entry) || yield()
+    end
+    deadline = time() + 15
+    while (@atomic entry.state) != :closed && time() < deadline
+        sleep(0.05)
+    end
+    @test (@atomic entry.state) == :closed
+    @test (@atomic counter.close_count) == 1
+end
+
 @testset "no descriptor growth across connect/close cycles" begin
     Sys.iswindows() && return
     multi_accept_server() do port
