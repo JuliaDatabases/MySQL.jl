@@ -104,7 +104,10 @@ source are never read.
 - **Finalizers never do I/O**: a dropped `MySQL.Handle` enqueues its `ReapEntry` (CAS
   `:live → :pending`); the reaper (0.5 s timer, `reap_now!`, `atexit`) removes entries under
   `REAPER_LOCK`, then closes each transport after releasing the lock. `close!` retires the
-  entry first so a later finalizer is a no-op. Reseau's own poll-FD finalizer is the
+  entry first so a later finalizer is a no-op. The reaper task runs on the default pool and
+  catches nothing around its timer wait, so a Ctrl-C that lands in it leaves the task as an
+  `InterruptException` (which Base hands to the REPL); `ensure_reaper!` starts a new task on
+  the next connect when the old one is done. Reseau's own poll-FD finalizer is the
   last-resort fd reclaimer.
 - **RSA-OAEP through OpenSSL_jll's libcrypto** (`crypto.jl`): explicit SHA-1 OAEP + MGF1,
   `k - 42` plaintext cap, every handle freed in `finally`, 20k-iteration leak test. The

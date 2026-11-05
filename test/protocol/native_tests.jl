@@ -506,7 +506,6 @@ end
     # The interrupt leaves the task, so Base's task_done_hook can hand it to the REPL.
     @test istaskfailed(reaper)
     @test reaper.result isa InterruptException
-    # The next registration replaces the dead reaper, and the replacement reaps.
     N.ensure_reaper!()
     fresh = N.REAPER_TASK[]
     @test fresh isa Task && fresh !== reaper && !istaskdone(fresh)
