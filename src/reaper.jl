@@ -36,6 +36,7 @@ const REAPER_LOCK = Threads.SpinLock()
 const REAPER_QUEUE = Ref{Union{Nothing, ReapEntry}}(nothing)
 const REAPER_QUEUE_LENGTH = Ref(0)
 const REAPER_TIMER = Ref{Union{Nothing, Timer}}(nothing)
+const REAPER_TASK = Ref{Union{Nothing, Task}}(nothing)
 const REAPER_INTERVAL_S = 0.5
 const REAPER_STATS = Ref((enqueued=0, closed=0))
 
@@ -162,6 +163,7 @@ function ensure_reaper!()
         task.sticky = false
         # reaper_loop handles timer shutdown and logs reclamation errors itself.
         # Base.errormonitor would add an untrimmable dynamic error-display task.
+        REAPER_TASK[] = task
         schedule(task)
         atexit(reaper_atexit)
     finally
