@@ -42,6 +42,8 @@ DBInterface.execute(stmt, ("alice", Date(2026, 1, 2)))
 DBInterface.executemany(stmt, (name=["bob", "carol"], joined=[Date(2026, 1, 3), Date(2026, 1, 4)]))
 DBInterface.close!(stmt)
 cursor = DBInterface.execute(conn, "SELECT * FROM users WHERE id = ?", (17,))   # one-shot prepare + execute
+# named parameters bind from a NamedTuple or Dict by name
+cursor = DBInterface.execute(conn, "SELECT * FROM users WHERE id = :id OR parent = :id", (id=17,))
 DBInterface.lastrowid(DBInterface.execute(conn, "INSERT INTO users (name) VALUES ('dave')"))
 
 # transactions, streaming, bulk loading

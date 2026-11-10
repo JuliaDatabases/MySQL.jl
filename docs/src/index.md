@@ -34,8 +34,8 @@ There are two ways to run SQL:
   * `DBInterface.execute(conn, sql)` runs a statement over the text protocol.
   * `stmt = DBInterface.prepare(conn, sql); DBInterface.execute(stmt, params)` prepares a
     statement once and executes it any number of times with parameters bound to its `?`
-    markers over the binary protocol. `DBInterface.execute(conn, sql, params)` is the
-    one-shot form (prepare, execute, close).
+    or `:name` markers over the binary protocol. `DBInterface.execute(conn, sql, params)` is
+    the one-shot form (prepare, execute, close).
 
 Both return a `MySQL.Cursor`, a [Tables.jl](https://juliadata.github.io/Tables.jl/stable/)
 row source, so a result can be materialized as `DataFrame(cursor)`, `Tables.columntable(cursor)`,
@@ -60,10 +60,9 @@ Parameters are bound by their Julia type: integers, floats, strings (`String`,
 `missing`/`nothing` for NULL.
 
 Pass a tuple, named tuple, vector, or `Tables.AbstractRow` for multiple parameters.
-Values bind to `?` markers in iteration order; names do not change that order. Named SQL
-markers such as `:name` are not supported. A bare scalar binds one parameter; use
-`(bytes,)` to bind a byte vector as one binary value. `executemany` takes one collection
-per parameter, as in the example below.
+Values bind to `?` markers in iteration order; names do not change that order. A bare
+scalar binds one parameter; use `(bytes,)` to bind a byte vector as one binary value.
+`executemany` takes one collection per parameter, as in the example below.
 
 ```julia
 stmt = DBInterface.prepare(conn, "INSERT INTO users (name, joined) VALUES (?, ?)")
@@ -71,6 +70,38 @@ DBInterface.execute(stmt, ("alice", Date(2026, 1, 2)))
 DBInterface.executemany(stmt, (name=["bob", "carol"], joined=[Date(2026, 1, 3), Date(2026, 1, 4)]))
 DBInterface.close!(stmt)
 ```
+
+#### Named parameters
+
+Write `:name` in place of `?` to bind values by name. MySQL's prepared statements accept only
+`?`, so MySQL.jl sends each `:name` to the server as `?` and looks up the values by name when
+the statement executes. Pass a `NamedTuple`, or an `AbstractDict` keyed by `Symbol` or
+`String`:
+
+```julia
+stmt = DBInterface.prepare(conn, "UPDATE users SET name = :name WHERE id = :id OR parent = :id")
+DBInterface.execute(stmt, (id=7, name="alice"))
+DBInterface.execute(stmt, Dict("id" => 8, "name" => "bob"))
+DBInterface.executemany(stmt, (name=["carol", "dan"], id=[9, 10]))   # each row binds by name
+DBInterface.close!(stmt)
+DBInterface.execute(conn, "SELECT * FROM users WHERE id = :id", (id=7,))
+```
+
+  * A name starts with a letter or `_` and continues with letters, digits, and `_`. Names
+    are case-sensitive: `:userId` takes the value of `userId`, not `userid`.
+  * A name used more than once binds the same value each time.
+  * Keys that the statement does not use are ignored. A missing name raises
+    `MySQL.MySQLInterfaceError` before anything is sent to the server.
+  * A statement uses `?` markers or `:name` markers, not both. A tuple, vector, or bare
+    scalar binds one value per `:name` marker, in the order the markers appear. A row
+    (`Tables.AbstractRow`) raises an error, because its column order need not match the
+    markers; bind it by name with `NamedTuple(row)`.
+  * A `:name` inside a string literal, a quoted identifier, or a comment is not a parameter.
+    Executable comments (`/*! ... */`) are sent unchanged, and `:=` stays an assignment.
+    String literals end where the session's `NO_BACKSLASH_ESCAPES` mode says they do when the
+    statement is prepared.
+  * When the server does not read a `:name` as a parameter, as with a label in a MariaDB
+    stored procedure (`lbl:LOOP`), MySQL.jl prepares the SQL as written.
 
 `DBInterface.transaction(conn) do ... end` wraps the block in `START TRANSACTION`/`COMMIT`
 (`ROLLBACK` on an exception). If a transaction is already active, including one started
@@ -280,6 +311,7 @@ MySQL.ConnectOptions
 DBInterface.connect
 DBInterface.close!
 DBInterface.execute
+DBInterface.executemany
 DBInterface.executemultiple
 DBInterface.prepare
 DBInterface.transaction
