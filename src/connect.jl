@@ -316,8 +316,8 @@ function connect(opts::ConnectOptions)
             (opts.can_handle_expired_passwords && err isa P.Error && err.errno == P.ER_MUST_CHANGE_PASSWORD && s.phase == P.READY) || rethrow()
             false
         end
-        deadline == 0 || apply_deadline!(s.transport, Int64(0))
-        # from here on `read_timeout`/`write_timeout` apply per transport operation
+        # clears the establishment deadline; from here on `read_timeout`/`write_timeout`
+        # apply per transport operation
         P.set_timeouts!(s, timeout_ns(opts.read_timeout), timeout_ns(opts.write_timeout))
         opts.init_command === nothing || run_init_command!(s, opts)
         return register!(Handle(s, opts, ReapEntry(s.transport), bootstrapped, trace))
