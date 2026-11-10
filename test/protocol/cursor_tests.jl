@@ -1102,6 +1102,21 @@ end
     end
 end
 
+@testset "set_timeouts! to 0 leaves no deadline armed (#257)" begin
+    with_native(c -> begin
+        expect_query(c); send_ok(c, 1)
+        expect_query(c); send_ok(c, 1)
+    end) do conn
+        s = N.session(conn)
+        P.set_timeouts!(s, 1_000_000_000, 1_000_000_000)
+        @test DBInterface.execute(conn, "bounded").rows_affected == 0
+        P.set_timeouts!(s, 0, 0)
+        sleep(1.5)                                                            # past the deadline the bounded command armed
+        @test DBInterface.execute(conn, "unbounded").rows_affected == 0
+        @test isopen(conn)
+    end
+end
+
 @testset "escape and identifiers" begin
     @test N.escape_literal("a'b\"c\\d\n\r\0\x1a", false) == "a\\'b\\\"c\\\\d\\n\\r\\0\\Z"
     @test N.escape_literal("a'b\\c", true) == "a''b\\c"
