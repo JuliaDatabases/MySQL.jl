@@ -198,6 +198,7 @@ function serve_connection!(conn)::Nothing
             end
         elseif cmd == P.COM_STMT_PREPARE
             sql = String(payload[2:end])
+            occursin(":id", sql) && error("a named parameter reached the server: $sql")
             if occursin("INSERT", sql)
                 send_prepare_ok(conn, INSERT_STMT_ID, Vector{UInt8}[coldef("?"), coldef("?")], Vector{UInt8}[])
             else
@@ -279,6 +280,19 @@ function run_workload(port::Int, value::Int)::Int
             push!(oids, Tables.getcolumn(row, Int32, 1, :id))
         end
         check(oids == Int32[17, 18], "one-shot execute")
+
+        # named parameters: `:id` is prepared as `?` and bound by name
+        nids = Int32[]
+        nstmt = DBInterface.prepare(conn, "SELECT id, name FROM people WHERE id = :id")
+        for row in DBInterface.execute(nstmt, (id=17,))::MySQL.BinaryCursor{true}
+            push!(nids, Tables.getcolumn(row, Int32, 1, :id))
+        end
+        for row in DBInterface.execute(nstmt, Dict(:id => 17))::MySQL.BinaryCursor{true}
+            push!(nids, Tables.getcolumn(row, Int32, 1, :id))
+        end
+        check(nids == Int32[17, 18, 17, 18], "named parameters")
+        DBInterface.executemany(nstmt, (id=[17, 18],))
+        DBInterface.close!(nstmt)
 
         # simple commands and escaping
         check(MySQL.ping(conn), "ping")

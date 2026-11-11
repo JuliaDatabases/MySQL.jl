@@ -96,5 +96,57 @@ function run_user_workflow(conn)
         @test length(results) == 3 # CALL has a final status result.
         @test MySQL.ping(conn)
         DBInterface.execute(conn, "DROP PROCEDURE workflow_results")
+        run_named_parameter_workflow(conn)
+    end
+end
+
+# #207: `:name` parameters are rewritten to `?` client-side and bound by name.
+function run_named_parameter_workflow(conn)
+    @testset "named parameters (#207)" begin
+        DBInterface.execute(conn, "DROP TABLE IF EXISTS named_params")
+        DBInterface.execute(conn, "CREATE TABLE named_params (id INT PRIMARY KEY, name VARCHAR(32), note VARCHAR(32))")
+        stmt = DBInterface.prepare(conn, "INSERT INTO named_params (id, name, note) VALUES (:id, :name, ':note')")
+        try
+            DBInterface.execute(stmt, (name="one", id=1))
+            DBInterface.execute(stmt, Dict(:id => 2, :name => "two"))
+            DBInterface.execute(stmt, Dict("id" => 3, "name" => "three"))
+            DBInterface.execute(stmt, (id=4, name="four", unused=true))
+            @test_throws MySQL.MySQLInterfaceError DBInterface.execute(stmt, (id=5,))
+            @test_throws MySQL.MySQLInterfaceError DBInterface.execute(stmt, Tables.Row((id=5, name="five")))
+            DBInterface.execute(stmt, (5, "five"))   # positional values bind in marker order
+            DBInterface.executemany(stmt, (name=["six", "seven"], id=[6, 7]))
+            DBInterface.executemany(stmt, Dict(:id => [8], :name => ["eight"]))
+        finally
+            DBInterface.close!(stmt)
+        end
+        rows = Tables.columntable(DBInterface.execute(conn, "SELECT id, name, note FROM named_params ORDER BY id"))
+        @test rows.id == 1:8
+        @test rows.name == ["one", "two", "three", "four", "five", "six", "seven", "eight"]
+        @test all(==(":note"), rows.note)
+
+        # a reused name binds every use; names are case-sensitive
+        sql = "SELECT id FROM named_params WHERE id = :Id OR id = :Id + :step ORDER BY id"
+        @test Tables.columntable(DBInterface.execute(conn, sql, (Id=2, step=1))).id == [2, 3]
+        @test_throws MySQL.MySQLInterfaceError DBInterface.execute(conn, sql, (id=2, step=1))
+        @test_throws MySQL.MySQLInterfaceError DBInterface.prepare(conn, "SELECT :a, ?")
+
+        # the literal ends where the session's sql_mode says it does
+        DBInterface.execute(conn, "SET @named_saved_mode = @@sql_mode")
+        DBInterface.execute(conn, "SET SESSION sql_mode = CONCAT(@@sql_mode, ',NO_BACKSLASH_ESCAPES')")
+        try
+            @test Tuple(first(DBInterface.execute(conn, "SELECT 'C:\\' AS path, :v AS v", (v=7,)))) == ("C:\\", 7)
+        finally
+            DBInterface.execute(conn, "SET SESSION sql_mode = @named_saved_mode")
+        end
+
+        if MySQL.server_kind(conn) == :mariadb
+            # MariaDB prepares stored-program DDL: `lbl:LOOP` is a label, not a parameter
+            DBInterface.execute(conn, "DROP PROCEDURE IF EXISTS named_label")
+            stmt = DBInterface.prepare(conn, "CREATE PROCEDURE named_label() BEGIN lbl:LOOP LEAVE lbl; END LOOP lbl; END")
+            DBInterface.execute(stmt)
+            DBInterface.close!(stmt)
+            @test DBInterface.execute(conn, "CALL named_label()").rows_affected == 0
+            DBInterface.execute(conn, "DROP PROCEDURE named_label")
+        end
     end
 end

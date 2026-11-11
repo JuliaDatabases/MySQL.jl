@@ -14,12 +14,14 @@ end
 
 A prepared statement on the native backend, from `DBInterface.prepare(conn, sql)`. Execute it
 with `DBInterface.execute(stmt, params)`; close it with `DBInterface.close!(stmt)` (the
-COM_STMT_CLOSE is deferred to the next command, never sent from a finalizer).
+COM_STMT_CLOSE is deferred to the next command, never sent from a finalizer). `stmt.sql` is
+the SQL as written, `:name` parameters included.
 """
 mutable struct Statement <: DBInterface.Statement
     conn::Connection
     statement_id::UInt32
     sql::String
+    named::Union{Nothing, NamedSQL}   # `nothing`: no `:name` parameters, `sql` is prepared as written
     generation::Int
     nparams::Int
     params::Vector{P.ColumnDef}
@@ -67,19 +69,31 @@ end
 """
     DBInterface.prepare(conn::MySQL.Connection, sql) -> Statement
 
-Prepares `sql` on the server and returns a `Statement`.
+Prepares `sql` on the server and returns a `Statement`. Parameters are positional `?` markers
+or named `:name` markers; one statement cannot mix the two. The server takes only `?`, so each
+`:name` is sent as `?` and execution binds its value by name. A `:name` inside a string
+literal, a quoted identifier, or a comment (executable `/*! */` comments included) is left
+alone. When the server does not read every `:name` as a parameter, as with a MariaDB
+stored-program label such as `lbl:LOOP`, the SQL is prepared as written and binds positionally.
 """
 function DBInterface.prepare(conn::Connection, sql::AbstractString)
     lock(conn.lock) do
         s = begin_command!(conn)
-        P.stmt_prepare!(s, sql)
-        ok = P.read_prepare_response!(s)
+        named = named_sql(sql, (s.status & P.SERVER_STATUS_NO_BACKSLASH_ESCAPES) != 0)
+        ok = if named === nothing
+            P.stmt_prepare!(s, sql)
+            P.read_prepare_response!(s)
+        else
+            ok, named = prepare_named!(s, sql, named)
+            ok
+        end
         names, types, lookup, coltypes = statement_schema(conn, ok)
         generation = @atomic conn.generation
         stmt = Statement(
             conn,
             ok.statement_id,
             String(sql),
+            named,
             generation,
             P.num_params(ok),
             ok.params,
@@ -101,13 +115,40 @@ function DBInterface.prepare(conn::Connection, sql::AbstractString)
     end
 end
 
-# Re-prepares `stmt.sql` on the current (READY) session and refreshes its id/generation and
-# cached metadata. A 1615 retry closes the superseded id on the same session. A reconnect
-# leaves the old-generation id alone because it belongs to the dead session.
+# Prepares the `?` rewrite. If the server does not read every `:name` as a parameter (the
+# rewrite does not parse, or it counts other parameters), the SQL is prepared as written:
+# MariaDB prepares stored-program labels (`lbl:LOOP`) and Oracle-mode `:NEW.col`, which have no
+# `?` form. If that fails too, the rewrite's problem is reported.
+function prepare_named!(s::P.Session, sql::AbstractString, named::NamedSQL)
+    P.stmt_prepare!(s, named.sql)
+    problem = try
+        ok = P.read_prepare_response!(s)
+        P.num_params(ok) == length(named.names) && return ok, named
+        P.stmt_close!(s, ok.statement_id)
+        MySQLInterfaceError("the server found $(P.num_params(ok)) parameters but the statement names $(length(named.names)); a statement cannot mix `?` and `:name` parameters")
+    catch err
+        (err isa P.StmtError && err.errno == P.ER_PARSE_ERROR) || rethrow()
+        err
+    end
+    P.stmt_prepare!(s, sql)
+    ok = try
+        P.read_prepare_response!(s)
+    catch err
+        err isa P.StmtError || rethrow()
+        throw(problem)
+    end
+    return ok, nothing
+end
+
+# Re-prepares the statement (its `?` rewrite when it has `:name` parameters) on the current
+# (READY) session and refreshes its id/generation and cached metadata. A 1615 retry closes the
+# superseded id on the same session. A reconnect leaves the old-generation id alone because it
+# belongs to the dead session.
 function reprepare!(conn::Connection, s::P.Session, stmt::Statement; close_previous::Bool=false, replay_long_data::Bool=true)
     old_id = stmt.statement_id
     old_generation = stmt.generation
-    P.stmt_prepare!(s, stmt.sql)
+    named = stmt.named
+    P.stmt_prepare!(s, named === nothing ? stmt.sql : named.sql)
     ok = P.read_prepare_response!(s)
     generation = @atomic conn.generation
     if close_previous && old_generation == generation && old_id != ok.statement_id
@@ -282,16 +323,28 @@ normalize_params(p::Union{Number, AbstractString, Missing, Nothing, Dates.TimeTy
 """
     DBInterface.execute(stmt::MySQL.Statement, params=(); mysql_store_result=true) -> BinaryCursor
 
-Executes the prepared statement with `params` bound as the `?` markers and returns a
-binary-protocol cursor. A tuple, named tuple, vector, or `Tables.AbstractRow` supplies values
-in iteration order; names do not select SQL parameters. A bare scalar binds one parameter.
-Wrap a binary byte vector as `(bytes,)` to bind it as one value. Named SQL markers such as
-`:name` are not supported. `mysql_store_result=false` streams rows (the connection is busy until
-the cursor is exhausted or closed).
+Executes the prepared statement with `params` bound to its parameters and returns a
+binary-protocol cursor. For `?` markers, a tuple, named tuple, vector, or `Tables.AbstractRow`
+supplies values in iteration order; names do not select SQL parameters. A bare scalar binds one
+parameter. Wrap a binary byte vector as `(bytes,)` to bind it as one value. For `:name` markers,
+pass a `NamedTuple` or an `AbstractDict` keyed by `Symbol` or `String`: each marker takes the
+value of its name (case-sensitive), a reused name binds the same value, and keys the SQL does
+not name are ignored. A missing name raises an error before anything is sent. A tuple, vector,
+or bare scalar binds one value per `:name` marker in marker order; a `Tables.AbstractRow` raises
+an error (convert it with `NamedTuple(row)` to bind by name). `mysql_store_result=false`
+streams rows (the connection is busy until the cursor is exhausted or closed).
 """
 function DBInterface.execute(stmt::Statement, params=(); mysql_store_result::Bool=true)
-    conn = stmt.conn
     params = normalize_params(params)
+    named = stmt.named
+    # Two calls, not one variable: a Union of both value types would box the parameters.
+    named === nothing && return execute_values(stmt, params, mysql_store_result)
+    return execute_values(stmt, named_values(named.names, params), mysql_store_result)
+end
+
+# Executes with `params` in `?` marker order.
+function execute_values(stmt::Statement, params, mysql_store_result::Bool)
+    conn = stmt.conn
     lock(conn.lock) do
         stmt.closed && closed_statement()
         check_paramcount(stmt, params)
@@ -349,6 +402,29 @@ binary cursor, like the connection-level `executemultiple`.
 function DBInterface.executemultiple(stmt::Statement, params=(); mysql_store_result::Bool=true)
     first = DBInterface.execute(stmt, params; mysql_store_result=mysql_store_result)
     return Cursors(stmt.conn, stmt.sql, first.opts, first)
+end
+
+"""
+    DBInterface.executemany(stmt::MySQL.Statement, params::NamedTuple)
+
+Executes `stmt` once per row of a batch that holds one equal-length collection per parameter,
+inside one transaction. For `:name` markers each row binds by name; for `?` markers each row
+binds in field order, as in DBInterface's generic method.
+"""
+function DBInterface.executemany(stmt::Statement, params::NamedTuple)
+    # DBInterface hands each row to `execute` positionally, which a `:name` statement rejects.
+    (stmt.named === nothing || isempty(params)) &&
+        return invoke(DBInterface.executemany, Tuple{DBInterface.Statement, Any}, stmt, params)
+    n = length(first(params))
+    all(c -> length(c) == n, params) ||
+        throw(DBInterface.ParameterError("parameter collections provided to `DBInterface.executemany` must have equal lengths"))
+    n == 0 && return nothing
+    DBInterface.transaction(stmt.conn) do
+        for i in 1:n
+            DBInterface.close!(DBInterface.execute(stmt, map(c -> c[i], params)))
+        end
+    end
+    return nothing
 end
 
 """
