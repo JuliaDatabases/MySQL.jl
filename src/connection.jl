@@ -279,15 +279,39 @@ function execute_ok!(s::P.Session, sql::AbstractString)
 end
 
 """
-    MySQL.ping(conn) -> Bool
+    MySQL.ping(conn; timeout=nothing) -> Bool
 
 COM_PING round trip; throws when the connection is unusable.
+
+`timeout` (seconds, positive) bounds the call with one deadline instead of `read_timeout`
+and `write_timeout`, which apply again afterwards. It covers every read and write of the
+call: reading a response still pending from an earlier command, closing parked statements,
+and the ping itself. When it expires, the connection is closed, so a late reply is never
+read, and `MySQL.Protocol.TimeoutError` is thrown. It does not cover waiting for another
+task to release the connection, or reconnecting a session already known dead
+(`reconnect=true`), which `connect_timeout` bounds.
 """
-function ping(conn::Connection)
+function ping(conn::Connection; timeout::Union{Nothing, Real}=nothing)
+    timeout === nothing || timeout > 0 || throw(ArgumentError("ping timeout must be a positive number of seconds, got $timeout"))
     lock(conn.lock) do
-        s = begin_command!(conn)
-        P.ping!(s)
-        P.read_command_response!(s; kind=P.CMD_SIMPLE)
+        # A reconnect replaces the session, so it runs before the bound is armed.
+        isopen(session(conn)) || ensure_live!(conn)
+        s = conn.handle.session
+        read_ns, write_ns = s.io.read_timeout_ns, s.io.write_timeout_ns
+        if timeout !== nothing
+            P.set_timeouts!(s, 0, 0)
+            # clamped so that `Inf` converts; `deadline_after_ns` saturates
+            deadline = P.deadline_after_ns(round(Int64, min(timeout * 1e9, 9.0e18)))
+            P.set_read_deadline!(s.transport, deadline)
+            P.set_write_deadline!(s.transport, deadline)
+        end
+        try
+            begin_command!(conn)
+            P.ping!(s)
+            P.read_command_response!(s; kind=P.CMD_SIMPLE)
+        finally
+            timeout === nothing || P.set_timeouts!(s, read_ns, write_ns)
+        end
         return true
     end
 end

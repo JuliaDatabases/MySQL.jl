@@ -1117,6 +1117,64 @@ end
     end
 end
 
+expect_ping(conn) = (read_command(conn)[2] == P.COM_PING || error("expected COM_PING"); nothing)
+
+@testset "ping(conn; timeout) bounds a ping the server never answers (#258)" begin
+    with_native(expect_ping) do conn
+        started = time_ns()
+        @test_throws P.TimeoutError MySQL.ping(conn; timeout=0.5)
+        @test time_ns() - started < 5_000_000_000
+        @test !isopen(conn)                                                   # a late reply is never read
+    end
+end
+
+@testset "ping(conn; timeout) also bounds draining an abandoned result (#258)" begin
+    with_native(c -> begin
+        expect_query(c)
+        send_packet(c, 1, column_count(1)); send_packet(c, 2, coldef("x"; type=P.MYSQL_TYPE_LONG, flags=NOT_NULL))
+        send_logical(c, 3, text_row("1"))                                    # the rest never arrives
+    end) do conn
+        cur = DBInterface.execute(conn, "stream"; mysql_store_result=false)
+        @test iterate(cur)[1].x == 1
+        started = time_ns()
+        @test_throws P.TimeoutError MySQL.ping(conn; timeout=0.5)
+        @test time_ns() - started < 5_000_000_000
+        @test !isopen(conn)
+    end
+end
+
+@testset "a bounded ping leaves no deadline armed (#258)" begin
+    with_native(c -> begin
+        expect_ping(c); send_ok(c, 1)
+        expect_ping(c); send_ok(c, 1)
+        expect_query(c); send_ok(c, 1)
+    end) do conn
+        @test_throws ArgumentError MySQL.ping(conn; timeout=0)
+        @test_throws ArgumentError MySQL.ping(conn; timeout=-1)
+        @test_throws ArgumentError MySQL.ping(conn; timeout=NaN)
+        @test MySQL.ping(conn; timeout=Inf)
+        @test MySQL.ping(conn; timeout=0.5)
+        sleep(1)                                                              # past the ping's deadline
+        @test DBInterface.execute(conn, "after").rows_affected == 0
+        @test isopen(conn)
+    end
+end
+
+@testset "read_timeout applies again after a bounded ping (#258)" begin
+    with_native(c -> begin
+        expect_ping(c); send_ok(c, 1)
+        expect_query(c)
+        sleep(2)
+        try
+            send_ok(c, 1)
+        catch
+        end
+    end; connect_kw=(; read_timeout=1)) do conn
+        @test MySQL.ping(conn; timeout=5)
+        @test_throws P.TimeoutError DBInterface.execute(conn, "slow")          # read_timeout=1, before the answer at 2 s
+    end
+end
+
 @testset "escape and identifiers" begin
     @test N.escape_literal("a'b\"c\\d\n\r\0\x1a", false) == "a\\'b\\\"c\\\\d\\n\\r\\0\\Z"
     @test N.escape_literal("a'b\\c", true) == "a''b\\c"
