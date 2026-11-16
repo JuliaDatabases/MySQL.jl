@@ -2,6 +2,8 @@
 # keywords, the ssl conflict table, option files, and the opt-in environment defaults.
 
 const DEFAULT_PORT = 3306
+# Connector/C's default Unix socket path (`MYSQL_UNIX_ADDR`).
+const DEFAULT_SOCKET = "/tmp/mysql.sock"
 const UTF8MB4 = "utf8mb4"
 
 # Concrete box for the user-supplied `local_infile_handler` callable: the field type stays
@@ -19,6 +21,7 @@ Validated, fully resolved connection parameters (see `ConnectOptions(host, user,
 struct ConnectOptions
     host::String
     port::Int
+    unix_socket::Union{Nothing, String}  # the socket path; `nothing` dials TCP
     user::String
     password::Union{Nothing, String}
     db::String
@@ -72,8 +75,7 @@ const DEPRECATED_KEYWORDS = Dict{Symbol, String}(
 )
 
 const DEFERRED_KEYWORDS = Dict{Symbol, String}(
-    :unix_socket => "Unix-domain sockets are not supported yet (TCP only; `localhost` is dialed over TCP)",
-    :named_pipe => "named pipes are not supported yet (TCP only; `localhost` is dialed over TCP)",
+    :named_pipe => "named pipes are not supported yet; use TCP or, outside Windows, a Unix socket",
 )
 
 const KNOWN_KEYWORDS = Set{Symbol}([
@@ -189,23 +191,21 @@ end
     return p
 end
 
-# Transport selection. Every host, `localhost` included, is dialed over TCP (or TLS on TCP):
-# the local transports are chosen only by an explicit request — `protocol=:socket`/`:pipe`
-# or `named_pipe=true` — and, being deferred, that request is an error that says so. (A
-# `unix_socket` path is accepted and reserved for the socket transport; Connector/C also
-# ignored it for TCP hosts.)
-function select_transport(protocol; named_pipe::Bool=false)
+# Transport selection, as in Connector/C. `protocol=:socket` uses a Unix socket, and with the
+# default protocol `localhost` uses one when a socket path is given: the `unix_socket`
+# keyword, `socket` in an option file, or `MYSQL_UNIX_PORT` with `read_env=true`. Every other
+# host, and `localhost` without a path, is dialed over TCP. Returns the socket path, or
+# `nothing` for TCP.
+function socket_path(protocol, named_pipe::Bool, host::String, unix_socket::Union{Nothing, String}, read_env::Bool)::Union{Nothing, String}
     kind = protocol_kind(protocol)
-    kind == :default || return kind
-    return named_pipe ? :pipe : :tcp
-end
-
-function require_tcp_transport(protocol; named_pipe::Bool=false)
-    transport = select_transport(protocol; named_pipe=named_pipe)
-    transport == :tcp && return nothing
-    transport == :socket && deferred_keyword(:unix_socket)
-    transport == :pipe && deferred_keyword(:named_pipe)
-    throw(ArgumentError("the `$transport` protocol is not available: the native backend currently supports TCP only"))
+    (kind == :default && named_pipe) && (kind = :pipe)
+    kind == :pipe && deferred_keyword(:named_pipe)
+    kind == :memory && throw(ArgumentError("the `memory` protocol (shared memory) is not available in the native backend"))
+    kind == :tcp && return nothing
+    path = unix_socket !== nothing ? unix_socket : read_env ? get(ENV, "MYSQL_UNIX_PORT", nothing) : nothing
+    (kind == :default && (host != "localhost" || path === nothing)) && return nothing
+    Sys.iswindows() && throw(ArgumentError("Unix sockets are not available on Windows; use protocol=:tcp"))
+    return path === nothing ? DEFAULT_SOCKET : path
 end
 
 # ---- ssl conflict table ----
@@ -491,13 +491,15 @@ function ConnectOptions(host::AbstractString, user::AbstractString, password::Un
     pick(k) = return haskey(kwd, k) && kwd[k] !== nothing ? kwd[k] : get(file, k, nothing)
     host_s = String(host)
     host_s == "" && haskey(file, :host) && (host_s = file[:host])
-    require_tcp_transport(protocol_kind(pick(:protocol)); named_pipe=option_bool_or(get(kwd, :named_pipe, nothing), "named_pipe", false))
     isempty(host_s) && (host_s = "localhost")
+    read_env = option_bool_or(get(kwd, :read_env, nothing), "read_env", false)
+    unix_socket = socket_path(pick(:protocol), option_bool_or(get(kwd, :named_pipe, nothing), "named_pipe", false), host_s,
+        option_string_or_nothing(pick(:unix_socket), "unix_socket"), read_env)
     user_s = String(user)
     user_s == "" && haskey(file, :user) && (user_s = file[:user])
     pw = password === nothing ? (haskey(file, :password) ? file[:password] : nothing) : String(password)
     port_raw = pick(:port)
-    if port_raw === nothing && option_bool_or(get(kwd, :read_env, nothing), "read_env", false) && haskey(ENV, "MYSQL_TCP_PORT")
+    if port_raw === nothing && read_env && haskey(ENV, "MYSQL_TCP_PORT")
         port_raw = ENV["MYSQL_TCP_PORT"]
     end
     port = port_raw === nothing ? DEFAULT_PORT : option_integer(port_raw, "port")
@@ -518,6 +520,13 @@ function ConnectOptions(host::AbstractString, user::AbstractString, password::Un
         enforce_raw !== nothing, enforce_raw === nothing ? false : enforce_raw,
         verify_raw !== nothing, verify_raw === nothing ? false : verify_raw,
         ca_file !== nothing)
+    if unix_socket !== nothing
+        # Reseau runs TLS over TCP only. A local socket needs no encryption, so `:preferred`
+        # connects without TLS, as Connector/C does over a socket.
+        mode == P.SSL_PREFERRED && (mode = P.SSL_DISABLED)
+        mode == P.SSL_DISABLED || throw(ArgumentError("TLS is not available over a Unix socket; use protocol=:tcp for ssl_mode, ssl_ca, or ssl_capath"))
+        pick(:bind) === nothing || throw(ArgumentError("bind applies only to TCP connections, not to a Unix socket"))
+    end
     min_version, max_version = parse_tls_version(option_string_or_nothing(pick(:tls_version), "tls_version"))
     tls = P.TLSOptions(; mode=mode, ca_file=ca_file, ca_dir=ca_dir,
         cert_file=option_string_or_nothing(pick(:ssl_cert), "ssl_cert"),
@@ -590,6 +599,7 @@ function ConnectOptions(host::AbstractString, user::AbstractString, password::Un
     return ConnectOptions(
         host_s,
         port,
+        unix_socket,
         user_s,
         pw,
         db,

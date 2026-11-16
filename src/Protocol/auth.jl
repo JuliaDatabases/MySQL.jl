@@ -17,7 +17,8 @@
                  insecure_cleartext_auth=false)
 
 Connection-level facts and user policy the plugins consult. `secure_transport` is true on
-TLS (any mode); `identity_verified` only under `ssl_mode = :verify_identity`.
+TLS (any mode) and on a local Unix socket; `identity_verified` only under
+`ssl_mode = :verify_identity`.
 """
 struct AuthPolicy
     secure_transport::Bool

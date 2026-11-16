@@ -64,8 +64,8 @@ client certificates), option files (`option_file`, `read_default_file`), timeout
 (`connect_timeout`, `read_timeout`, `write_timeout`), `reconnect`, `multi_statements`,
 `init_command`, decoding policies (`zero_dates`, `time_type`), and
 memory limits (`max_buffered_bytes`); see the
-[documentation](https://mysql.juliadatabases.org/dev/). The transport is TCP or TLS
-(Unix sockets, named pipes, and compression are not supported yet and raise clear errors).
+[documentation](https://mysql.juliadatabases.org/dev/). The transport is TCP, TLS, or a Unix
+socket (named pipes and compression are not supported yet and raise clear errors).
 
 Results use the JuliaData value types: text and BLOB columns are zero-copy
 [DataStrings.jl](https://github.com/JuliaData/DataStrings.jl) `DataString`/`DataBytes`

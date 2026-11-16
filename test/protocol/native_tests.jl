@@ -8,6 +8,28 @@ struct LocalInfileFunctor end
     @test isempty(Test.detect_unbound_args(MySQL))
 end
 
+@testset "Unix socket transport selection" begin
+    if Sys.iswindows()
+        @test_throws ArgumentError N.ConnectOptions("localhost", "u"; unix_socket="/tmp/x.sock")
+        @test_throws ArgumentError N.ConnectOptions("h", "u"; protocol=:socket)
+    else
+        @test N.ConnectOptions("localhost", "u"; unix_socket="/tmp/x.sock").unix_socket == "/tmp/x.sock"
+        @test N.ConnectOptions("", "u"; unix_socket="/tmp/x.sock").unix_socket == "/tmp/x.sock"
+        @test N.ConnectOptions("h", "u"; protocol=:socket).unix_socket == N.DEFAULT_SOCKET
+        @test N.ConnectOptions("h", "u"; protocol="socket", unix_socket="/tmp/x.sock").unix_socket == "/tmp/x.sock"
+        withenv("MYSQL_UNIX_PORT" => "/tmp/env.sock") do
+            @test N.ConnectOptions("localhost", "u"; read_env=true).unix_socket == "/tmp/env.sock"
+            @test N.ConnectOptions("localhost", "u").unix_socket === nothing
+        end
+        # a socket carries no TLS: `:preferred` connects without it, and TLS requirements fail
+        @test N.ConnectOptions("localhost", "u"; unix_socket="/tmp/x.sock").tls.mode == P.SSL_DISABLED
+        @test N.ConnectOptions("localhost", "u"; unix_socket="/tmp/x.sock", ssl_mode=:disabled).tls.mode == P.SSL_DISABLED
+        for kw in ((; ssl_mode=:required), (; ssl_mode=:verify_identity), (; ssl_ca="/tmp/ca.pem"), (; bind="127.0.0.1"))
+            @test_throws ArgumentError N.ConnectOptions("localhost", "u"; unix_socket="/tmp/x.sock", kw...)
+        end
+    end
+end
+
 @testset "Native options truth table" begin
     @test_throws ArgumentError N.ConnectOptions("h", "u"; bogus=1)
     for (name, value) in ((:ssl_cipher, "AES"), (:ssl_crl, "/x"),
@@ -18,24 +40,22 @@ end
     @test_throws ArgumentError N.ConnectOptions("h", "u"; plugin_dir="/x")
     @test N.ConnectOptions("h", "u"; compress=false) isa N.ConnectOptions
     @test_logs (:warn, r"deprecated") N.ConnectOptions("h", "u"; data_truncation=true)
-    @test N.ConnectOptions("h", "u"; unix_socket="/tmp/mysql.sock").host == "h"
+    # a socket path applies only to `localhost`; other hosts are dialed over TCP
+    @test N.ConnectOptions("h", "u"; unix_socket="/tmp/mysql.sock").unix_socket === nothing
     @test_throws ArgumentError N.ConnectOptions("h", "u"; named_pipe=true)
     @test N.ConnectOptions("h", "u"; named_pipe=nothing, protocol=:tcp).host == "h"
-    @test_throws ArgumentError N.ConnectOptions("h", "u"; protocol=:socket)
     @test N.ConnectOptions("h", "u"; named_pipe=true, protocol=:tcp).host == "h"
-    # every host is dialed over TCP; only an explicit local-transport request is (deferred) error
     @test N.ConnectOptions("", "u").host == "localhost"
     @test N.ConnectOptions("localhost", "u").host == "localhost"
     @test N.ConnectOptions("localhost", "u"; protocol=:default).host == "localhost"
     @test N.ConnectOptions("localhost", "u"; protocol="default").host == "localhost"
     @test N.ConnectOptions(".", "u").host == "."
-    @test N.ConnectOptions("localhost", "u"; unix_socket="/tmp/mysql.sock").host == "localhost"
-    @test_throws ArgumentError N.ConnectOptions("localhost", "u"; protocol=:socket)
+    @test N.ConnectOptions("localhost", "u").unix_socket === nothing
+    @test N.ConnectOptions("localhost", "u"; unix_socket="/tmp/x.sock", protocol=:tcp).unix_socket === nothing
     @test_throws ArgumentError N.ConnectOptions("localhost", "u"; protocol=:pipe)
     @test_throws ArgumentError N.ConnectOptions("localhost", "u"; protocol=:memory)
     @test N.ConnectOptions("h", "u"; protocol=:tcp).port == 3306
     @test N.ConnectOptions("h", "u"; protocol="tcp").port == 3306
-    @test_throws ArgumentError N.ConnectOptions("h", "u"; protocol="socket")
     @test_throws ArgumentError N.ConnectOptions("h", "u"; charset_name="latin1")
     @test N.ConnectOptions("h", "u"; charset_name="UTF8MB4").port == 3306
     both = N.ConnectOptions("h", "u"; ssl_ca="a", ssl_capath="b").tls
@@ -219,13 +239,17 @@ end
         @test_throws ArgumentError N.ConnectOptions("h", "u"; option_file=bad)
         socket_protocol = joinpath(dir, "socket.cnf")
         write(socket_protocol, "[client]\nprotocol=socket\n")
-        @test_throws ArgumentError N.ConnectOptions("h", "u"; option_file=socket_protocol)
-        @test N.ConnectOptions("h", "u"; option_file=socket_protocol, protocol=:tcp).host == "h"
-        # a `socket=` path in the file (the stock my.cnf) never selects the deferred transport
+        @test N.ConnectOptions("h", "u"; option_file=socket_protocol, protocol=:tcp).unix_socket === nothing
+        # a `socket=` path in the file (the stock my.cnf) selects the socket for `localhost`
         socket_path = joinpath(dir, "socket-path.cnf")
         write(socket_path, "[client]\nhost=localhost\nsocket=/tmp/mysql-option.sock\n")
-        @test N.ConnectOptions("", "u"; option_file=socket_path).host == "localhost"
-        @test N.ConnectOptions("", "u"; option_file=socket_path, protocol=:tcp).host == "localhost"
+        @test N.ConnectOptions("", "u"; option_file=socket_path, protocol=:tcp).unix_socket === nothing
+        if Sys.iswindows()
+            @test_throws ArgumentError N.ConnectOptions("h", "u"; option_file=socket_protocol)
+        else
+            @test N.ConnectOptions("h", "u"; option_file=socket_protocol).unix_socket == N.DEFAULT_SOCKET
+            @test N.ConnectOptions("", "u"; option_file=socket_path).unix_socket == "/tmp/mysql-option.sock"
+        end
         # A missing explicitly requested file is an error; default locations may be absent.
         @test_throws ArgumentError N.ConnectOptions("h", "u"; option_file=joinpath(dir, "missing.cnf"))
         login = joinpath(dir, ".mylogin.cnf")
@@ -288,7 +312,7 @@ end
 
 function synthetic_reap_entries(n::Int)
     entries = N.ReapEntry[]
-    counters = P.FaultTransport{IOBuffer}[]
+    counters = P.FaultTransport[]
     refs = WeakRef[]
     for _ in 1:n
         transport = P.FaultTransport(IOBuffer())

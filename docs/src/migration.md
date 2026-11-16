@@ -44,11 +44,15 @@ MySQL.jl 2.0 requires **Julia 1.10 or later**.
    `"stmt1; stmt2"` by default (an `if/elseif` bug made 1.x enable it silently).
 4. **Enum-valued options**: pass Symbols — `ssl_mode=:required` (was
    `MySQL.API.SSL_MODE_REQUIRED`), `protocol=:tcp` (was `MySQL.API.MYSQL_PROTOCOL_TCP`).
-5. **Local servers**: every host, `"localhost"` and `""` included, is dialed over TCP (the
-   Connector/C rule that turned `localhost` into a Unix socket is gone). The socket and
-   named-pipe transports are not implemented yet: `protocol=:socket`/`:pipe` or
-   `named_pipe=true` raise a clear error (an explicit `protocol=:tcp` overrides
-   `named_pipe`). A `unix_socket` path is accepted but unused.
+5. **Local servers**: `"localhost"` and `""` are dialed over TCP unless a socket path is
+   given. With a path (the `unix_socket` keyword, `socket` in an option file, or
+   `MYSQL_UNIX_PORT` with `read_env=true`), `localhost` connects through that Unix socket,
+   as with Connector/C. Without a path, Connector/C used `/tmp/mysql.sock`; MySQL.jl uses
+   TCP. `protocol=:socket` always uses a socket, at `/tmp/mysql.sock` when no path is
+   given. TLS is not available over a socket: `ssl_mode=:preferred` connects without it,
+   and a mode or CA option that requires TLS raises an `ArgumentError`. Named pipes are not
+   implemented yet: `protocol=:pipe` or `named_pipe=true` raise a clear error (an explicit
+   `protocol=:tcp` overrides `named_pipe`).
    TCP access also needs a matching account grant. With `skip_name_resolve`, a
    `'user'@'localhost'` grant need not cover `127.0.0.1` or `::1`; see
    [MySQL's host-resolution rules](https://dev.mysql.com/doc/refman/8.0/en/server-system-variables.html#sysvar_skip_name_resolve).
@@ -228,10 +232,9 @@ either `:verify_identity` or `insecure_cleartext_auth=true`.
 Documented gaps, planned for later 2.x releases — attempting to use them raises a clear
 error rather than misbehaving:
 
-- **Unix sockets and Windows named pipes** (transport is TCP/TLS). Every host, including
-  `"localhost"`, is dialed over TCP; asking for the local transport explicitly
-  (`protocol=:socket`/`:pipe`, or `named_pipe=true` without `protocol=:tcp`) raises a clear error, and a `unix_socket`
-  path (keyword or option file) is accepted but unused until the transport exists.
+- **Windows named pipes** and **TLS over a Unix socket**. `protocol=:pipe`, or
+  `named_pipe=true` without `protocol=:tcp`, raises a clear error, and so does a TLS
+  requirement on a socket connection.
 - **Compression** (`compress=true` is an `ArgumentError`), server cursors /
   `COM_STMT_FETCH`, query attributes, `COM_STMT_BULK_EXECUTE`
 - MariaDB `client_ed25519` / PARSEC / `dialog` (PAM) authentication (`UnsupportedAuthError`)

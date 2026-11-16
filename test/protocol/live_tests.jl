@@ -58,7 +58,12 @@ function run_live_lane(ref::String; soak::Bool=false, manifest::Bool=false)
     port = pick_port()
     command = mysql ? ["--mysql-native-password=ON"] : nothing
     env = Dict("MYSQL_ROOT_PASSWORD" => ROOT_PW, "MARIADB_ROOT_PASSWORD" => ROOT_PW)
-    Harbor.with_container(image; tag=tag, ports=Dict(3306 => port), environment=env, command=command, wait_strategy=(port=3306,), wait_timeout=180.0) do _
+    # On Linux the server's socket directory is shared with the host, so a test can connect
+    # through the socket. (Docker Desktop cannot pass a Unix socket through to macOS.)
+    sockdir = mktempdir()
+    chmod(sockdir, 0o777)
+    volumes = Sys.islinux() ? Dict("/var/run/mysqld" => sockdir) : Dict{String, String}()
+    Harbor.with_container(image; tag=tag, ports=Dict(3306 => port), volumes=volumes, environment=env, command=command, wait_strategy=(port=3306,), wait_timeout=180.0) do _
         @testset "$ref" begin
             root = wait_for_native(port)
             @test root.session.server.kind == (mysql ? :mysql : :mariadb)
@@ -71,6 +76,16 @@ function run_live_lane(ref::String; soak::Bool=false, manifest::Bool=false)
             h = N.connect("127.0.0.1", "root", ROOT_PW; port=port, ssl_mode=:disabled, connect_timeout=10)
             @test !P.is_secure_transport(h.session) && h.auth_trace[end] == :ok
             N.close!(h)
+            if Sys.islinux()
+                # A new caching_sha2 account has no cached hash, so MySQL asks for full
+                # authentication, which a local socket answers with the cleartext password.
+                exec!(root, "CREATE USER 'sockuser'@'localhost' IDENTIFIED BY 'sockpw'")
+                h = N.connect("localhost", "sockuser", "sockpw"; unix_socket=joinpath(sockdir, "mysqld.sock"), connect_timeout=10)
+                @test h.session.transport isa P.Reseau.Unix.Conn && h.auth_trace[end] == :ok
+                mysql && @test :full_auth_cleartext in h.auth_trace
+                @test select_strings(h, "SELECT CURRENT_USER()")[1][1] == "sockuser@localhost"
+                N.close!(h)
+            end
             rows = select_strings(root, "SELECT @@character_set_client, @@character_set_connection, @@character_set_results, @@version")
             @test rows[1][1:3] == ["utf8mb4", "utf8mb4", "utf8mb4"]
             @test select_strings(root, "SELECT 'héllo wörld 🐘'")[1][1] == "héllo wörld 🐘"

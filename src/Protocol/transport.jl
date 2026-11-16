@@ -1,6 +1,5 @@
 # Transports the session can own. A concrete union keeps the packet hot path an `isa` split
-# (no abstract-typed field). Unix sockets / named pipes are deferred, so there is no
-# `Sockets` dependency.
+# (no abstract-typed field).
 
 """
     FaultTransport(inner; fail_read_at=-1, fail_write_at=-1, read_error, write_error, after_write_error=nothing, discard_writes=false)
@@ -18,8 +17,8 @@ Test-only transport wrapper that injects faults at byte offsets:
 Byte counters are plain integers (a `FaultTransport` is used from one task); `close_count`
 is atomic because the reaper's timer task may race an explicit close in tests.
 """
-mutable struct FaultTransport{T <: IO} <: IO
-    inner::T
+mutable struct FaultTransport <: IO
+    inner::Union{IOBuffer, Reseau.TCP.Conn}
     read_bytes::Int
     write_bytes::Int
     fail_read_at::Int
@@ -32,14 +31,15 @@ mutable struct FaultTransport{T <: IO} <: IO
     @atomic close_count::Int
 end
 
-function FaultTransport(inner::IO; fail_read_at::Integer=-1, fail_write_at::Integer=-1, read_error::Exception=EOFError(), write_error::Exception=EOFError(), after_write_error::Union{Nothing, Exception}=nothing, discard_writes::Bool=false)
-    return FaultTransport{typeof(inner)}(inner, 0, 0, Int(fail_read_at), Int(fail_write_at), read_error, write_error, after_write_error, false, discard_writes, 0)
+function FaultTransport(inner::Union{IOBuffer, Reseau.TCP.Conn}; fail_read_at::Integer=-1, fail_write_at::Integer=-1, read_error::Exception=EOFError(), write_error::Exception=EOFError(), after_write_error::Union{Nothing, Exception}=nothing, discard_writes::Bool=false)
+    return FaultTransport(inner, 0, 0, Int(fail_read_at), Int(fail_write_at), read_error, write_error, after_write_error, false, discard_writes, 0)
 end
 
-# A closed union of concrete types: the packet hot path stays an `isa` split, `--trim=safe`
-# can resolve every transport operation statically, and no transport type (so no `close`
-# method) can be defined after the reaper's timer task fixes its world age.
-const Transport = Union{Reseau.TCP.Conn, Reseau.TLS.Conn, FaultTransport{IOBuffer}, FaultTransport{Reseau.TCP.Conn}}
+# A closed union of four concrete types, Julia's limit for splitting a union into static
+# calls: the packet hot path stays an `isa` split, `--trim=safe` can resolve every transport
+# operation statically, and no transport type (so no `close` method) can be defined after the
+# reaper's timer task fixes its world age.
+const Transport = Union{Reseau.TCP.Conn, Reseau.TLS.Conn, Reseau.Unix.Conn, FaultTransport}
 
 function Base.unsafe_read(ft::FaultTransport, ptr::Ptr{UInt8}, nbytes::UInt)
     n = Int(nbytes)
@@ -95,7 +95,7 @@ end
 # Whether the packet reader may batch reads through its read buffer (Reseau's `unsafe_read`
 # costs one `recv` per call, so per-packet exact reads dominate large scans; §8.9). The
 # test-only `FaultTransport` stays byte-exact so fault byte offsets remain deterministic.
-supports_buffered_reads(::Union{Reseau.TCP.Conn, Reseau.TLS.Conn}) = return true
+supports_buffered_reads(::Union{Reseau.TCP.Conn, Reseau.Unix.Conn, Reseau.TLS.Conn}) = return true
 supports_buffered_reads(::FaultTransport) = return false
 
 # A socket error on an open connection (a reset or broken pipe; under TLS the cause of a
@@ -108,7 +108,7 @@ supports_buffered_reads(::FaultTransport) = return false
 end
 
 # Reads 1..n available bytes into `buf[offset:end]` (one transport read); 0 means EOF.
-function transport_read_some!(t::Union{Reseau.TCP.Conn, Reseau.TLS.Conn}, buf::Vector{UInt8}, offset::Int, n::Int)
+function transport_read_some!(t::Union{Reseau.TCP.Conn, Reseau.Unix.Conn, Reseau.TLS.Conn}, buf::Vector{UInt8}, offset::Int, n::Int)
     try
         return Base.readbytes!(t, view(buf, offset:lastindex(buf)), n; all=false)
     catch err
@@ -152,6 +152,11 @@ function set_read_deadline!(t::Reseau.TCP.Conn, deadline_ns::Integer)
     return nothing
 end
 
+function set_read_deadline!(t::Reseau.Unix.Conn, deadline_ns::Integer)
+    Reseau.Unix.set_read_deadline!(t, deadline_ns)
+    return nothing
+end
+
 function set_read_deadline!(t::Reseau.TLS.Conn, deadline_ns::Integer)
     Reseau.TLS.set_read_deadline!(t, deadline_ns)
     return nothing
@@ -164,6 +169,11 @@ end
 
 function set_write_deadline!(t::Reseau.TCP.Conn, deadline_ns::Integer)
     Reseau.TCP.set_write_deadline!(t, deadline_ns)
+    return nothing
+end
+
+function set_write_deadline!(t::Reseau.Unix.Conn, deadline_ns::Integer)
+    Reseau.Unix.set_write_deadline!(t, deadline_ns)
     return nothing
 end
 
