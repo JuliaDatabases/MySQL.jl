@@ -314,9 +314,7 @@ function connect(opts::ConnectOptions)
         P.read_greeting!(s)
         secure = P.starttls!(s, opts.tls, opts.host; handshake_timeout_ns=deadline == 0 ? 0 : remaining_ns(deadline))
         (secure && deadline != 0) && apply_deadline!(s.transport, deadline)
-        # Like TLS, a local socket keeps a cleartext password off the network.
-        local_socket = opts.unix_socket !== nothing
-        policy = P.AuthPolicy(opts.auth.secure_transport || secure || local_socket, secure && opts.tls.mode == P.SSL_VERIFY_IDENTITY, opts.auth.server_public_key, opts.auth.get_server_public_key, opts.auth.enable_cleartext_plugin, opts.auth.insecure_cleartext_auth)
+        policy = P.AuthPolicy(opts.auth.secure_transport || secure, secure && opts.tls.mode == P.SSL_VERIFY_IDENTITY, opts.auth.server_public_key, opts.auth.get_server_public_key, opts.auth.enable_cleartext_plugin, opts.auth.insecure_cleartext_auth, opts.unix_socket !== nothing)
         trace = Symbol[]
         ok = P.authenticate!(s, opts.user, opts.password, policy; db=opts.db, attrs=opts.attrs, default_auth=opts.default_auth, trace=trace)
         bootstrapped = try

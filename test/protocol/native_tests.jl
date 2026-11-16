@@ -9,14 +9,18 @@ struct LocalInfileFunctor end
 end
 
 @testset "Unix socket transport selection" begin
+    # a socket reaches only the local server
+    @test_throws ArgumentError N.ConnectOptions("h", "u"; protocol=:socket)
+    @test_throws ArgumentError N.ConnectOptions("127.0.0.1", "u"; protocol="socket", unix_socket="/tmp/x.sock")
     if Sys.iswindows()
-        @test_throws ArgumentError N.ConnectOptions("localhost", "u"; unix_socket="/tmp/x.sock")
-        @test_throws ArgumentError N.ConnectOptions("h", "u"; protocol=:socket)
+        # as with Connector/C, `localhost` with a socket path stays on TCP on Windows
+        @test N.ConnectOptions("localhost", "u"; unix_socket="/tmp/x.sock").unix_socket === nothing
+        @test_throws ArgumentError N.ConnectOptions("localhost", "u"; protocol=:socket)
     else
         @test N.ConnectOptions("localhost", "u"; unix_socket="/tmp/x.sock").unix_socket == "/tmp/x.sock"
         @test N.ConnectOptions("", "u"; unix_socket="/tmp/x.sock").unix_socket == "/tmp/x.sock"
-        @test N.ConnectOptions("h", "u"; protocol=:socket).unix_socket == N.DEFAULT_SOCKET
-        @test N.ConnectOptions("h", "u"; protocol="socket", unix_socket="/tmp/x.sock").unix_socket == "/tmp/x.sock"
+        @test N.ConnectOptions("localhost", "u"; protocol=:socket).unix_socket == N.DEFAULT_SOCKET
+        @test N.ConnectOptions("localhost", "u"; protocol="socket", unix_socket="/tmp/x.sock").unix_socket == "/tmp/x.sock"
         withenv("MYSQL_UNIX_PORT" => "/tmp/env.sock") do
             @test N.ConnectOptions("localhost", "u"; read_env=true).unix_socket == "/tmp/env.sock"
             @test N.ConnectOptions("localhost", "u").unix_socket === nothing
@@ -244,10 +248,11 @@ end
         socket_path = joinpath(dir, "socket-path.cnf")
         write(socket_path, "[client]\nhost=localhost\nsocket=/tmp/mysql-option.sock\n")
         @test N.ConnectOptions("", "u"; option_file=socket_path, protocol=:tcp).unix_socket === nothing
+        @test_throws ArgumentError N.ConnectOptions("h", "u"; option_file=socket_protocol)
         if Sys.iswindows()
-            @test_throws ArgumentError N.ConnectOptions("h", "u"; option_file=socket_protocol)
+            @test N.ConnectOptions("", "u"; option_file=socket_path).unix_socket === nothing
         else
-            @test N.ConnectOptions("h", "u"; option_file=socket_protocol).unix_socket == N.DEFAULT_SOCKET
+            @test N.ConnectOptions("localhost", "u"; option_file=socket_protocol).unix_socket == N.DEFAULT_SOCKET
             @test N.ConnectOptions("", "u"; option_file=socket_path).unix_socket == "/tmp/mysql-option.sock"
         end
         # A missing explicitly requested file is an error; default locations may be absent.

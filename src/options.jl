@@ -191,20 +191,21 @@ end
     return p
 end
 
-# Transport selection, as in Connector/C. `protocol=:socket` uses a Unix socket, and with the
-# default protocol `localhost` uses one when a socket path is given: the `unix_socket`
-# keyword, `socket` in an option file, or `MYSQL_UNIX_PORT` with `read_env=true`. Every other
-# host, and `localhost` without a path, is dialed over TCP. Returns the socket path, or
-# `nothing` for TCP.
-function socket_path(protocol, named_pipe::Bool, host::String, unix_socket::Union{Nothing, String}, read_env::Bool)::Union{Nothing, String}
-    kind = protocol_kind(protocol)
+# Transport selection, as in Connector/C. A Unix socket reaches only the local server, so it
+# needs host `localhost`. `protocol=:socket` uses one, and with the default protocol
+# `localhost` uses one when a socket path is given: the `unix_socket` keyword, `socket` in an
+# option file, or `MYSQL_UNIX_PORT` with `read_env=true`. Every other host, `localhost`
+# without a path, and any default-protocol connection on Windows are dialed over TCP.
+# Returns the socket path, or `nothing` for TCP.
+function socket_path(kind::Symbol, named_pipe::Bool, host::String, unix_socket::Union{Nothing, String}, read_env::Bool)::Union{Nothing, String}
     (kind == :default && named_pipe) && (kind = :pipe)
     kind == :pipe && deferred_keyword(:named_pipe)
     kind == :memory && throw(ArgumentError("the `memory` protocol (shared memory) is not available in the native backend"))
     kind == :tcp && return nothing
     path = unix_socket !== nothing ? unix_socket : read_env ? get(ENV, "MYSQL_UNIX_PORT", nothing) : nothing
-    (kind == :default && (host != "localhost" || path === nothing)) && return nothing
+    (kind == :default && (Sys.iswindows() || host != "localhost" || path === nothing)) && return nothing
     Sys.iswindows() && throw(ArgumentError("Unix sockets are not available on Windows; use protocol=:tcp"))
+    host == "localhost" || throw(ArgumentError("protocol=:socket connects to the local server, so the host must be \"localhost\", not $(repr(host))"))
     return path === nothing ? DEFAULT_SOCKET : path
 end
 
@@ -493,7 +494,7 @@ function ConnectOptions(host::AbstractString, user::AbstractString, password::Un
     host_s == "" && haskey(file, :host) && (host_s = file[:host])
     isempty(host_s) && (host_s = "localhost")
     read_env = option_bool_or(get(kwd, :read_env, nothing), "read_env", false)
-    unix_socket = socket_path(pick(:protocol), option_bool_or(get(kwd, :named_pipe, nothing), "named_pipe", false), host_s,
+    unix_socket = socket_path(protocol_kind(pick(:protocol)), option_bool_or(get(kwd, :named_pipe, nothing), "named_pipe", false), host_s,
         option_string_or_nothing(pick(:unix_socket), "unix_socket"), read_env)
     user_s = String(user)
     user_s == "" && haskey(file, :user) && (user_s = file[:user])

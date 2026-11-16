@@ -137,8 +137,8 @@ raise `ArgumentError` unless their value is `nothing` or `false`.
 |---|---|---|
 | `db` | `""` | default database (`USE`) |
 | `port` | `3306` | TCP port; omitted/`nothing` uses file or opt-in environment defaults; `0` explicitly selects 3306 |
-| `protocol` | `:default` | `:tcp`, `:socket` (a Unix socket, `/tmp/mysql.sock` without `unix_socket`), or the deferred `:pipe` (it raises a clear error) |
-| `unix_socket` | `nothing` | Unix socket path, used instead of TCP when the host is `"localhost"`; TLS is not available over a socket |
+| `protocol` | `:default` | `:tcp`, `:socket` (a Unix socket for host `"localhost"`, `/tmp/mysql.sock` without `unix_socket`), or the deferred `:pipe` (it raises a clear error) |
+| `unix_socket` | `nothing` | Unix socket path, used instead of TCP when the host is `"localhost"` (not on Windows); TLS is not available over a socket |
 | `bind` | `nothing` | local interface/address to connect from |
 | `connect_timeout` | `nothing` | positive integer seconds for the whole establishment (dial, TLS, authentication, charset bootstrap) |
 | `read_timeout`, `write_timeout` | `nothing` | positive integer seconds per transport read/write; expiry closes the connection |

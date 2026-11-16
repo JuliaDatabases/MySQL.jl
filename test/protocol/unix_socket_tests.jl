@@ -39,9 +39,9 @@ function socket_peer_connect!(conn)
 end
 
 Sys.iswindows() || @testset "Unix socket transport" begin
-    for (host, kw) in (("localhost", (;)), ("127.0.0.1", (; protocol=:socket)))
+    for kw in ((;), (; protocol=:socket))
         with_unix_server(socket_peer_connect!) do path
-            h = N.connect(host, "root", "pw"; unix_socket=path, connect_timeout=10, kw...)
+            h = N.connect("localhost", "root", "pw"; unix_socket=path, connect_timeout=10, kw...)
             @test h.session.transport isa Reseau.Unix.Conn
             @test !P.is_secure_transport(h.session) && :full_auth_cleartext in h.auth_trace
             N.close!(h)
@@ -49,4 +49,14 @@ Sys.iswindows() || @testset "Unix socket transport" begin
     end
     missing_path = joinpath(mktempdir(), "missing.sock")
     @test_throws SystemError N.connect("localhost", "root", "pw"; unix_socket=missing_path, connect_timeout=10)
+end
+
+@testset "a Unix socket is secure for caching_sha2_password only" begin
+    # The server accepts a cleartext password over a socket for caching_sha2_password, but
+    # sha256_password requires TLS, so it still asks for the server's RSA key.
+    pw = Vector{UInt8}(codeunits("pw"))
+    nonce = collect(UInt8, 1:20)
+    socket = P.AuthPolicy(; local_socket=true, get_server_public_key=true)
+    @test P.step!(P.AuthState(P.CachingSha2Password(), nonce), UInt8[P.CACHING_SHA2_PERFORM_FULL_AUTH], pw, socket) == vcat(pw, 0x00)
+    @test P.initial_response(P.Sha256Password(), pw, nonce, socket) == [P.SHA256_REQUEST_PUBLIC_KEY]
 end

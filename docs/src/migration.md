@@ -48,9 +48,10 @@ MySQL.jl 2.0 requires **Julia 1.10 or later**.
    given. With a path (the `unix_socket` keyword, `socket` in an option file, or
    `MYSQL_UNIX_PORT` with `read_env=true`), `localhost` connects through that Unix socket,
    as with Connector/C. Without a path, Connector/C used `/tmp/mysql.sock`; MySQL.jl uses
-   TCP. `protocol=:socket` always uses a socket, at `/tmp/mysql.sock` when no path is
-   given. TLS is not available over a socket: `ssl_mode=:preferred` connects without it,
-   and a mode or CA option that requires TLS raises an `ArgumentError`. Named pipes are not
+   TCP. On Windows, `localhost` always uses TCP. `protocol=:socket` uses a socket, at
+   `/tmp/mysql.sock` when no path is given, and requires host `localhost`. TLS is not
+   available over a socket: `ssl_mode=:preferred` connects without it, and a mode or CA
+   option that requires TLS raises an `ArgumentError`. Named pipes are not
    implemented yet: `protocol=:pipe` or `named_pipe=true` raise a clear error (an explicit
    `protocol=:tcp` overrides `named_pipe`).
    TCP access also needs a matching account grant. With `skip_name_resolve`, a

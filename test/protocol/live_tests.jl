@@ -85,6 +85,14 @@ function run_live_lane(ref::String; soak::Bool=false, manifest::Bool=false)
                 mysql && @test :full_auth_cleartext in h.auth_trace
                 @test select_strings(h, "SELECT CURRENT_USER()")[1][1] == "sockuser@localhost"
                 N.close!(h)
+                if mysql
+                    # sha256_password accepts a cleartext password only over TLS, so over a
+                    # socket the client must use the server's RSA key.
+                    exec!(root, "CREATE USER 'shauser'@'localhost' IDENTIFIED WITH sha256_password BY 'shapw'")
+                    h = N.connect("localhost", "shauser", "shapw"; unix_socket=joinpath(sockdir, "mysqld.sock"), get_server_public_key=true, connect_timeout=10)
+                    @test :rsa_response in h.auth_trace && h.auth_trace[end] == :ok
+                    N.close!(h)
+                end
             end
             rows = select_strings(root, "SELECT @@character_set_client, @@character_set_connection, @@character_set_results, @@version")
             @test rows[1][1:3] == ["utf8mb4", "utf8mb4", "utf8mb4"]
