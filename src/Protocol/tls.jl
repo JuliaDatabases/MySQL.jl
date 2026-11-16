@@ -33,26 +33,38 @@ ssl_mode_string(str::String)::SSLMode = return ssl_mode_named(Symbol(replace(low
 end
 
 """
-    TLSOptions(; mode=SSL_PREFERRED, ca_file=nothing, cert_file=nothing, key_file=nothing,
-                 server_name=nothing, min_version=nothing, max_version=nothing)
+    TLSOptions(; mode=SSL_PREFERRED, ca_file=nothing, ca_dir=nothing, cert_file=nothing, key_file=nothing,
+                 key_passphrase=nothing, server_name=nothing, min_version=nothing, max_version=nothing)
 
-`ca_file` may be a bundle or a hashed CA directory (Reseau accepts both); `cert_file`/`key_file`
-enable mutual TLS; `server_name` overrides the SNI/verification name derived from the host.
+`ca_file` may be a bundle or a CA directory (Reseau accepts both); `ca_dir` is a CA directory
+trusted together with `ca_file`. `cert_file`/`key_file` enable mutual TLS, and `key_passphrase`
+unlocks an encrypted `key_file`. `server_name` overrides the SNI/verification name derived
+from the host. `show` never prints the passphrase.
 """
 struct TLSOptions
     mode::SSLMode
     ca_file::Union{Nothing, String}
+    ca_dir::Union{Nothing, String}
     cert_file::Union{Nothing, String}
     key_file::Union{Nothing, String}
+    key_passphrase::Union{Nothing, String}
     server_name::Union{Nothing, String}
     min_version::Union{Nothing, UInt16}
     max_version::Union{Nothing, UInt16}
 end
 
-function TLSOptions(; mode=SSL_PREFERRED, ca_file=nothing, cert_file=nothing, key_file=nothing, server_name=nothing, min_version=nothing, max_version=nothing)
+function TLSOptions(; mode=SSL_PREFERRED, ca_file=nothing, ca_dir=nothing, cert_file=nothing, key_file=nothing, key_passphrase=nothing, server_name=nothing, min_version=nothing, max_version=nothing)
     xor(cert_file === nothing, key_file === nothing) && throw(ArgumentError("ssl_cert and ssl_key must be provided together"))
     m = ssl_mode(mode)
-    return TLSOptions(m, ca_file === nothing ? nothing : String(ca_file), cert_file === nothing ? nothing : String(cert_file), key_file === nothing ? nothing : String(key_file), server_name === nothing ? nothing : String(server_name), min_version, max_version)
+    str(x) = x === nothing ? nothing : String(x)
+    return TLSOptions(m, str(ca_file), str(ca_dir), str(cert_file), str(key_file), str(key_passphrase), str(server_name), min_version, max_version)
+end
+
+function Base.show(io::IO, o::TLSOptions)
+    print(io, "TLSOptions(mode=", o.mode, ", ca_file=", repr(o.ca_file), ", ca_dir=", repr(o.ca_dir),
+        ", cert_file=", repr(o.cert_file), ", key_file=", repr(o.key_file),
+        ", key_passphrase=", o.key_passphrase === nothing ? "nothing" : "\"…\"", ", server_name=", repr(o.server_name), ")")
+    return nothing
 end
 
 is_ip_literal(host::AbstractString) = return occursin(r"^\d{1,3}(\.\d{1,3}){3}$", host) || occursin(':', host)
@@ -70,20 +82,27 @@ end
 
 # Reseau's `Config` constructors take `Union{Nothing, ...}` arguments, and a call whose
 # arguments are still unions is not statically resolvable under `--trim=safe`. The nested
-# `=== nothing` branches below narrow each optional (SNI name, the client cert/key pair,
-# the CA file) to a concrete type before the one positional `Config` call in each leaf.
-@inline function tls_config_leaf(sn::Union{Nothing, String}, vp::Bool, vh::Bool, cf::Union{Nothing, String}, kf::Union{Nothing, String}, caf::Union{Nothing, String}, hs::Int64, minv::UInt16, maxv::UInt16)
-    return Reseau.TLS.Config(sn, vp, vh, Reseau.TLS.ClientAuthMode.NoClientCert, cf, kf, caf, nothing, String[], UInt16[], hs, minv, maxv, false)
+# `=== nothing` branches below narrow each optional (SNI name, the client cert/key pair and
+# its passphrase, the CA file and directory) to a concrete type before the one positional
+# `Config` call in each leaf.
+@inline function tls_config_leaf(sn::Union{Nothing, String}, vp::Bool, vh::Bool, cf::Union{Nothing, String}, kf::Union{Nothing, String}, kp::Union{Nothing, String}, caf::Union{Nothing, String}, cad::Union{Nothing, String}, hs::Int64, minv::UInt16, maxv::UInt16)
+    return Reseau.TLS.Config(sn, vp, vh, Reseau.TLS.ClientAuthMode.NoClientCert, cf, kf, caf, nothing, String[], UInt16[], hs, minv, maxv, false, 64, nothing, cad, nothing, kp)
 end
 
-@inline function tls_config_ca(sn, vp::Bool, vh::Bool, cf, kf, caf::Union{Nothing, String}, hs::Int64, minv::UInt16, maxv::UInt16)
-    caf === nothing && return tls_config_leaf(sn, vp, vh, cf, kf, nothing, hs, minv, maxv)
-    return tls_config_leaf(sn, vp, vh, cf, kf, caf, hs, minv, maxv)
+@inline function tls_config_cadir(sn, vp::Bool, vh::Bool, cf, kf, kp, caf, cad::Union{Nothing, String}, hs::Int64, minv::UInt16, maxv::UInt16)
+    cad === nothing && return tls_config_leaf(sn, vp, vh, cf, kf, kp, caf, nothing, hs, minv, maxv)
+    return tls_config_leaf(sn, vp, vh, cf, kf, kp, caf, cad, hs, minv, maxv)
 end
 
-@inline function tls_config_cert(sn, vp::Bool, vh::Bool, cf::Union{Nothing, String}, kf::Union{Nothing, String}, caf, hs::Int64, minv::UInt16, maxv::UInt16)
-    (cf === nothing || kf === nothing) && return tls_config_ca(sn, vp, vh, nothing, nothing, caf, hs, minv, maxv)
-    return tls_config_ca(sn, vp, vh, cf, kf, caf, hs, minv, maxv)
+@inline function tls_config_ca(sn, vp::Bool, vh::Bool, cf, kf, kp, caf::Union{Nothing, String}, cad, hs::Int64, minv::UInt16, maxv::UInt16)
+    caf === nothing && return tls_config_cadir(sn, vp, vh, cf, kf, kp, nothing, cad, hs, minv, maxv)
+    return tls_config_cadir(sn, vp, vh, cf, kf, kp, caf, cad, hs, minv, maxv)
+end
+
+@inline function tls_config_cert(sn, vp::Bool, vh::Bool, cf::Union{Nothing, String}, kf::Union{Nothing, String}, kp::Union{Nothing, String}, caf, cad, hs::Int64, minv::UInt16, maxv::UInt16)
+    (cf === nothing || kf === nothing) && return tls_config_ca(sn, vp, vh, nothing, nothing, nothing, caf, cad, hs, minv, maxv)
+    kp === nothing && return tls_config_ca(sn, vp, vh, cf, kf, nothing, caf, cad, hs, minv, maxv)
+    return tls_config_ca(sn, vp, vh, cf, kf, kp, caf, cad, hs, minv, maxv)
 end
 
 function tls_config(opts::TLSOptions, host::AbstractString, handshake_timeout_ns::Integer)
@@ -93,8 +112,8 @@ function tls_config(opts::TLSOptions, host::AbstractString, handshake_timeout_ns
     hs = max(Int64(0), Int64(handshake_timeout_ns))
     minv = opts.min_version === nothing ? Reseau.TLS.TLS1_2_VERSION : opts.min_version
     maxv = opts.max_version === nothing ? Reseau.TLS.TLS1_3_VERSION : opts.max_version
-    sn === nothing && return tls_config_cert(nothing, verify_peer, verify_hostname, opts.cert_file, opts.key_file, opts.ca_file, hs, minv, maxv)
-    return tls_config_cert(sn, verify_peer, verify_hostname, opts.cert_file, opts.key_file, opts.ca_file, hs, minv, maxv)
+    sn === nothing && return tls_config_cert(nothing, verify_peer, verify_hostname, opts.cert_file, opts.key_file, opts.key_passphrase, opts.ca_file, opts.ca_dir, hs, minv, maxv)
+    return tls_config_cert(sn, verify_peer, verify_hostname, opts.cert_file, opts.key_file, opts.key_passphrase, opts.ca_file, opts.ca_dir, hs, minv, maxv)
 end
 
 raw_tcp(t::Reseau.TCP.Conn) = return t

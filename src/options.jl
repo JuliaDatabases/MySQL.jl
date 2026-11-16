@@ -61,7 +61,6 @@ const UNAVAILABLE_KEYWORDS = Dict{Symbol, String}(
     :ssl_cipher => "cipher selection requires transport support that Reseau does not expose yet",
     :ssl_crl => "certificate-revocation lists require transport support that Reseau does not expose yet",
     :ssl_crlpath => "certificate-revocation lists require transport support that Reseau does not expose yet",
-    :passphrase => "encrypted private-key passphrases require transport support that Reseau does not expose yet",
     :compress => "the compressed-packet protocol layer is planned for a later 2.x release",
 )
 
@@ -509,8 +508,8 @@ function ConnectOptions(host::AbstractString, user::AbstractString, password::Un
     lowercase(charset) == UTF8MB4 || throw(ArgumentError("only charset_name=\"utf8mb4\" is supported by the native backend"))
     ssl_ca = option_string_or_nothing(pick(:ssl_ca), "ssl_ca")
     ssl_capath = option_string_or_nothing(pick(:ssl_capath), "ssl_capath")
-    (ssl_ca !== nothing && ssl_capath !== nothing) && throw(ArgumentError("ssl_ca and ssl_capath cannot be combined yet (Reseau takes a single trust root); pass one of them"))
-    ca_file = ssl_ca !== nothing ? ssl_ca : ssl_capath
+    # With both, the bundle and the directory are trusted together.
+    ca_file, ca_dir = ssl_ca === nothing ? (ssl_capath, nothing) : (ssl_ca, ssl_capath)
     ssl_mode_kw = get(kwd, :ssl_mode, nothing)
     enforce_raw = option_bool_or_nothing(get(kwd, :ssl_enforce, nothing), "ssl_enforce")
     verify_raw = option_bool_or_nothing(get(kwd, :ssl_verify_server_cert, nothing), "ssl_verify_server_cert")
@@ -520,9 +519,10 @@ function ConnectOptions(host::AbstractString, user::AbstractString, password::Un
         verify_raw !== nothing, verify_raw === nothing ? false : verify_raw,
         ca_file !== nothing)
     min_version, max_version = parse_tls_version(option_string_or_nothing(pick(:tls_version), "tls_version"))
-    tls = P.TLSOptions(; mode=mode, ca_file=ca_file,
+    tls = P.TLSOptions(; mode=mode, ca_file=ca_file, ca_dir=ca_dir,
         cert_file=option_string_or_nothing(pick(:ssl_cert), "ssl_cert"),
         key_file=option_string_or_nothing(pick(:ssl_key), "ssl_key"),
+        key_passphrase=option_string_or_nothing(get(kwd, :passphrase, nothing), "passphrase"),
         server_name=option_string_or_nothing(get(kwd, :ssl_server_name, nothing), "ssl_server_name"),
         min_version=min_version, max_version=max_version)
     default_auth = option_string_or_nothing(get(kwd, :default_auth, nothing), "default_auth")
