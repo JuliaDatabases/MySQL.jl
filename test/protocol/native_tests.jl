@@ -11,7 +11,7 @@ end
 @testset "Native options truth table" begin
     @test_throws ArgumentError N.ConnectOptions("h", "u"; bogus=1)
     for (name, value) in ((:ssl_cipher, "AES"), (:ssl_crl, "/x"),
-            (:ssl_crlpath, "/x"), (:passphrase, "secret"), (:compress, true))
+            (:ssl_crlpath, "/x"), (:compress, true))
         err = try; N.ConnectOptions("h", "u"; name => value); nothing; catch e; e; end
         @test err isa ArgumentError && occursin("not available in MySQL.jl 2.0", err.msg)
     end
@@ -38,7 +38,11 @@ end
     @test_throws ArgumentError N.ConnectOptions("h", "u"; protocol="socket")
     @test_throws ArgumentError N.ConnectOptions("h", "u"; charset_name="latin1")
     @test N.ConnectOptions("h", "u"; charset_name="UTF8MB4").port == 3306
-    @test_throws ArgumentError N.ConnectOptions("h", "u"; ssl_ca="a", ssl_capath="b")
+    both = N.ConnectOptions("h", "u"; ssl_ca="a", ssl_capath="b").tls
+    @test both.ca_file == "a" && both.ca_dir == "b"
+    secret = N.ConnectOptions("h", "u"; ssl_cert="c", ssl_key="k", passphrase="hunter2")
+    @test secret.tls.key_passphrase == "hunter2"
+    @test !occursin("hunter2", sprint(show, secret.tls)) && !occursin("hunter2", sprint(show, secret))
     @test N.ConnectOptions("h", "u"; ssl_capath="/etc/ssl/certs").tls.ca_file == "/etc/ssl/certs"
     @test_throws ArgumentError N.ConnectOptions("h", "u"; local_files=true)
     @test N.ConnectOptions("h", "u"; local_files=true, local_infile_handler=identity).client_flags & P.CLIENT_LOCAL_FILES != 0

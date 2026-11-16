@@ -116,7 +116,7 @@ Deliberate, documented changes relative to Connector/C 1.6.0:
 | `local_files=true` | accepted without a handler | requires `local_infile_handler`, otherwise `ArgumentError` at connect; a server upload request without a configured handler is a `ProtocolError` |
 | Unknown keywords | silently swallowed | `ArgumentError` |
 | `ssl_mode` | #240: enum collision, `SSL_MODE_DISABLED` unimplementable | five real modes; default `:preferred`; explicit `ssl_mode` wins over `ssl_enforce`/`ssl_verify_server_cert`/CA-material escalation; contradictions are `ArgumentError`s; **no plaintext fallback after a failed TLS handshake** |
-| `ssl_ca` + `ssl_capath` together | both applied | `ArgumentError` (Reseau has a single trust-root source); each alone works |
+| `ssl_ca` + `ssl_capath` together | both applied | both applied |
 | `connect_timeout` | C socket timeout with platform-dependent meaning | one monotonic establishment deadline spanning dial, greeting, TLS, the whole auth exchange, and the charset bootstrap |
 | `read_timeout` / `write_timeout` | `MYSQL_OPT_READ_TIMEOUT`/`MYSQL_OPT_WRITE_TIMEOUT`: per socket operation | same meaning: re-armed before every transport read/write, so a slowly-consumed streaming result never expires while the server keeps answering; expiry closes the connection |
 | `reconnect` | C auto-reconnect | the same contract, made explicit: the command that hits a dead connection reports it (`MySQL.Error` 2006/2013), and the *next* command reconnects — only before a send, never mid-command, never inside a transaction; a reconnect that itself fails leaves the connection retryable, not closed |
@@ -155,7 +155,7 @@ Deliberate, documented changes relative to Connector/C 1.6.0:
 
 ## Temporarily unavailable (compatibility names are reserved)
 
-- `ssl_cipher`, `ssl_crl`, `ssl_crlpath`, and `passphrase` need matching transport support
+- `ssl_cipher`, `ssl_crl`, and `ssl_crlpath` need matching transport support
   in Reseau. MySQL.jl keeps these option names reserved and reports that they are not
   available in 2.0; it does not silently ignore recognized option-file forms, and the
   options are not declared permanently removed.

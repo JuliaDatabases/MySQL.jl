@@ -208,6 +208,37 @@ end
         @test_throws ArgumentError N.ConnectOptions("h", "u"; ssl_cert=certfile("client.crt"))
     end
 
+    @testset "passphrase unlocks an encrypted client key" begin
+        cfg = server_config(; client_auth=TLS.ClientAuthMode.RequireAndVerifyClientCert, client_ca_file=certfile("ca.crt"))
+        mtls = (; ssl_mode=:verify_ca, ssl_ca=certfile("ca.crt"), ssl_cert=certfile("client.crt"), ssl_key=certfile("client-encrypted.key"))
+        with_server(conn -> (try; tls_peer_connect!(conn; cfg=cfg); catch; end)) do port
+            h = native_connect(port; mtls..., passphrase="mysql-jl-test")
+            @test P.is_secure_transport(h.session)
+            N.close!(h)
+        end
+        for passphrase in ("wrong", nothing)
+            with_server(conn -> (try; tls_peer_connect!(conn; cfg=cfg); catch; end)) do port
+                err = try; native_connect(port; mtls..., passphrase); nothing; catch e; e; end
+                @test err isa P.TLSNegotiationError
+            end
+        end
+    end
+
+    @testset "ssl_ca and ssl_capath are trusted together" begin
+        # The bundle holds an unrelated root; only the directory holds the server's CA.
+        capath = mktempdir()
+        cp(certfile("ca.crt"), joinpath(capath, "ca.crt"))
+        with_server(conn -> (try; tls_peer_connect!(conn); catch; end)) do port
+            h = native_connect(port; ssl_mode=:verify_ca, ssl_ca=certfile("selfsigned.crt"), ssl_capath=capath)
+            @test P.is_secure_transport(h.session)
+            N.close!(h)
+        end
+        with_server(conn -> (try; tls_peer_connect!(conn); catch; end)) do port
+            err = try; native_connect(port; ssl_mode=:verify_ca, ssl_ca=certfile("selfsigned.crt")); nothing; catch e; e; end
+            @test err isa P.TLSNegotiationError
+        end
+    end
+
     @testset "an abandoned TLS handle is reclaimed by the reaper" begin
         with_server(conn -> tls_peer_connect!(conn; after=stall_until_eof)) do port
             handle_ref, transport_ref, entry = abandon_tls_handle(port)

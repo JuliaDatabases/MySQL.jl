@@ -166,8 +166,9 @@ raise `ArgumentError` unless their value is `nothing` or `false`.
 | keyword | default | meaning |
 |---|---|---|
 | `ssl_mode` | `:preferred` | `:disabled`, `:preferred` (TLS when offered, no fallback after a failed handshake), `:required`, `:verify_ca`, `:verify_identity`; only the last two authenticate the server |
-| `ssl_ca` / `ssl_capath` | `nothing` | CA bundle file / hashed CA directory (one of them); supplying one raises the default mode to `:verify_ca` |
+| `ssl_ca` / `ssl_capath` | `nothing` | CA bundle file / CA directory; with both, both are trusted; supplying either raises the default mode to `:verify_ca` |
 | `ssl_cert`, `ssl_key` | `nothing` | client certificate and key (mutual TLS) |
+| `passphrase` | `nothing` | passphrase for an encrypted `ssl_key`; it is never printed |
 | `ssl_server_name` | host | the name used for SNI and certificate verification |
 | `tls_version` | TLS 1.2 and 1.3 | e.g. `"TLSv1.3"` |
 | `ssl_enforce`, `ssl_verify_server_cert` | `nothing` | `true` requires TLS / identity verification; `false` does not lower the mode; contradictions with an explicit keyword `ssl_mode` are errors |

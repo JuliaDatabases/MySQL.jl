@@ -12,6 +12,7 @@ gen_leaf() { # name subject san extendedKeyUsage
 gen_leaf server "/CN=localhost" "DNS:localhost,IP:127.0.0.1" serverAuth
 gen_leaf server-dnsonly "/CN=localhost" "DNS:localhost" serverAuth
 gen_leaf client "/CN=mysql-jl-client" "DNS:client.invalid" clientAuth
+openssl pkcs8 -topk8 -v2 aes-256-cbc -in client.key -out client-encrypted.key -passout pass:mysql-jl-test
 openssl req -x509 -newkey rsa:2048 -nodes -sha256 -days 3650 -keyout selfsigned.key -out selfsigned.crt \
   -subj "/CN=localhost" -addext "subjectAltName=DNS:localhost,IP:127.0.0.1" 2>/dev/null
 for bits in 2048 3072 4096; do
