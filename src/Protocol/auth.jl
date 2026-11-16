@@ -1,12 +1,12 @@
 # Authentication plugins and the authentication exchange.
 #
-# Per-plugin transport-security rules (TCP only; Unix sockets/named pipes are deferred):
+# Per-plugin transport-security rules, as the server applies them:
 #
-# | plugin step                          | TLS (any mode)                         | plain TCP            |
-# |--------------------------------------|----------------------------------------|----------------------|
-# | caching_sha2 full auth (cleartext)   | allowed                                | RSA path (opt-in)    |
-# | sha256 full auth (cleartext)         | allowed                                | RSA path (opt-in)    |
-# | mysql_clear_password                 | :verify_identity only, else opt-in     | opt-in only          |
+# | plugin step                        | TLS (any mode)                     | Unix socket       | plain TCP         |
+# |------------------------------------|------------------------------------|-------------------|-------------------|
+# | caching_sha2 full auth (cleartext) | allowed                            | allowed           | RSA path (opt-in) |
+# | sha256 full auth (cleartext)       | allowed                            | RSA path (opt-in) | RSA path (opt-in) |
+# | mysql_clear_password               | :verify_identity only, else opt-in | opt-in only       | opt-in only       |
 #
 # The RSA path needs `server_public_key` (PEM) or `get_server_public_key=true`; the cleartext
 # plugin needs explicit enablement (`enable_cleartext_plugin` or `default_auth`).
@@ -180,7 +180,7 @@ cleartext_password(password::AbstractVector{UInt8}) = return nul_terminated_pass
 
 # ---- policy ----
 
-@noinline rsa_unavailable(plugin::String) = return throw(AuthError("$plugin requires a secure connection for full authentication; over plain TCP pass `server_public_key=<PEM path>` or `get_server_public_key=true` to use RSA password exchange, or connect with `ssl_mode=:required`"))
+@noinline rsa_unavailable(plugin::String) = return throw(AuthError("$plugin requires a secure connection for full authentication; without TLS pass `server_public_key=<PEM path>` or `get_server_public_key=true` to use RSA password exchange, or connect over TCP with `ssl_mode=:required`"))
 
 function require_cleartext_allowed(policy::AuthPolicy)
     policy.enable_cleartext_plugin || throw(AuthError("the server requested mysql_clear_password, which is disabled; pass `enable_cleartext_plugin=true` (or `default_auth=\"mysql_clear_password\"`)"))

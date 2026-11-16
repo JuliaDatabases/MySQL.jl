@@ -181,7 +181,7 @@ raise `ArgumentError` unless their value is `nothing` or `false`.
 | keyword | default | meaning |
 |---|---|---|
 | `default_auth` | supported server default, else `caching_sha2_password` | plugin to answer the handshake with; an auth switch selects the account's plugin |
-| `get_server_public_key` | `false` | fetch the server's RSA key for `caching_sha2`/`sha256` full authentication over plain TCP |
+| `get_server_public_key` | `false` | fetch the server's RSA key for `caching_sha2`/`sha256` full authentication without TLS |
 | `server_public_key` | `nothing` | path of that key in PEM form |
 | `enable_cleartext_plugin` | `false` | allow `mysql_clear_password` (PAM/LDAP accounts); `default_auth="mysql_clear_password"` also enables it |
 | `insecure_cleartext_auth` | `false` | allow cleartext authentication without `:verify_identity` |
