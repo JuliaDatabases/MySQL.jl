@@ -118,6 +118,7 @@ end
 
 raw_tcp(t::Reseau.TCP.Conn) = return t
 raw_tcp(t::FaultTransport) = return t.inner isa Reseau.TCP.Conn ? t.inner : throw(ArgumentError("STARTTLS needs a TCP transport"))
+raw_tcp(::Reseau.Unix.Conn) = throw(ArgumentError("STARTTLS needs a TCP transport"))
 raw_tcp(::Reseau.TLS.Conn) = return throw(ArgumentError("the session is already on TLS"))
 
 function socket_fd(tcp::Reseau.TCP.Conn)
@@ -142,7 +143,7 @@ function has_pending_tcp_bytes(tcp::Reseau.TCP.Conn)
 end
 
 is_secure_transport(t::Reseau.TLS.Conn) = return true
-is_secure_transport(t::Reseau.TCP.Conn) = return false
+is_secure_transport(t::Union{Reseau.TCP.Conn, Reseau.Unix.Conn}) = return false
 is_secure_transport(t::FaultTransport) = return t.inner isa Reseau.TLS.Conn
 is_secure_transport(s::Session) = return is_secure_transport(s.transport)
 

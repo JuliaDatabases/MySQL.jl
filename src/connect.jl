@@ -142,7 +142,18 @@ function dial_with_bind(address::String, deadline::Int64, bind::String, local_ad
     throw(first_err::Exception)
 end
 
+function dial_unix(path::String, deadline::Int64)
+    try
+        deadline == 0 && return Reseau.Unix.connect(path)
+        return Reseau.Unix.connect(path; timeout_ns=remaining_ns(deadline))
+    catch err
+        P.is_deadline_error(err) && throw(P.TimeoutError("connect_timeout expired while connecting to $path"))
+        rethrow()
+    end
+end
+
 function dial(opts::ConnectOptions, deadline::Int64)
+    opts.unix_socket === nothing || return dial_unix(opts.unix_socket, deadline)
     address = hostport(opts.host, opts.port)
     try
         local_addrs = resolve_bind(opts.bind, deadline)
@@ -296,14 +307,14 @@ everything up to the bootstrap as a single deadline; afterwards `read_timeout` a
 """
 function connect(opts::ConnectOptions)
     deadline = deadline_from(opts.connect_timeout)
-    tcp = dial(opts, deadline)
-    s = P.Session(tcp; limits=opts.limits, capabilities=opts.client_flags, debug=opts.debug)
+    conn = dial(opts, deadline)
+    s = P.Session(conn; limits=opts.limits, capabilities=opts.client_flags, debug=opts.debug)
     try
-        deadline == 0 || apply_deadline!(tcp, deadline)
+        deadline == 0 || apply_deadline!(conn, deadline)
         P.read_greeting!(s)
         secure = P.starttls!(s, opts.tls, opts.host; handshake_timeout_ns=deadline == 0 ? 0 : remaining_ns(deadline))
         (secure && deadline != 0) && apply_deadline!(s.transport, deadline)
-        policy = P.AuthPolicy(opts.auth.secure_transport || secure, secure && opts.tls.mode == P.SSL_VERIFY_IDENTITY, opts.auth.server_public_key, opts.auth.get_server_public_key, opts.auth.enable_cleartext_plugin, opts.auth.insecure_cleartext_auth)
+        policy = P.AuthPolicy(opts.auth.secure_transport || secure, secure && opts.tls.mode == P.SSL_VERIFY_IDENTITY, opts.auth.server_public_key, opts.auth.get_server_public_key, opts.auth.enable_cleartext_plugin, opts.auth.insecure_cleartext_auth, opts.unix_socket !== nothing)
         trace = Symbol[]
         ok = P.authenticate!(s, opts.user, opts.password, policy; db=opts.db, attrs=opts.attrs, default_auth=opts.default_auth, trace=trace)
         bootstrapped = try

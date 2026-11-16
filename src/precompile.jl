@@ -1,7 +1,7 @@
 # Precompile workload: drives the whole driver stack — greeting, authentication, the charset
 # bootstrap, text and binary result sets (buffered and streaming), prepared statements, DML,
 # ping, transactions, close — against a canned MySQL 8 transcript on the in-memory
-# `FaultTransport{IOBuffer}` (the client's writes are discarded), so a session's first
+# `FaultTransport` over an `IOBuffer` (the client's writes are discarded), so a session's first
 # connect and query do not pay for compiling the driver. No sockets, tasks, or timers are
 # involved (the reaper is never started); Reseau precompiles the transport paths itself.
 using PrecompileTools: @setup_workload, @compile_workload

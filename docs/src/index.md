@@ -23,7 +23,8 @@ using MySQL, DBInterface, Dates   # MySQL re-exports Durations.Timestamp
 conn = DBInterface.connect(MySQL.Connection, "localhost", "user", "password"; db="mydb")
 ```
 
-Every host, `"localhost"` included, is dialed over TCP (port 3306 unless `port` is given).
+Hosts are dialed over TCP (port 3306 unless `port` is given). To use a local server's Unix
+socket, pass its path as `unix_socket` with host `"localhost"`.
 TLS is used whenever the server offers it (`ssl_mode=:preferred`); see
 [Connection options](@ref) for the full keyword list.
 
@@ -136,7 +137,8 @@ raise `ArgumentError` unless their value is `nothing` or `false`.
 |---|---|---|
 | `db` | `""` | default database (`USE`) |
 | `port` | `3306` | TCP port; omitted/`nothing` uses file or opt-in environment defaults; `0` explicitly selects 3306 |
-| `protocol` | `:default` | `:tcp`, or the deferred `:socket`/`:pipe` (they raise a clear error) |
+| `protocol` | `:default` | `:tcp`, `:socket` (a Unix socket for host `"localhost"`, `/tmp/mysql.sock` without `unix_socket`), or the deferred `:pipe` (it raises a clear error) |
+| `unix_socket` | `nothing` | Unix socket path, used instead of TCP when the host is `"localhost"` (not on Windows); TLS is not available over a socket |
 | `bind` | `nothing` | local interface/address to connect from |
 | `connect_timeout` | `nothing` | positive integer seconds for the whole establishment (dial, TLS, authentication, charset bootstrap) |
 | `read_timeout`, `write_timeout` | `nothing` | positive integer seconds per transport read/write; expiry closes the connection |
@@ -179,7 +181,7 @@ raise `ArgumentError` unless their value is `nothing` or `false`.
 | keyword | default | meaning |
 |---|---|---|
 | `default_auth` | supported server default, else `caching_sha2_password` | plugin to answer the handshake with; an auth switch selects the account's plugin |
-| `get_server_public_key` | `false` | fetch the server's RSA key for `caching_sha2`/`sha256` full authentication over plain TCP |
+| `get_server_public_key` | `false` | fetch the server's RSA key for `caching_sha2`/`sha256` full authentication without TLS |
 | `server_public_key` | `nothing` | path of that key in PEM form |
 | `enable_cleartext_plugin` | `false` | allow `mysql_clear_password` (PAM/LDAP accounts); `default_auth="mysql_clear_password"` also enables it |
 | `insecure_cleartext_auth` | `false` | allow cleartext authentication without `:verify_identity` |
@@ -226,7 +228,7 @@ ignored. This is a subset of the [MySQL option-file format](https://dev.mysql.co
 Supported file keys are `host`, `user`, `password`, `port`, `database`, `connect-timeout`,
 `default-character-set`, `protocol`, `bind-address`, `socket`, `tls-version`, `ssl-mode`,
 `ssl-ca`, `ssl-capath`, `ssl-cert`, and `ssl-key`. Underscores can replace hyphens.
-`socket` is accepted but unused. `ssl-cipher`, `ssl-crl`, and `ssl-crlpath` raise an error
+`socket` gives the Unix socket path for host `localhost`. `ssl-cipher`, `ssl-crl`, and `ssl-crlpath` raise an error
 because these settings are unavailable. `compress` also raises an error unless its value
 is `0`, `OFF`, or `FALSE` (case-insensitive).
 

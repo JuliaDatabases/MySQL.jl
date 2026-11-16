@@ -1,12 +1,12 @@
 # Authentication plugins and the authentication exchange.
 #
-# Per-plugin transport-security rules (TCP only; Unix sockets/named pipes are deferred):
+# Per-plugin transport-security rules, as the server applies them:
 #
-# | plugin step                          | TLS (any mode)                         | plain TCP            |
-# |--------------------------------------|----------------------------------------|----------------------|
-# | caching_sha2 full auth (cleartext)   | allowed                                | RSA path (opt-in)    |
-# | sha256 full auth (cleartext)         | allowed                                | RSA path (opt-in)    |
-# | mysql_clear_password                 | :verify_identity only, else opt-in     | opt-in only          |
+# | plugin step                        | TLS (any mode)                     | Unix socket       | plain TCP         |
+# |------------------------------------|------------------------------------|-------------------|-------------------|
+# | caching_sha2 full auth (cleartext) | allowed                            | allowed           | RSA path (opt-in) |
+# | sha256 full auth (cleartext)       | allowed                            | RSA path (opt-in) | RSA path (opt-in) |
+# | mysql_clear_password               | :verify_identity only, else opt-in | opt-in only       | opt-in only       |
 #
 # The RSA path needs `server_public_key` (PEM) or `get_server_public_key=true`; the cleartext
 # plugin needs explicit enablement (`enable_cleartext_plugin` or `default_auth`).
@@ -14,10 +14,12 @@
 """
     AuthPolicy(; secure_transport=false, identity_verified=false, server_public_key=nothing,
                  get_server_public_key=false, enable_cleartext_plugin=false,
-                 insecure_cleartext_auth=false)
+                 insecure_cleartext_auth=false, local_socket=false)
 
 Connection-level facts and user policy the plugins consult. `secure_transport` is true on
-TLS (any mode); `identity_verified` only under `ssl_mode = :verify_identity`.
+TLS (any mode); `identity_verified` only under `ssl_mode = :verify_identity`. `local_socket`
+is true on a Unix socket, which the server counts as secure for `caching_sha2_password`
+only; `sha256_password` still requires TLS for a cleartext password.
 """
 struct AuthPolicy
     secure_transport::Bool
@@ -26,11 +28,12 @@ struct AuthPolicy
     get_server_public_key::Bool
     enable_cleartext_plugin::Bool
     insecure_cleartext_auth::Bool
+    local_socket::Bool
 end
 
-function AuthPolicy(; secure_transport::Bool=false, identity_verified::Bool=false, server_public_key::Union{Nothing, AbstractVector{UInt8}, AbstractString}=nothing, get_server_public_key::Bool=false, enable_cleartext_plugin::Bool=false, insecure_cleartext_auth::Bool=false)
+function AuthPolicy(; secure_transport::Bool=false, identity_verified::Bool=false, server_public_key::Union{Nothing, AbstractVector{UInt8}, AbstractString}=nothing, get_server_public_key::Bool=false, enable_cleartext_plugin::Bool=false, insecure_cleartext_auth::Bool=false, local_socket::Bool=false)
     pem = server_public_key === nothing ? nothing : server_public_key isa AbstractString ? Vector{UInt8}(codeunits(server_public_key)) : Vector{UInt8}(server_public_key)
-    return AuthPolicy(secure_transport, identity_verified, pem, get_server_public_key, enable_cleartext_plugin, insecure_cleartext_auth)
+    return AuthPolicy(secure_transport, identity_verified, pem, get_server_public_key, enable_cleartext_plugin, insecure_cleartext_auth, local_socket)
 end
 
 abstract type AuthPlugin end
@@ -177,7 +180,7 @@ cleartext_password(password::AbstractVector{UInt8}) = return nul_terminated_pass
 
 # ---- policy ----
 
-@noinline rsa_unavailable(plugin::String) = return throw(AuthError("$plugin requires a secure connection for full authentication; over plain TCP pass `server_public_key=<PEM path>` or `get_server_public_key=true` to use RSA password exchange, or connect with `ssl_mode=:required`"))
+@noinline rsa_unavailable(plugin::String) = return throw(AuthError("$plugin requires a secure connection for full authentication; without TLS pass `server_public_key=<PEM path>` or `get_server_public_key=true` to use RSA password exchange, or connect over TCP with `ssl_mode=:required`"))
 
 function require_cleartext_allowed(policy::AuthPolicy)
     policy.enable_cleartext_plugin || throw(AuthError("the server requested mysql_clear_password, which is disabled; pass `enable_cleartext_plugin=true` (or `default_auth=\"mysql_clear_password\"`)"))
@@ -253,7 +256,7 @@ function step!(::CachingSha2Password, state::AuthState, data::AbstractVector{UIn
     end
     data[1] == CACHING_SHA2_PERFORM_FULL_AUTH || protocol_error("unexpected caching_sha2_password status byte 0x$(string(data[1], base=16, pad=2))")
     state.full_auth = true
-    policy.secure_transport && return cleartext_password(password)
+    (policy.secure_transport || policy.local_socket) && return cleartext_password(password)
     policy.server_public_key === nothing || return rsa_encrypt_password(password, state.nonce, policy.server_public_key)
     if policy.get_server_public_key
         state.awaiting_public_key = true
@@ -281,7 +284,7 @@ function trace_event(state::AuthState, data::AbstractVector{UInt8}, policy::Auth
     isempty(data) && return :continue
     data[1] == CACHING_SHA2_FAST_AUTH_SUCCESS && return :fast_auth
     data[1] == CACHING_SHA2_PERFORM_FULL_AUTH || return :continue
-    policy.secure_transport && return :full_auth_cleartext
+    (policy.secure_transport || policy.local_socket) && return :full_auth_cleartext
     state.awaiting_public_key && return :rsa_request
     return :full_auth_rsa
 end
