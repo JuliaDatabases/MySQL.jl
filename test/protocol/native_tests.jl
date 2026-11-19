@@ -5,6 +5,7 @@ struct LocalInfileFunctor end
     @test N.sqltype(Missing) == "VARCHAR(255)"
     @test N.sqltype(Any) == "VARCHAR(255)"
     @test N.sqltype(Union{Missing, Int64}) == "BIGINT"
+    @test N.sqltype(MySQL.Dates.Time) == "TIME(6)"    # TIME(0) would round the fractional seconds
     @test isempty(Test.detect_unbound_args(MySQL))
 end
 

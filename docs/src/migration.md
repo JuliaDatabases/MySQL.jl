@@ -92,7 +92,8 @@ row types `MySQL.TextRow` and `MySQL.BinaryRow` (1.x: `MySQL.TextRow` and `MySQL
   generated statements only, `debug=:values` also logs row values (1.x `debug=true`
   logged values). A `DateTime` column is created as `DATETIME(3)` (1.x: `DATETIME`,
   which dropped the milliseconds); `Timestamp{Second}`/`{Millisecond}`/`{Microsecond}`
-  columns become `DATETIME`/`DATETIME(3)`/`DATETIME(6)`.
+  columns become `DATETIME`/`DATETIME(3)`/`DATETIME(6)`. A `Time` column is created as
+  `TIME(6)` (1.x: `TIME`, which rounded away the fractional seconds).
 
 ## Unchanged (Preserve)
 

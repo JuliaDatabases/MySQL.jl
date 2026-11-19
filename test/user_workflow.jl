@@ -65,6 +65,11 @@ function run_user_workflow(conn)
         DBInterface.execute(conn, "DROP TABLE IF EXISTS old_dates_load")
         MySQL.load((id=[1], born=[DateTime(1955, 3, 4)]), conn, "old_dates_load")
         @test isequal(Tables.columntable(DBInterface.execute(conn, "SELECT born FROM old_dates_load")).born, [Timestamp{Millisecond}(DateTime(1955, 3, 4))])
+        # Fractional seconds of a Time column survive MySQL.load (a TIME(0) column rounds them).
+        DBInterface.execute(conn, "DROP TABLE IF EXISTS times_load")
+        times = [Time(12, 0, 0, 500), Time(23, 59, 59, 999, 999), Time(0, 0, 0, 0, 1)]
+        MySQL.load((id=[1, 2, 3], at=times), conn, "times_load")
+        @test Tables.columntable(DBInterface.execute(conn, "SELECT at FROM times_load ORDER BY id")).at == times
         @test DBInterface.transaction(conn) do
             DBInterface.execute(conn, "UPDATE items SET label='changed' WHERE id=1")
             :committed
