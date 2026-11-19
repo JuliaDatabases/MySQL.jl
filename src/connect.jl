@@ -297,18 +297,20 @@ end
 timeout_ns(seconds::Union{Nothing, Int}) = return seconds === nothing ? Int64(0) : Int64(seconds) * 1_000_000_000
 
 """
-    connect(opts::ConnectOptions) -> Handle
+    connect(opts::ConnectOptions; db=opts.db) -> Handle
     connect(host, user, password=nothing; kw...) -> Handle
 
 Establishes an authenticated, utf8mb4-bootstrapped session: dial, greeting, STARTTLS per
-`ssl_mode`, authentication, charset bootstrap, then `init_command`. `connect_timeout` bounds
-everything up to the bootstrap as a single deadline; afterwards `read_timeout` and
-`write_timeout` bound each transport read and write. Any failure closes the transport.
+`ssl_mode`, authentication with default database `db`, charset bootstrap, then
+`init_command`. `connect_timeout` bounds everything up to the bootstrap as a single
+deadline; afterwards `read_timeout` and `write_timeout` bound each transport read and
+write. Any failure closes the transport.
 """
-function connect(opts::ConnectOptions)
+function connect(opts::ConnectOptions; db::String=opts.db)
     deadline = deadline_from(opts.connect_timeout)
     conn = dial(opts, deadline)
-    s = P.Session(conn; limits=opts.limits, capabilities=opts.client_flags, debug=opts.debug)
+    flags = isempty(db) ? opts.client_flags & ~P.CLIENT_CONNECT_WITH_DB : opts.client_flags | P.CLIENT_CONNECT_WITH_DB
+    s = P.Session(conn; limits=opts.limits, capabilities=flags, debug=opts.debug)
     try
         deadline == 0 || apply_deadline!(conn, deadline)
         P.read_greeting!(s)
@@ -316,7 +318,7 @@ function connect(opts::ConnectOptions)
         (secure && deadline != 0) && apply_deadline!(s.transport, deadline)
         policy = P.AuthPolicy(opts.auth.secure_transport || secure, secure && opts.tls.mode == P.SSL_VERIFY_IDENTITY, opts.auth.server_public_key, opts.auth.get_server_public_key, opts.auth.enable_cleartext_plugin, opts.auth.insecure_cleartext_auth, opts.unix_socket !== nothing)
         trace = Symbol[]
-        ok = P.authenticate!(s, opts.user, opts.password, policy; db=opts.db, attrs=opts.attrs, default_auth=opts.default_auth, trace=trace)
+        ok = P.authenticate!(s, opts.user, opts.password, policy; db=db, attrs=opts.attrs, default_auth=opts.default_auth, trace=trace)
         bootstrapped = try
             bootstrap_charset!(s, ok)
         catch err

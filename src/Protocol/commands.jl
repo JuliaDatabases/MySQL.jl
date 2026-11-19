@@ -226,6 +226,7 @@ end
 function finish_ok!(s::Session, p::PacketView)
     ok = guarded(() -> parse_ok(p, s.capabilities, s.limits), s)
     s.status = ok.status
+    track_schema!(s, ok)
     s.command_kind == CMD_LOCAL_INFILE && (s.command_kind = CMD_QUERY)
     if more_results(ok)
         transition!(s, :ok_more, RESULT_END)
@@ -338,6 +339,7 @@ end
 function finish_result!(s::Session, p::PacketView)
     if deprecate_eof(s)
         ok = guarded(() -> parse_ok(p, s.capabilities, s.limits), s)
+        track_schema!(s, ok)
         status, warnings, oksnap = ok.status, ok.warnings, ok
     else
         is_eof_packet(p) || throw(fault!(s, ProtocolError("expected EOF terminator, got a $(payload_length(p))-byte 0xFE packet")))

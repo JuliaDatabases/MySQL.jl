@@ -156,16 +156,18 @@ end
 # Reconnect only before a send, once the session is known dead (closed, or broken by a
 # fault such as the server dropping an idle connection), and never inside a transaction:
 # the command that hit the failure reports it, the next one reconnects — the libmysqlclient
-# contract. Statements and cursors of the old session are invalidated by the generation
-# bump. A failed reconnect keeps the (dead) handle so the next command reports the
-# connection error again and retries, instead of reporting a closed connection.
+# contract. The new session opens the default database the old one last reported (a `USE`
+# carries over, as in libmysqlclient). Statements and cursors of the old session are
+# invalidated by the generation bump. A failed reconnect keeps the (dead) handle so the
+# next command reports the connection error again and retries, instead of reporting a
+# closed connection.
 function ensure_live!(conn::Connection)
     h = conn.handle
     isopen(h.session) && return nothing
     can_reconnect = conn.options.reconnect && conn.transaction_owner === nothing && !P.in_transaction(h.session.status)
     can_reconnect || throw(P.Error(P.CR_SERVER_GONE_ERROR, "MySQL server has gone away", "HY000"))
     close!(h)
-    conn.handle = connect(conn.options)
+    conn.handle = connect(conn.options; db=h.session.schema)
     invalidate_cursors!(conn)
     return nothing
 end
