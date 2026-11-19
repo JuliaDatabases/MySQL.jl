@@ -335,6 +335,7 @@ Policy violations raise `AuthError`, unknown plugins `UnsupportedAuthError`, ser
 """
 function authenticate!(s::Session, user::AbstractString, password::Union{Nothing, AbstractString, AbstractVector{UInt8}}, policy::AuthPolicy; db::AbstractString="", attrs::Vector{Pair{String, String}}=Pair{String, String}[], default_auth::Union{Nothing, AbstractString}=nothing, trace::Union{Nothing, Vector{Symbol}}=nothing)
     require_phase(s, HANDSHAKE)
+    s.schema = String(db)
     note(event::Symbol) = return (trace === nothing || push!(trace, event); nothing)
     pw = password === nothing ? UInt8[] : password isa AbstractString ? Vector{UInt8}(codeunits(password)) : Vector{UInt8}(password)
     try

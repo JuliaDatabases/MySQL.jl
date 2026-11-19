@@ -965,6 +965,55 @@ end
     end
 end
 
+@testset "reconnect restores the database the session last reported" begin
+    # The server reports a `USE` (or dropping the current database) in a SESSION_TRACK_SCHEMA
+    # block; libmysqlclient and 1.x reconnect to that database, not the one first requested.
+    dbs = String[]
+    accepted = AcceptedCounter(0)
+    schema_ok(name) = ok_payload(; status=P.SERVER_STATUS_AUTOCOMMIT | P.SERVER_SESSION_STATE_CHANGED, state=state_block(P.SESSION_TRACK_SCHEMA, name), track=true)
+    listener = Reseau.TCP.listen(Reseau.TCP.loopback_addr(0))
+    port = Int(Reseau.TCP.addr(listener).port)
+    errormonitor(Threads.@spawn begin
+        while true
+            c = try; Reseau.TCP.accept(listener); catch; break; end
+            n = increment!(accepted)
+            errormonitor(Threads.@spawn begin
+                try
+                    send_packet(c, 0, greeting(; caps=MYSQL8_SERVER_CAPS & ~P.CLIENT_SSL))
+                    seq, response = read_packet(c)
+                    caps = UInt32(response[1]) | UInt32(response[2]) << 8 | UInt32(response[3]) << 16 | UInt32(response[4]) << 24
+                    rc = P.PacketCursor(response)
+                    P.skip!(rc, 32)
+                    P.read_nul_string!(rc)
+                    P.read_lenenc_bytes!(rc)
+                    push!(dbs, caps & P.CLIENT_CONNECT_WITH_DB != 0 ? P.read_nul_string!(rc) : "<none>")
+                    send_packet(c, seq + 1, ok_payload())
+                    read_command(c)                                           # SET NAMES
+                    send_packet(c, 1, ok_payload())
+                    expect_query(c)
+                    send_packet(c, 1, n == 1 ? schema_ok("other") : n == 2 ? schema_ok("") : ok_payload())
+                    stall_until_eof(c)
+                catch
+                finally
+                    close(c)
+                end
+            end)
+        end
+    end)
+    try
+        conn = DBInterface.connect(N.Connection, "127.0.0.1", "root", "pw"; port=port, ssl_mode=:disabled, connect_timeout=10, reconnect=true)
+        DBInterface.execute(conn, "USE other")
+        P.transport_close(conn.handle.session.transport)
+        DBInterface.execute(conn, "DROP DATABASE other")                      # reconnects into `other`
+        P.transport_close(conn.handle.session.transport)
+        DBInterface.execute(conn, "SELECT 1")                                 # reconnects with no database
+        @test dbs == ["<none>", "other", "<none>"]
+        DBInterface.close!(conn)
+    finally
+        close(listener)
+    end
+end
+
 @testset "connection loss tells a sent command from a refused one (#248)" begin
     # The peer reads the command and hangs up without answering: the server may have run it
     # (2013). The next command is refused before anything is written (2006).

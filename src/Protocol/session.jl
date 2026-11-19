@@ -3,7 +3,9 @@
 
 Protocol state for one connection: the transport (replaced in place at STARTTLS), the
 shared packet reader/writer, negotiated capabilities, server info, the current `Phase`, the
-last status flags, and per-command accounting against `Limits`.
+last status flags, the default database (`schema`: the one requested at authentication,
+then each `SESSION_TRACK_SCHEMA` change the server reports), and per-command accounting
+against `Limits`.
 
 Every I/O failure (deadline, EOF, malformed packet, limit) moves the session to `BROKEN`
 and closes the transport: after any such failure the stream position is unknowable.
@@ -18,6 +20,7 @@ mutable struct Session
     capabilities::UInt64
     server::Union{Nothing, ServerInfo}
     status::UInt16
+    schema::String
     generation::Int
     authenticated::Bool
     command_kind::CommandKind
@@ -28,10 +31,19 @@ end
 
 function Session(transport::Transport; limits::Limits=Limits(), capabilities::UInt64=DEFAULT_CLIENT_CAPABILITIES, debug::Bool=false, log_transitions::Bool=false)
     log = log_transitions ? Tuple{Phase, Symbol, Phase}[] : nothing
-    return Session(transport, PacketIO(), limits, CONNECTING, debug, capabilities, capabilities, nothing, 0x0000, 1, false, CMD_QUERY, 0, 0, log)
+    return Session(transport, PacketIO(), limits, CONNECTING, debug, capabilities, capabilities, nothing, 0x0000, "", 1, false, CMD_QUERY, 0, 0, log)
 end
 
 has_capability(s::Session, flag::UInt64) = return has_capability(s.capabilities, flag)
+
+# A `USE` (or dropping the current database) changes the session's default database; a
+# reconnect restores the last one the server reported.
+function track_schema!(s::Session, ok::OKPacket)
+    schema = schema_change(ok)
+    schema === nothing || (s.schema = schema)
+    return nothing
+end
+
 server_kind(s::Session) = return s.server === nothing ? :unknown : s.server.kind
 is_mariadb(s::Session) = return server_kind(s) == :mariadb
 deprecate_eof(s::Session) = return has_capability(s, CLIENT_DEPRECATE_EOF)
@@ -299,6 +311,7 @@ function read_auth_packet!(s::Session, round_number::Int, auth_bytes::Int)
     if kind == :ok
         ok = guarded(() -> parse_ok(p, s.capabilities, s.limits), s)
         s.status = ok.status
+        track_schema!(s, ok)
         s.authenticated = true
         transition!(s, :auth_ok, READY)
         return AuthPacket(:ok, ok, "", UInt8[])
